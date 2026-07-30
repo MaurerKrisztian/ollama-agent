@@ -37,10 +37,14 @@ export class ContextManager {
       'You have access to tools to read files, inspect workspace directories, search code, create files, edit code, and execute terminal shell commands directly on the system.',
       'RULE 1: Use tools when the user prompt requires: inspecting/listing/reading/searching/creating/editing workspace files or directories, OR running a terminal/shell/bash command. For general knowledge, math, or general questions, respond directly in plain text without invoking tools.',
       'RULE 1b: When the user says "run", "execute", "check", or asks a terminal/shell/system question (e.g. GPU info, disk usage, list processes), ALWAYS use the execute_command tool immediately.',
-      'RULE 2: When you need to inspect or modify code, ALWAYS output the `<tool_call>` block immediately.',
+      useNativeTools
+        ? 'RULE 2: When you need to inspect or modify code, ALWAYS issue a runtime-native structured tool call immediately.'
+        : 'RULE 2: When you need to inspect or modify code, ALWAYS output the `<tool_call>` block immediately.',
       'RULE 3 (Line Deletion): To remove/delete lines of code or text from a file, set `replacement_text` to an empty string `""`.',
       'RULE 4 (Clean Function Rewriting): When rewriting a function, class, or code block, include the COMPLETE existing code block in `target_text` (from header to closing brace `}`) so the entire block is replaced cleanly without leaving orphaned lines.',
-      'RULE 5 (Multi-Step Workflows): Complete multi-step tool workflows fully. When asked to inspect/read then edit/create, immediately issue the `<tool_call>` tag for the next action without asking for confirmation.',
+      useNativeTools
+        ? 'RULE 5 (Multi-Step Workflows): Complete multi-step tool workflows fully. Immediately issue the next runtime-native structured tool call without asking for confirmation.'
+        : 'RULE 5 (Multi-Step Workflows): Complete multi-step tool workflows fully. When asked to inspect/read then edit/create, immediately issue the `<tool_call>` tag for the next action without asking for confirmation.',
       'RULE 6 (No Deferred Actions): Never announce a future tool action without invoking it in the same response. Do not end a response between requested workflow steps.',
     ];
 
@@ -145,7 +149,7 @@ export class ContextManager {
   public getRawJson(): string {
     const contextObject = {
       baseSystemPrompt: this.systemPrompt,
-      effectiveSystemPrompt: this.getEffectiveSystemPrompt(),
+      effectiveSystemPrompt: this.getEffectiveSystemPrompt(true),
       tools: this.tools,
       messageCount: this.messages.length,
       messages: this.messages,

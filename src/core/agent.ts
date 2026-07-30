@@ -26,6 +26,18 @@ function inferExplicitlyRequestedTools(prompt: string): string[] {
     if (!requested.includes(toolName)) requested.push(toolName);
   };
 
+  // Broad project/codebase research requests require discovery before reading
+  // project metadata. Without this classification, a malformed first tool call
+  // is treated as a completed prose response and the agent waits for another
+  // user message.
+  const isProjectResearchRequest =
+    /\b(?:research|understand|inspect|check|summari[sz]e)\b.*\b(?:project|codebase|workspace)\b/.test(normalized) ||
+    /\b(?:project|codebase|workspace)\b.*\b(?:research|understand|inspect|check|summari[sz]e)\b/.test(normalized);
+  if (isProjectResearchRequest) {
+    add('list_directory');
+    add('read_file');
+  }
+
   if (/\b(?:list|show)\b.*\b(?:directory|folder|files)\b/.test(normalized)) add('list_directory');
   if (/\b(?:search|grep|find)\b.*\b(?:workspace|code|file|word|symbol|for)\b/.test(normalized)) add('grep_search');
   if (/\b(?:read|inspect|open)\b/.test(normalized)) add('read_file');

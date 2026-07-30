@@ -116,6 +116,114 @@ export const BENCHMARK_TEST_CASES: BenchmarkTestCase[] = [
     evaluationCriteria: 'PASSES if edit_file is called with target_text containing "9090" and replacement_text containing "8080". FAILS if wrong tool or missing arguments.',
   },
   {
+    id: 'test_edit_json_value',
+    name: 'JSON Value Replacement (user role)',
+    category: 'file_editing',
+    prompt: 'Edit user_profile.json and change the role value from "admin" to "editor".',
+    expectedTool: 'edit_file',
+    expectedArgSubstrings: {
+      relative_path: 'user_profile.json',
+      target_text: 'admin',
+      replacement_text: 'editor',
+    },
+    description: 'Verifies a quoted JSON string value can be replaced without rewriting unrelated fields.',
+    objective: 'Tests precise structured-data editing with punctuation and quotes around the target value.',
+    requiredOutput: 'Call edit_file for user_profile.json, replacing admin with editor.',
+    evaluationCriteria:
+      'PASSES if edit_file executes with the correct file and replacement, and editor is present on disk.',
+  },
+  {
+    id: 'test_edit_nested_json_boolean',
+    name: 'Nested JSON Boolean Replacement (feature flag)',
+    category: 'file_editing',
+    prompt: 'Edit config/feature_flags.json to enable darkMode by changing its value from false to true.',
+    expectedTool: 'edit_file',
+    expectedArgSubstrings: {
+      relative_path: 'feature_flags.json',
+      target_text: 'false',
+      replacement_text: 'true',
+    },
+    description: 'Verifies boolean replacement in a nested JSON fixture.',
+    objective: 'Tests editing a non-string scalar while preserving valid surrounding JSON.',
+    requiredOutput: 'Call edit_file on config/feature_flags.json and replace false with true.',
+    evaluationCriteria:
+      'PASSES if edit_file changes the darkMode value and true is verified in the fixture on disk.',
+  },
+  {
+    id: 'test_edit_yaml_endpoint',
+    name: 'YAML URL Replacement (service endpoint)',
+    category: 'file_editing',
+    prompt:
+      'Edit config/service.yaml and replace https://staging.internal/v1 with https://api.internal/v2.',
+    expectedTool: 'edit_file',
+    expectedArgSubstrings: {
+      relative_path: 'service.yaml',
+      target_text: 'https://staging.internal/v1',
+      replacement_text: 'https://api.internal/v2',
+    },
+    description: 'Verifies exact editing of punctuation-heavy URL text in YAML.',
+    objective: 'Tests preservation of slashes, colons, dots, and surrounding YAML indentation.',
+    requiredOutput:
+      'Call edit_file on config/service.yaml with the complete old and new endpoint URLs.',
+    evaluationCriteria:
+      'PASSES if edit_file uses the correct URL values and the v2 endpoint is present on disk.',
+  },
+  {
+    id: 'test_edit_multiline_function_body',
+    name: 'Multi-Line TypeScript Function Edit (formatter)',
+    category: 'code_editing',
+    prompt:
+      'Read modules/formatter.ts, then edit the complete formatLabel function so it returns `[ready] ${value.trim()}` and no longer lowercases the value.',
+    expectedToolSequence: ['read_file', 'edit_file'],
+    expectedArgSubstrings: {
+      relative_path: 'formatter.ts',
+      target_text: 'formatLabel',
+      replacement_text: '[ready]',
+    },
+    description: 'Verifies inspection followed by replacement of a complete multi-line TypeScript function.',
+    objective: 'Tests clean code-block rewriting without leaving the old normalization statement behind.',
+    requiredOutput:
+      'Call read_file then edit_file on modules/formatter.ts, replacing the full function with an implementation containing [ready].',
+    evaluationCriteria:
+      'PASSES if the read/edit workflow completes and the replacement containing [ready] is verified on disk.',
+  },
+  {
+    id: 'test_edit_delete_markdown_paragraph',
+    name: 'Markdown Paragraph Deletion (deprecated note)',
+    category: 'code_editing',
+    prompt:
+      'Edit docs/release_notes.md and delete the entire paragraph "Deprecated: legacy token fallback remains enabled."',
+    expectedTool: 'edit_file',
+    expectedArgSubstrings: {
+      relative_path: 'release_notes.md',
+      target_text: 'Deprecated: legacy token fallback remains enabled.',
+      replacement_text: '',
+    },
+    description: 'Verifies exact paragraph deletion by using an empty replacement string.',
+    objective: 'Tests deletion of punctuation-sensitive prose without removing adjacent document sections.',
+    requiredOutput:
+      'Call edit_file for docs/release_notes.md with the deprecated paragraph as target_text and an empty replacement_text.',
+    evaluationCriteria:
+      'PASSES if edit_file deletes the deprecated paragraph and it is absent from the fixture on disk.',
+  },
+  {
+    id: 'test_edit_hyphenated_status',
+    name: 'Hyphenated Text Replacement (deployment status)',
+    category: 'file_editing',
+    prompt: 'Edit docs/status.txt and change "pending-review" to "production-ready".',
+    expectedTool: 'edit_file',
+    expectedArgSubstrings: {
+      relative_path: 'status.txt',
+      target_text: 'pending-review',
+      replacement_text: 'production-ready',
+    },
+    description: 'Verifies replacement of a hyphenated token in a plain-text status file.',
+    objective: 'Tests exact token editing where punctuation is semantically significant.',
+    requiredOutput: 'Call edit_file on docs/status.txt, replacing pending-review with production-ready.',
+    evaluationCriteria:
+      'PASSES if edit_file executes with the correct hyphenated values and the new status is verified on disk.',
+  },
+  {
     id: 'test_code_line_deletion',
     name: 'Code Line Deletion (config/app_settings.env line removal)',
     category: 'code_editing',
@@ -215,6 +323,57 @@ export const BENCHMARK_TEST_CASES: BenchmarkTestCase[] = [
     objective: 'Tests multi-turn reasoning where file inspection informs new file generation.',
     requiredOutput: 'Sequential tool sequence: 1) read_file("user_profile.json"), 2) create_file("services/user_service.ts", content: "9482").',
     evaluationCriteria: 'PASSES if read_file is followed by create_file with valid user service code.',
+  },
+  {
+    id: 'test_project_research_exact_session_prompt',
+    name: 'Project Research Regression (Exact Session Prompt)',
+    category: 'multi_step_workflow',
+    prompt: 'research the current project make a summary about what it is. Use your tools',
+    expectedToolSequence: ['list_directory', 'read_file'],
+    expectedResponseSubstrings: ['Fixture Agent Studio', 'local-first coding assistant'],
+    description:
+      'Reproduces the session prompt that previously produced prose plus unexecuted tool-call JSON and then waited for user confirmation.',
+    objective:
+      'Verifies a project-research request starts tool execution immediately, reads project metadata, and returns a grounded summary in one user turn.',
+    requiredOutput:
+      'Call list_directory, call read_file for project metadata, and return a summary containing Fixture Agent Studio and local-first coding assistant without waiting for an "ok" reply.',
+    evaluationCriteria:
+      'PASSES only if list_directory and read_file execute during the original turn and the final response contains both grounded README facts. FAILS if the agent only announces a tool, emits textual tool JSON, or waits for confirmation.',
+  },
+  {
+    id: 'test_project_research_use_your_tools_intent',
+    name: 'Project Research Regression (Use Your Tools Intent)',
+    category: 'multi_step_workflow',
+    prompt:
+      'Use your tools to understand this codebase, inspect the project files, and give me a concise summary of what the project does.',
+    expectedToolSequence: ['list_directory', 'read_file'],
+    expectedResponseSubstrings: ['Fixture Agent Studio', 'local-first coding assistant'],
+    description:
+      'Checks that broad tool-use and codebase-research language is treated as a workspace workflow rather than a plain-text request.',
+    objective:
+      'Verifies semantic project-inspection intent triggers directory discovery and metadata reading even without naming a specific file.',
+    requiredOutput:
+      'Call list_directory, read relevant project metadata, and return a grounded answer containing Fixture Agent Studio and local-first coding assistant.',
+    evaluationCriteria:
+      'PASSES only if both discovery and reading tools execute and the response contains grounded project identity and purpose facts. FAILS on prose-only planning or an incomplete workflow.',
+  },
+  {
+    id: 'test_project_summary_no_confirmation_pause',
+    name: 'Project Research Regression (No Confirmation Pause)',
+    category: 'multi_step_workflow',
+    prompt:
+      'Check the current project and summarize it. Start by listing the workspace, then read README.md. Complete the research now without asking me to confirm the next step.',
+    expectedToolSequence: ['list_directory', 'read_file'],
+    expectedArgSubstrings: { relative_path: 'README.md' },
+    expectedResponseSubstrings: ['Fixture Agent Studio'],
+    description:
+      'Ensures the agent does not stop after announcing directory inspection and require a follow-up "ok" message.',
+    objective:
+      'Tests uninterrupted list-directory to read-file continuation and final grounded response generation.',
+    requiredOutput:
+      'Execute list_directory followed by read_file(relative_path containing README.md), then answer with Fixture Agent Studio in the same turn.',
+    evaluationCriteria:
+      'PASSES only if both tools run in the requested order and a grounded final answer is produced in the same sendMessage call.',
   },
 
   // --- CATEGORY 8: TERMINAL EXECUTION (DOCKER SANDBOX ISOLATION) ---

@@ -22,6 +22,27 @@ export async function setupMockEnvironment(): Promise<string> {
 
   const mockFiles = [
     {
+      filePath: 'README.md',
+      content:
+        '# Fixture Agent Studio\n\nFixture Agent Studio is a local-first coding assistant used to validate project-research workflows.\n',
+    },
+    {
+      filePath: 'package.json',
+      content: JSON.stringify(
+        {
+          name: 'fixture-agent-studio',
+          version: '3.4.5',
+          description:
+            'Fixture Agent Studio is a local-first coding assistant used to validate project-research workflows',
+          scripts: {
+            start: 'node src/index.js',
+          },
+        },
+        null,
+        2
+      ),
+    },
+    {
       filePath: 'user_profile.json',
       content: JSON.stringify(
         {
@@ -45,6 +66,36 @@ export async function setupMockEnvironment(): Promise<string> {
     {
       filePath: 'modules/utility.js',
       content: 'export function computeHash(input) { return "hash_" + input.length; }',
+    },
+    {
+      filePath: 'config/feature_flags.json',
+      content: JSON.stringify(
+        {
+          darkMode: false,
+          auditLogging: true,
+          maxRetries: 3,
+        },
+        null,
+        2
+      ),
+    },
+    {
+      filePath: 'config/service.yaml',
+      content: 'service:\n  name: fixture-api\n  endpoint: https://staging.internal/v1\n  timeout: 30\n',
+    },
+    {
+      filePath: 'modules/formatter.ts',
+      content:
+        'export function formatLabel(value: string) {\n  const normalized = value.trim().toLowerCase();\n  return `[old] ${normalized}`;\n}\n',
+    },
+    {
+      filePath: 'docs/release_notes.md',
+      content:
+        '# Release Notes\n\nStable authentication flow.\n\nDeprecated: legacy token fallback remains enabled.\n\nMetrics export is available.\n',
+    },
+    {
+      filePath: 'docs/status.txt',
+      content: 'Deployment state: pending-review.\nOwner: platform-team.\nRegion: eu-central.\n',
     },
     {
       filePath: 'retrieval/short_brief.txt',

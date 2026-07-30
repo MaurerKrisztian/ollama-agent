@@ -149,6 +149,60 @@ export class OllamaClient {
       } catch (_) {}
     }
 
+    // 4. Some smaller models announce an action and then emit a bare tool JSON
+    // object without the requested XML wrapper. Scan balanced JSON objects so
+    // prose followed by a valid tool call still executes.
+    for (let start = 0; start < text.length; start++) {
+      if (text[start] !== '{') continue;
+
+      let depth = 0;
+      let inString = false;
+      let escaped = false;
+      for (let end = start; end < text.length; end++) {
+        const char = text[end];
+        if (inString) {
+          if (escaped) {
+            escaped = false;
+          } else if (char === '\\') {
+            escaped = true;
+          } else if (char === '"') {
+            inString = false;
+          }
+          continue;
+        }
+
+        if (char === '"') {
+          inString = true;
+        } else if (char === '{') {
+          depth++;
+        } else if (char === '}') {
+          depth--;
+          if (depth === 0) {
+            const candidate = text.slice(start, end + 1);
+            try {
+              const parsed = JSON.parse(candidate);
+              if (
+                typeof parsed.name === 'string' &&
+                (parsed.arguments === undefined ||
+                  (parsed.arguments !== null &&
+                    typeof parsed.arguments === 'object' &&
+                    !Array.isArray(parsed.arguments)))
+              ) {
+                calls.push({
+                  id: `call_${Date.now()}_0`,
+                  name: parsed.name,
+                  arguments: parsed.arguments || parsed.parameters || {},
+                });
+                cleanedText = `${text.slice(0, start)}${text.slice(end + 1)}`.trim();
+                return { calls, cleanedText };
+              }
+            } catch (_) {}
+            break;
+          }
+        }
+      }
+    }
+
     return { calls, cleanedText };
   }
 
