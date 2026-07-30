@@ -256,6 +256,7 @@ interface ChatWindowProps {
   streamingText: string;
   isGenerating: boolean;
   isModelLoaded: boolean;
+  modelLoadElapsed: number;
   generationStatus: 'idle' | 'generating' | 'completed' | 'cancelled' | 'error';
   pendingApprovalCall?: PendingApprovalCall | null;
   onSendMessage: (msg: string, attachments?: TextAttachment[]) => void;
@@ -308,6 +309,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   streamingText,
   isGenerating,
   isModelLoaded,
+  modelLoadElapsed,
   generationStatus,
   pendingApprovalCall,
   onSendMessage,
@@ -550,16 +552,26 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
 
         {isGenerating && !streamingText && !pendingApprovalCall && (
           <div className="glass-panel animate-fade-in" style={{ display: 'flex', gap: '12px', alignItems: 'center', marginLeft: '44px', padding: '12px 18px', borderRadius: '12px', border: `1px solid ${isModelLoaded ? 'rgba(99, 102, 241, 0.3)' : 'rgba(245, 158, 11, 0.3)'}`, color: isModelLoaded ? 'var(--accent-primary)' : 'var(--accent-amber)', fontSize: '0.875rem' }}>
-            <Loader2 size={18} className="spin" />
-            <div>
+            <Loader2 size={18} className="spin" style={{ flexShrink: 0 }} />
+            <div style={{ minWidth: 0, flex: 1 }}>
               <span style={{ fontWeight: 600, display: 'block' }}>
-                {isModelLoaded ? 'Agent is thinking…' : '⚡ Loading Model Weights into GPU VRAM…'}
+                {isModelLoaded ? 'Agent is thinking…' : `⚡ Loading Model Weights into GPU VRAM… ${modelLoadElapsed}s`}
               </span>
               <span style={{ fontSize: '0.775rem', color: 'var(--text-muted)' }}>
                 {isModelLoaded
                   ? 'Preparing the response. Token streaming will start shortly.'
-                  : 'Ollama is initializing model weights. Token streaming will start shortly.'}
+                  : 'Ollama is initializing model weights. Progress is indeterminate because Ollama does not report bytes loaded.'}
               </span>
+              {!isModelLoaded && (
+                <div
+                  className="model-load-track"
+                  role="progressbar"
+                  aria-label="Loading model weights into GPU VRAM"
+                  aria-valuetext={`Loading for ${modelLoadElapsed} seconds`}
+                >
+                  <div className="model-load-bar" />
+                </div>
+              )}
             </div>
           </div>
         )}

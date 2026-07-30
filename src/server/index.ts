@@ -21,6 +21,9 @@ const agent = new AgentEngine({
   workingDir: process.cwd(),
 });
 
+// Auto-load MCP configuration if available
+agent.loadMcpConfig().catch(() => {});
+
 const getPublicConfig = () => ({
   ...agent.getConfig(),
   ollamaTokenConfigured: agent.hasOllamaToken(),
@@ -146,8 +149,99 @@ app.get('/api/messages', (_req, res) => {
 // GET /api/tools - List available agent tools
 app.get('/api/tools', (req, res) => {
   res.json({
-    tools: TOOL_DEFINITIONS,
+    tools: agent.getActiveTools(),
     workingDir: agent.getConfig().workingDir,
+  });
+});
+
+// GET /api/mcp/servers - Status of connected MCP servers and tools
+app.get('/api/mcp/servers', async (req, res) => {
+  const mcpManager = agent.getToolExecutor().getMcpManager();
+  const rawConfig = await mcpManager.getRawConfigContent();
+  res.json({
+    success: true,
+    mcpEnabled: mcpManager.isGlobalEnabled(),
+    configPath: mcpManager.getConfigPath(),
+    rawConfig,
+    servers: mcpManager.getServersStatus(),
+    mcpTools: mcpManager.getToolDefinitions(),
+    allToolDetails: mcpManager.getAllToolDetails(),
+  });
+});
+
+// POST /api/mcp/toggle-global - Master toggle for MCP support
+app.post('/api/mcp/toggle-global', (req, res) => {
+  const { enabled } = req.body || {};
+  if (typeof enabled !== 'boolean') {
+    return res.status(400).json({ success: false, error: 'enabled (boolean) is required.' });
+  }
+  const mcpManager = agent.getToolExecutor().getMcpManager();
+  mcpManager.setGlobalEnabled(enabled);
+  res.json({
+    success: true,
+    mcpEnabled: mcpManager.isGlobalEnabled(),
+    servers: mcpManager.getServersStatus(),
+    allToolDetails: mcpManager.getAllToolDetails(),
+  });
+});
+
+// POST /api/mcp/reload - Reload MCP servers from config file
+app.post('/api/mcp/reload', async (req, res) => {
+  try {
+    const { configPath } = req.body || {};
+    const result = await agent.loadMcpConfig(configPath);
+    const mcpManager = agent.getToolExecutor().getMcpManager();
+    const rawConfig = await mcpManager.getRawConfigContent();
+    res.json({
+      success: result.success,
+      configPath: mcpManager.getConfigPath(),
+      rawConfig,
+      servers: mcpManager.getServersStatus(),
+      mcpTools: mcpManager.getToolDefinitions(),
+      allToolDetails: mcpManager.getAllToolDetails(),
+      error: result.error,
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/mcp/config - Save updated MCP JSON configuration
+app.post('/api/mcp/config', async (req, res) => {
+  try {
+    const { rawConfig } = req.body || {};
+    if (typeof rawConfig !== 'string') {
+      return res.status(400).json({ success: false, error: 'rawConfig string is required.' });
+    }
+    const mcpManager = agent.getToolExecutor().getMcpManager();
+    const saveRes = await mcpManager.saveRawConfig(rawConfig);
+    const updatedRaw = await mcpManager.getRawConfigContent();
+    res.json({
+      success: saveRes.success,
+      configPath: mcpManager.getConfigPath(),
+      rawConfig: updatedRaw,
+      servers: mcpManager.getServersStatus(),
+      mcpTools: mcpManager.getToolDefinitions(),
+      allToolDetails: mcpManager.getAllToolDetails(),
+      error: saveRes.error,
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/mcp/toggle-tool - Enable or disable an MCP tool
+app.post('/api/mcp/toggle-tool', (req, res) => {
+  const { name, enabled } = req.body || {};
+  if (typeof name !== 'string' || typeof enabled !== 'boolean') {
+    return res.status(400).json({ success: false, error: 'name (string) and enabled (boolean) are required.' });
+  }
+  const mcpManager = agent.getToolExecutor().getMcpManager();
+  mcpManager.toggleTool(name, enabled);
+  res.json({
+    success: true,
+    allToolDetails: mcpManager.getAllToolDetails(),
+    servers: mcpManager.getServersStatus(),
   });
 });
 
@@ -383,9 +477,15 @@ app.post('/api/benchmark/run-stream', async (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
+  const benchmarkController = new AbortController();
+  res.on('close', () => {
+    if (!res.writableEnded) benchmarkController.abort();
+  });
 
   const sendEvent = (event: string, data: any) => {
-    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    if (!res.writableEnded && !res.destroyed) {
+      res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    }
   };
 
   try {
@@ -403,12 +503,17 @@ app.post('/api/benchmark/run-stream', async (req, res) => {
           total,
           test: { id: testCase.id, name: testCase.name, category: testCase.category },
         });
-      }
+      },
+      benchmarkController.signal,
     );
 
     sendEvent('benchmark_done', { report });
   } catch (err: any) {
-    sendEvent('error', { error: err.message });
+    if (benchmarkController.signal.aborted || err?.name === 'AbortError') {
+      sendEvent('cancelled', { message: 'Benchmark stopped.' });
+    } else {
+      sendEvent('error', { error: err.message });
+    }
   } finally {
     res.end();
   }

@@ -3,6 +3,7 @@ import path from 'path';
 import { exec } from 'child_process';
 import { ToolDefinition } from './types.js';
 import { WebClient } from './web.js';
+import { McpClientManager } from './mcp.js';
 
 type DiffLine = {
   type: 'context' | 'add' | 'remove' | 'meta';
@@ -287,10 +288,20 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
 export class ToolExecutor {
   private workingDir: string;
   private webClient: WebClient;
+  private mcpManager: McpClientManager;
 
-  constructor(initialWorkingDir: string = process.cwd(), webClient: WebClient = new WebClient()) {
+  constructor(
+    initialWorkingDir: string = process.cwd(),
+    webClient: WebClient = new WebClient(),
+    mcpManager: McpClientManager = new McpClientManager(initialWorkingDir)
+  ) {
     this.workingDir = path.resolve(initialWorkingDir);
     this.webClient = webClient;
+    this.mcpManager = mcpManager;
+  }
+
+  public getMcpManager(): McpClientManager {
+    return this.mcpManager;
   }
 
   public getWorkingDir(): string {
@@ -301,6 +312,7 @@ export class ToolExecutor {
     try {
       const resolved = path.resolve(newDir);
       this.workingDir = resolved;
+      this.mcpManager.setWorkingDir(resolved);
       return { success: true, path: this.workingDir };
     } catch (err: any) {
       return { success: false, path: this.workingDir, error: err.message };
@@ -483,6 +495,10 @@ export class ToolExecutor {
   }
 
   public async executeTool(name: string, args: Record<string, any>): Promise<any> {
+    if (this.mcpManager.hasTool(name)) {
+      return await this.mcpManager.executeTool(name, args);
+    }
+
     switch (name) {
       case 'list_directory': {
         const subPath = args.relative_path || '.';

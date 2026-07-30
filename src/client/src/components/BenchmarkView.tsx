@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Play,
   CheckCircle2,
@@ -16,6 +16,7 @@ import {
   FileCode2,
   CheckCheck,
   RotateCw,
+  Square,
 } from 'lucide-react';
 import { OllamaModelInfo } from '../types';
 
@@ -76,6 +77,9 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
   const [liveResults, setLiveResults] = useState<TestResultTrace[]>([]);
   const [testCasesInfo, setTestCasesInfo] = useState<BenchmarkTestCaseInfo[]>([]);
   const [isRunning, setIsRunning] = useState(false);
+  const [isStopping, setIsStopping] = useState(false);
+  const [wasStopped, setWasStopped] = useState(false);
+  const benchmarkAbortController = useRef<AbortController | null>(null);
   const [runningSingleId, setRunningSingleId] = useState<string | null>(null);
   const [progress, setProgress] = useState<{
     current: number;
@@ -98,8 +102,14 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
       .catch((err) => console.error('Error fetching benchmark test cases:', err));
   }, []);
 
+  useEffect(() => () => benchmarkAbortController.current?.abort(), []);
+
   const handleRunAllBenchmarks = async () => {
+    const controller = new AbortController();
+    benchmarkAbortController.current = controller;
     setIsRunning(true);
+    setIsStopping(false);
+    setWasStopped(false);
     setReport(null);
     setLiveResults([]);
     const filteredCount = selectedCategory === 'all'
@@ -115,6 +125,7 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
           model: activeModel,
           ...(selectedCategory !== 'all' ? { category: selectedCategory } : {}),
         }),
+        signal: controller.signal,
       });
 
       if (!response.ok || !response.body) {
@@ -162,6 +173,8 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
               });
             } else if (eventType === 'benchmark_done') {
               setReport(eventData.report);
+            } else if (eventType === 'cancelled') {
+              setWasStopped(true);
             } else if (eventType === 'error') {
               alert(`Benchmark Stream Error: ${eventData.error}`);
             }
@@ -169,11 +182,25 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
         }
       }
     } catch (err: any) {
-      alert(`Benchmark execution failed: ${err.message}`);
+      if (err?.name === 'AbortError') {
+        setWasStopped(true);
+      } else {
+        alert(`Benchmark execution failed: ${err.message}`);
+      }
     } finally {
+      if (benchmarkAbortController.current === controller) {
+        benchmarkAbortController.current = null;
+      }
       setIsRunning(false);
+      setIsStopping(false);
       setProgress(null);
     }
+  };
+
+  const handleStopBenchmarks = () => {
+    if (!benchmarkAbortController.current) return;
+    setIsStopping(true);
+    benchmarkAbortController.current.abort();
   };
 
   const handleRunSingleTest = async (testId: string) => {
@@ -252,28 +279,30 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
           </div>
 
           <button
-            onClick={handleRunAllBenchmarks}
-            disabled={isRunning || runningSingleId !== null}
+            onClick={isRunning ? handleStopBenchmarks : handleRunAllBenchmarks}
+            disabled={isStopping || (!isRunning && runningSingleId !== null)}
             style={{
               display: 'flex',
               alignItems: 'center',
               gap: '8px',
-              background: isRunning ? 'rgba(99, 102, 241, 0.4)' : 'var(--accent-gradient)',
-              border: 'none',
+              background: isRunning ? 'rgba(239, 68, 68, 0.16)' : 'var(--accent-gradient)',
+              border: isRunning ? '1px solid rgba(239, 68, 68, 0.55)' : 'none',
               color: '#fff',
               padding: '10px 20px',
               borderRadius: '8px',
               fontSize: '0.9rem',
               fontWeight: 600,
-              cursor: isRunning || runningSingleId !== null ? 'not-allowed' : 'pointer',
-              boxShadow: '0 4px 14px rgba(99, 102, 241, 0.35)',
+              cursor: isStopping || (!isRunning && runningSingleId !== null) ? 'not-allowed' : 'pointer',
+              boxShadow: isRunning ? '0 4px 14px rgba(239, 68, 68, 0.2)' : '0 4px 14px rgba(99, 102, 241, 0.35)',
               transition: 'all 0.2s',
             }}
           >
-            {isRunning ? <Loader2 size={18} className="spin" /> : <Play size={18} />}
+            {isStopping ? <Loader2 size={18} className="spin" /> : isRunning ? <Square size={17} /> : <Play size={18} />}
             <span>
               {isRunning
-                ? `Testing... (${progress ? `${progress.current}/${progress.total}` : ''})`
+                ? isStopping
+                  ? 'Stopping…'
+                  : `Stop Benchmark (${progress ? `${progress.current}/${progress.total}` : ''})`
                 : selectedCategory === 'all'
                   ? `Run All Benchmarks (${testCasesInfo.length})`
                   : `Run Category (${testCasesInfo.filter((t) => t.category === selectedCategory).length})`}
@@ -281,6 +310,12 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
           </button>
         </div>
       </div>
+
+      {wasStopped && !isRunning && (
+        <div className="glass-panel animate-fade-in" style={{ padding: '12px 18px', borderRadius: '10px', border: '1px solid rgba(245, 158, 11, 0.35)', color: 'var(--accent-amber)', fontSize: '0.85rem' }}>
+          Benchmark stopped. Completed results are preserved below.
+        </div>
+      )}
 
       {/* Live Stream Progress Bar */}
       {isRunning && progress && (

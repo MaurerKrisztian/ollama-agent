@@ -18,6 +18,14 @@ export class ContextManager {
     this.systemPrompt = prompt;
   }
 
+  public setTools(tools: ToolDefinition[]): void {
+    this.tools = tools;
+  }
+
+  public getTools(): ToolDefinition[] {
+    return this.tools;
+  }
+
   public getSystemPrompt(): string {
     return this.systemPrompt;
   }

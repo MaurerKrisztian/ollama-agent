@@ -23,6 +23,7 @@ interface HeaderProps {
   sidebarOpen: boolean;
   activeView: 'chat' | 'benchmark';
   isGenerating?: boolean;
+  modelLoadElapsed?: number;
   onSelectView: (view: 'chat' | 'benchmark') => void;
   onToggleSidebar: () => void;
   onSelectModel: (model: string) => void;
@@ -44,6 +45,7 @@ export const Header: React.FC<HeaderProps> = ({
   sidebarOpen,
   activeView,
   isGenerating,
+  modelLoadElapsed = 0,
   onSelectView,
   onToggleSidebar,
   onSelectModel,
@@ -188,7 +190,12 @@ export const Header: React.FC<HeaderProps> = ({
                 }}
               >
                 <Loader2 size={14} className="spin" />
-                <span>Loading VRAM...</span>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', minWidth: '112px' }}>
+                  <span>Loading VRAM… {modelLoadElapsed}s</span>
+                  <div className="model-load-track model-load-track-compact" aria-hidden="true">
+                    <div className="model-load-bar" />
+                  </div>
+                </div>
               </div>
             );
           }

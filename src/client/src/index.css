@@ -190,6 +190,34 @@ code {
   animation: spin 1s linear infinite;
 }
 
+.model-load-track {
+  position: relative;
+  height: 5px;
+  margin-top: 9px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(245, 158, 11, 0.16);
+}
+
+.model-load-track-compact {
+  height: 3px;
+  margin-top: 0;
+}
+
+.model-load-bar {
+  position: absolute;
+  inset-block: 0;
+  width: 42%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, transparent, var(--accent-amber), #fde68a, transparent);
+  animation: modelLoadProgress 1.35s ease-in-out infinite;
+}
+
+@keyframes modelLoadProgress {
+  from { transform: translateX(-110%); }
+  to { transform: translateX(340%); }
+}
+
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(6px); }
   to { opacity: 1; transform: translateY(0); }

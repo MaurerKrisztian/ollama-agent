@@ -172,6 +172,14 @@ export class AgentEngine {
     return this.toolExecutor;
   }
 
+  public getActiveTools() {
+    return [...TOOL_DEFINITIONS, ...this.toolExecutor.getMcpManager().getToolDefinitions()];
+  }
+
+  public async loadMcpConfig(customPath?: string) {
+    return await this.toolExecutor.getMcpManager().loadConfig(customPath);
+  }
+
   public async getWorkingDirectoryPromptContext(): Promise<string> {
     if (!this.config.showWorkingDirInfo) return '';
     try {
@@ -223,6 +231,9 @@ export class AgentEngine {
       callbacks?.signal?.throwIfAborted();
       maxLoops--;
 
+      const activeTools = this.getActiveTools();
+      this.contextManager.setTools(activeTools);
+
       let effectiveSystemPrompt = this.contextManager.getEffectiveSystemPrompt(true);
       if (this.config.showWorkingDirInfo) {
         effectiveSystemPrompt += `\n\n${await this.getWorkingDirectoryPromptContext()}`;
@@ -254,7 +265,7 @@ export class AgentEngine {
         model: this.config.model,
         temperature: isContinuationAttempt ? 0 : this.config.temperature,
         messages: messagesForOllama,
-        tools: TOOL_DEFINITIONS,
+        tools: activeTools,
         onChunk: callbacks?.onChunk,
         signal: callbacks?.signal,
       });

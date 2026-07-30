@@ -49,6 +49,7 @@ export const App: React.FC = () => {
 
   const [streamingText, setStreamingText] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
+  const [modelLoadElapsed, setModelLoadElapsed] = useState(0);
   const [generationStatus, setGenerationStatus] =
     useState<'idle' | 'generating' | 'completed' | 'cancelled' | 'error'>('idle');
   const [pendingApprovalCall, setPendingApprovalCall] = useState<PendingApprovalCall | null>(null);
@@ -119,11 +120,34 @@ export const App: React.FC = () => {
     }
   };
 
+  const isActiveModelLoaded = runningModels.some(
+    (model) =>
+      (model.name === config.model || model.model === config.model) &&
+      model.size_vram > 0
+  );
+
   useEffect(() => {
-    loadInitialState();
-    const interval = setInterval(fetchRunningModels, 4000);
-    return () => clearInterval(interval);
+    void loadInitialState();
   }, []);
+
+  useEffect(() => {
+    void fetchRunningModels();
+    const interval = setInterval(fetchRunningModels, isGenerating ? 750 : 4000);
+    return () => clearInterval(interval);
+  }, [isGenerating]);
+
+  useEffect(() => {
+    if (!isGenerating || isActiveModelLoaded) {
+      setModelLoadElapsed(0);
+      return;
+    }
+
+    const startedAt = Date.now();
+    const updateElapsed = () => setModelLoadElapsed(Math.floor((Date.now() - startedAt) / 1000));
+    updateElapsed();
+    const interval = setInterval(updateElapsed, 1000);
+    return () => clearInterval(interval);
+  }, [isGenerating, isActiveModelLoaded, config.model]);
 
   const handleSelectModel = async (newModel: string) => {
     setConfig((prev) => ({ ...prev, model: newModel }));
@@ -360,6 +384,7 @@ export const App: React.FC = () => {
         sidebarOpen={sidebarOpen}
         activeView={activeView}
         isGenerating={isGenerating}
+        modelLoadElapsed={modelLoadElapsed}
         onSelectView={setActiveView}
         onToggleSidebar={() => setSidebarOpen((prev) => !prev)}
         onSelectModel={handleSelectModel}
@@ -379,11 +404,8 @@ export const App: React.FC = () => {
             messages={messages}
             streamingText={streamingText}
             isGenerating={isGenerating}
-            isModelLoaded={runningModels.some(
-              (model) =>
-                (model.name === config.model || model.model === config.model) &&
-                model.size_vram > 0
-            )}
+            isModelLoaded={isActiveModelLoaded}
+            modelLoadElapsed={modelLoadElapsed}
             generationStatus={generationStatus}
             pendingApprovalCall={pendingApprovalCall}
             onSendMessage={handleSendMessage}

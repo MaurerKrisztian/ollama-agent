@@ -37,8 +37,10 @@ export async function runSingleBenchmarkTest(
   testId: string,
   modelName: string,
   ollamaHost: string = 'http://127.0.0.1:11434',
-  ollamaToken?: string
+  ollamaToken?: string,
+  signal?: AbortSignal,
 ): Promise<TestResultTrace> {
+  signal?.throwIfAborted();
   const testCase = BENCHMARK_TEST_CASES.find((t) => t.id === testId);
   if (!testCase) {
     throw new Error(`Test case "${testId}" not found.`);
@@ -165,8 +167,10 @@ export async function runSingleBenchmarkTest(
       onToolStart: (name, args) => {
         actualToolsCalled.push({ name, args });
       },
+      signal,
     });
   } catch (err: any) {
+    if (signal?.aborted || err?.name === 'AbortError') throw err;
     testError = err.message;
   }
 
@@ -190,6 +194,10 @@ export async function runSingleBenchmarkTest(
       call.name === 'replace_file' && key === 'replacement_text'
         ? call.args.content
         : call.args[key];
+    if (key === 'relative_path' && expectedSubstring === '.') {
+      const val = String(actualValue ?? '').trim();
+      return val === '.' || val === '' || val === './';
+    }
     return String(actualValue ?? '').includes(expectedSubstring);
   };
 
@@ -430,8 +438,10 @@ export async function runBenchmarkSuite(
   onProgress?: (current: number, total: number, result: TestResultTrace) => void,
   testCases: BenchmarkTestCase[] = BENCHMARK_TEST_CASES,
   ollamaToken?: string,
-  onTestStart?: (current: number, total: number, testCase: BenchmarkTestCase) => void
+  onTestStart?: (current: number, total: number, testCase: BenchmarkTestCase) => void,
+  signal?: AbortSignal,
 ): Promise<BenchmarkReport> {
+  signal?.throwIfAborted();
   const startTime = Date.now();
   const mockDir = await setupMockEnvironment();
 
@@ -439,9 +449,10 @@ export async function runBenchmarkSuite(
   let passCount = 0;
 
   for (let i = 0; i < testCases.length; i++) {
+    signal?.throwIfAborted();
     const testCase = testCases[i];
     onTestStart?.(i + 1, testCases.length, testCase);
-    const trace = await runSingleBenchmarkTest(testCase.id, modelName, ollamaHost, ollamaToken);
+    const trace = await runSingleBenchmarkTest(testCase.id, modelName, ollamaHost, ollamaToken, signal);
     if (trace.passed) passCount++;
     results.push(trace);
 

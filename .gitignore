@@ -9,6 +9,7 @@ src/client/dist/
 .env
 .env.*
 !.env.example
+.mcp.json
 
 # Logs
 *.log
