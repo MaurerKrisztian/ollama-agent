@@ -26,6 +26,25 @@ export interface ToolSettings {
   };
 }
 
+export interface SystemMetrics {
+  cpu: {
+    utilization: number;
+    cores: number;
+  };
+  memory: {
+    usedGb: number;
+    totalGb: number;
+    utilization: number;
+  };
+  gpu?: {
+    name: string;
+    gpuUtil: number;
+    memUtil: number;
+    memUsedMb: number;
+    memTotalMb: number;
+  } | null;
+}
+
 export interface ContextInfo {
   totalMessages: number;
   charCount: number;

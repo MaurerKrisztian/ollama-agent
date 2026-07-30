@@ -31,6 +31,35 @@ export class ContextManager {
   }
 
   /**
+   * Rewind conversation context to a specific message ID, deleting all messages after it.
+   */
+  public rewindToMessage(messageId: string): { success: boolean; rewoundMessage?: ChatMessage } {
+    const targetIndex = this.messages.findIndex((m) => m.id === messageId);
+    if (targetIndex === -1) {
+      return { success: false };
+    }
+    const targetMsg = this.messages[targetIndex];
+    this.messages = this.messages.slice(0, targetIndex);
+    return { success: true, rewoundMessage: targetMsg };
+  }
+
+  /**
+   * Compact existing message context into a single summary message.
+   */
+  public compactWithSummary(summary: string): ChatMessage {
+    const compactMessage: ChatMessage = {
+      id: `msg_compact_${Date.now()}`,
+      role: 'system',
+      content: `[COMPACTED CONVERSATION SUMMARY]\n${summary.trim()}`,
+      displayContent: `⚡ **Context Compacted**: All previous conversation history and tool outputs have been summarized to save context space.\n\n**Summary of Prior Context:**\n${summary.trim()}`,
+      timestamp: Date.now(),
+    };
+
+    this.messages = [compactMessage];
+    return compactMessage;
+  }
+
+  /**
    * Generates effective system prompt with 5-tool core rules & generic syntax examples
    */
   public getEffectiveSystemPrompt(useNativeTools: boolean = false): string {

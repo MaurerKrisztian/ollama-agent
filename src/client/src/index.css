@@ -251,3 +251,34 @@ code {
 .ctx-tool-label { color: #fbbf24; font-weight: 600; }
 .ctx-tool-name { color: #38bdf8; font-weight: 500; }
 .ctx-divider { color: rgba(255, 255, 255, 0.2); }
+
+/* Header Responsive Layout Utilities */
+@media (max-width: 1280px) {
+  .header-subtext {
+    display: none !important;
+  }
+  .header-btn-text {
+    display: none !important;
+  }
+  .header-metric-label {
+    display: none !important;
+  }
+}
+
+@media (max-width: 960px) {
+  .header-hardware-badge {
+    display: none !important;
+  }
+  .header-vram-details {
+    display: none !important;
+  }
+}
+
+@media (max-width: 768px) {
+  .header-brand-title {
+    display: none !important;
+  }
+  .header-temp-slider {
+    display: none !important;
+  }
+}

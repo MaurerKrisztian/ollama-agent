@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import { X, Copy, Check, FileJson, AlignLeft, Layers, FolderTree, RefreshCw, Cpu } from 'lucide-react';
+import { X, Copy, Check, FileJson, AlignLeft, Layers, FolderTree, RefreshCw, Cpu, Sparkles } from 'lucide-react';
 import { ContextInfo } from '../types';
 
 interface ContextSidebarProps {
@@ -7,6 +7,7 @@ interface ContextSidebarProps {
   onClose: () => void;
   contextInfo: ContextInfo | null;
   activeModel?: string;
+  onCompactContext?: () => void;
 }
 
 function escapeHtml(str: string): string {
@@ -91,6 +92,7 @@ export const ContextSidebar: React.FC<ContextSidebarProps> = ({
   onClose,
   contextInfo,
   activeModel,
+  onCompactContext,
 }) => {
   const [activeTab, setActiveTab] = useState<'formatted' | 'json' | 'workdir'>('formatted');
   const [copied, setCopied] = useState(false);
@@ -245,6 +247,32 @@ export const ContextSidebar: React.FC<ContextSidebarProps> = ({
                     <span>Messages: <strong style={{ color: '#fff' }}>{contextInfo.totalMessages}</strong></span>
                   )}
                 </div>
+
+                {onCompactContext && (
+                  <button
+                    onClick={onCompactContext}
+                    title="Summarize and compact conversation history to save context space (/compact)"
+                    style={{
+                      marginTop: '4px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '6px',
+                      padding: '5px 10px',
+                      borderRadius: '6px',
+                      border: '1px solid rgba(99, 102, 241, 0.4)',
+                      background: 'rgba(99, 102, 241, 0.15)',
+                      color: 'var(--accent-primary)',
+                      fontSize: '0.75rem',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease',
+                    }}
+                  >
+                    <Sparkles size={13} />
+                    <span>Compact Context (`/compact`)</span>
+                  </button>
+                )}
               </>
             );
           })()}

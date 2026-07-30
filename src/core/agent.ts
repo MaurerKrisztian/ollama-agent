@@ -207,6 +207,55 @@ export class AgentEngine {
     this.contextManager.clear();
   }
 
+  public rewindToMessage(messageId: string) {
+    return this.contextManager.rewindToMessage(messageId);
+  }
+
+  public async compactContext(): Promise<{ success: boolean; summary?: string; reason?: string; context?: any; message?: ChatMessage }> {
+    const messages = this.contextManager.getMessages();
+    if (messages.length <= 1) {
+      return { success: false, reason: 'Context is already minimal (1 or fewer messages).' };
+    }
+
+    const conversationText = this.contextManager.getConvertedContext();
+    const prompt = `You are a context summarization assistant. Summarize the conversation history below concisely.
+Structure your output into these bullet points:
+- **User Goal**: What the user requested.
+- **Actions Taken**: Files read/edited, tools run, or web searches performed.
+- **Key Technical Findings & State**: Current code state, error tracebacks, or conclusions.
+
+Keep the summary dense and factual under 300 words. Do not use tool calls.
+
+Conversation History:
+${conversationText}`;
+
+    let summaryText = '';
+    try {
+      const summaryResult = await this.ollamaClient.chatStream({
+        host: this.config.ollamaHost,
+        model: this.config.model,
+        temperature: 0.1,
+        messages: [
+          {
+            role: 'user',
+            content: prompt,
+          },
+        ],
+      });
+      summaryText = summaryResult.content || '';
+    } catch (err: any) {
+      summaryText = `Compacted ${messages.length} messages. User requested assistance with: ${messages.find((m) => m.role === 'user')?.content.slice(0, 100) || 'workspace tasks'}.`;
+    }
+
+    const compactMsg = this.contextManager.compactWithSummary(summaryText);
+    return {
+      success: true,
+      summary: summaryText,
+      message: compactMsg,
+      context: this.contextManager.getContextInfo(),
+    };
+  }
+
   public async sendMessage(userMessage: string, callbacks?: AgentSendMessageOptions): Promise<string> {
     // Add User Message to Context
     const userMsg = this.contextManager.addMessage({

@@ -2,6 +2,9 @@ import express from 'express';
 import cors from 'cors';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import os from 'node:os';
+import { exec } from 'node:child_process';
+import { promisify } from 'node:util';
 import { AgentEngine } from '../core/agent.js';
 import { TOOL_DEFINITIONS } from '../core/tools.js';
 import { runBenchmarkSuite, runSingleBenchmarkTest } from '../benchmark/runner.js';
@@ -56,7 +59,124 @@ app.get('/api/models/running', async (req, res) => {
   }
 });
 
-// GET /api/models/show - Fetch detailed spec (Modelfile, parameters, template, model_info) for a model
+const execAsync = promisify(exec);
+let prevCpuTimes: { idle: number; total: number } | null = null;
+
+function getCpuUsage(): number {
+  try {
+    const cpus = os.cpus();
+    if (!cpus || cpus.length === 0) return 0;
+    let idle = 0;
+    let total = 0;
+
+    for (const cpu of cpus) {
+      for (const type in cpu.times) {
+        total += (cpu.times as any)[type];
+      }
+      idle += cpu.times.idle;
+    }
+
+    if (!prevCpuTimes) {
+      prevCpuTimes = { idle, total };
+      return 0;
+    }
+
+    const idleDiff = idle - prevCpuTimes.idle;
+    const totalDiff = total - prevCpuTimes.total;
+    prevCpuTimes = { idle, total };
+
+    if (totalDiff <= 0) return 0;
+    const usage = 100 - (100 * idleDiff) / totalDiff;
+    return Math.min(100, Math.max(0, Number(usage.toFixed(1))));
+  } catch (_) {
+    return 0;
+  }
+}
+
+async function getGpuMetrics(): Promise<{ name: string; gpuUtil: number; memUtil: number; memUsedMb: number; memTotalMb: number } | null> {
+  const isWin = process.platform === 'win32';
+  const isMac = process.platform === 'darwin';
+
+  // 1. NVIDIA GPUs on Linux & Windows
+  try {
+    const cmd = 'nvidia-smi --query-gpu=name,utilization.gpu,utilization.memory,memory.used,memory.total --format=csv,noheader,nounits';
+    const { stdout } = await execAsync(cmd, { timeout: 1500 });
+    const parts = stdout.trim().split(',').map((p) => p.trim());
+    if (parts.length >= 5 && parts[0]) {
+      return {
+        name: parts[0],
+        gpuUtil: Number(parts[1]) || 0,
+        memUtil: Number(parts[2]) || 0,
+        memUsedMb: Number(parts[3]) || 0,
+        memTotalMb: Number(parts[4]) || 0,
+      };
+    }
+  } catch (_) {
+    if (isWin) {
+      try {
+        const nvsmiPath = '"C:\\Program Files\\NVIDIA Corporation\\NVSMI\\nvidia-smi.exe"';
+        const { stdout } = await execAsync(`${nvsmiPath} --query-gpu=name,utilization.gpu,utilization.memory,memory.used,memory.total --format=csv,noheader,nounits`, { timeout: 1500 });
+        const parts = stdout.trim().split(',').map((p) => p.trim());
+        if (parts.length >= 5 && parts[0]) {
+          return {
+            name: parts[0],
+            gpuUtil: Number(parts[1]) || 0,
+            memUtil: Number(parts[2]) || 0,
+            memUsedMb: Number(parts[3]) || 0,
+            memTotalMb: Number(parts[4]) || 0,
+          };
+        }
+      } catch (_) {}
+    }
+  }
+
+  // 2. Apple Silicon / macOS Metal GPUs
+  if (isMac) {
+    try {
+      const { stdout } = await execAsync('sysctl -n machdep.cpu.brand_string', { timeout: 1000 });
+      const name = stdout.trim();
+      if (name.includes('Apple')) {
+        return {
+          name,
+          gpuUtil: 0,
+          memUtil: 0,
+          memUsedMb: 0,
+          memTotalMb: 0,
+        };
+      }
+    } catch (_) {}
+  }
+
+  return null;
+}
+
+// GET /api/system/metrics - Fetch live CPU, System RAM, and GPU utilization metrics
+app.get('/api/system/metrics', async (_req, res) => {
+  try {
+    const cpuUtil = getCpuUsage();
+    const totalMem = os.totalmem();
+    const freeMem = os.freemem();
+    const usedMem = totalMem - freeMem;
+    const memUtil = Number(((usedMem / totalMem) * 100).toFixed(1));
+    const gpu = await getGpuMetrics();
+
+    res.json({
+      success: true,
+      cpu: {
+        utilization: cpuUtil,
+        cores: os.cpus().length,
+      },
+      memory: {
+        usedGb: Number((usedMem / (1024 * 1024 * 1024)).toFixed(2)),
+        totalGb: Number((totalMem / (1024 * 1024 * 1024)).toFixed(2)),
+        utilization: memUtil,
+      },
+      gpu,
+    });
+  } catch (_) {
+    res.json({ success: false, error: 'Hardware metrics unavailable' });
+  }
+});
 app.get('/api/models/show', async (req, res) => {
   try {
     const modelName = typeof req.query.name === 'string' ? req.query.name : agent.getConfig().model;
@@ -265,6 +385,42 @@ app.post('/api/clear', (req, res) => {
   });
 });
 
+// POST /api/chat/rewind - Rewind context to a specific prompt message ID
+app.post('/api/chat/rewind', (req, res) => {
+  const { messageId } = req.body || {};
+  if (typeof messageId !== 'string') {
+    return res.status(400).json({ success: false, error: 'messageId string is required.' });
+  }
+  const result = agent.rewindToMessage(messageId);
+  if (!result.success) {
+    return res.status(404).json({ success: false, error: 'Message not found in context.' });
+  }
+  res.json({
+    success: true,
+    rewoundMessage: result.rewoundMessage,
+    context: agent.getContextManager().getContextInfo(),
+  });
+});
+
+// POST /api/chat/compact - Compact conversation history into a structured summary
+app.post('/api/chat/compact', async (_req, res) => {
+  try {
+    const result = await agent.compactContext();
+    if (!result.success) {
+      return res.status(400).json({ success: false, error: result.reason || 'Context cannot be compacted.' });
+    }
+    res.json({
+      success: true,
+      summary: result.summary,
+      message: result.message,
+      context: result.context,
+      messages: agent.getContextManager().getMessages(),
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // POST /api/chat/tool-approval - Approve or reject a pending tool execution
 app.post('/api/chat/tool-approval', (req, res) => {
   const { decision } = req.body as { decision: ApprovalDecision };
@@ -349,6 +505,28 @@ app.post('/api/chat', async (req, res) => {
   const sendEvent = (event: string, data: any) => {
     res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
   };
+
+  // Intercept /compact command
+  if (message.trim().toLowerCase() === '/compact') {
+    try {
+      sendEvent('chunk', { chunk: '⚡ Compacting conversation context with Ollama...' });
+      const compactRes = await agent.compactContext();
+      if (compactRes.success && compactRes.message) {
+        sendEvent('message_added', compactRes.message);
+        sendEvent('context_update', compactRes.context);
+        sendEvent('done', {
+          fullText: compactRes.message.displayContent || compactRes.message.content,
+          context: compactRes.context,
+        });
+      } else {
+        sendEvent('error', { error: compactRes.reason || 'Context is already minimal.' });
+      }
+    } catch (err: any) {
+      sendEvent('error', { error: err.message });
+    }
+    res.end();
+    return;
+  }
   const generationController = new AbortController();
   activeGenerationController = generationController;
 

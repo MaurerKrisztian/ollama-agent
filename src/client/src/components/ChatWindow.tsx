@@ -1,7 +1,7 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Send, Square, Wrench, CheckCircle2, XCircle, ShieldAlert, User, Bot, Loader2, FileText, Folder, Terminal, Edit3, Search, PlusCircle, Sparkles, Code2, Eye, ChevronDown, X, Globe, ExternalLink, Layers } from 'lucide-react';
+import { Send, Square, Wrench, CheckCircle2, XCircle, ShieldAlert, User, Bot, Loader2, FileText, Folder, Terminal, Edit3, Search, PlusCircle, Sparkles, Code2, Eye, ChevronDown, X, Globe, ExternalLink, Layers, RotateCcw } from 'lucide-react';
 import { ChatMessage, FileDiffData, PendingApprovalCall, TextAttachment } from '../types';
 
 const compactValue = (value: unknown, maxLength = 64): string => {
@@ -253,6 +253,64 @@ const WebPageReaderView: React.FC<{
   </div>
 );
 
+const CompactedContextCard: React.FC<{ message: ChatMessage }> = ({ message }) => {
+  const [expanded, setExpanded] = useState(true);
+  const cleanSummary = message.content.replace(/^\[COMPACTED CONVERSATION SUMMARY\]\s*/i, '');
+
+  return (
+    <div className="animate-fade-in" style={{ margin: '12px auto', maxWidth: '90%', width: '100%' }}>
+      <div
+        style={{
+          background: 'rgba(99, 102, 241, 0.08)',
+          border: '1px solid rgba(99, 102, 241, 0.3)',
+          borderRadius: '12px',
+          overflow: 'hidden',
+          boxShadow: '0 4px 15px rgba(99, 102, 241, 0.12)',
+        }}
+      >
+        <button
+          type="button"
+          onClick={() => setExpanded((curr) => !curr)}
+          style={{
+            width: '100%',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            padding: '10px 14px',
+            background: 'rgba(99, 102, 241, 0.15)',
+            border: 0,
+            color: 'var(--accent-primary)',
+            cursor: 'pointer',
+            textAlign: 'left',
+            font: 'inherit',
+          }}
+        >
+          <Sparkles size={16} style={{ flexShrink: 0 }} />
+          <span style={{ fontWeight: 700, fontSize: '0.875rem' }}>Context Compacted & Summarized</span>
+          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginLeft: '6px' }}>
+            (Prior conversation history compressed to save tokens)
+          </span>
+          <ChevronDown
+            size={16}
+            style={{
+              marginLeft: 'auto',
+              flexShrink: 0,
+              transform: expanded ? 'rotate(180deg)' : 'none',
+              transition: 'transform 0.15s ease',
+            }}
+          />
+        </button>
+
+        {expanded && (
+          <div style={{ padding: '14px 16px', borderTop: '1px solid rgba(99, 102, 241, 0.2)', fontSize: '0.85rem', lineHeight: 1.55 }}>
+            <MarkdownContent content={cleanSummary} />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
 const ToolResultCard: React.FC<{
   message: ChatMessage;
   args: Record<string, any>;
@@ -482,44 +540,83 @@ interface ChatWindowProps {
   onCancelGeneration: () => void;
   onApproveToolCall?: () => void;
   onRejectToolCall?: () => void;
+  onRewindToMessage?: (messageId: string, promptContent: string) => void;
+  onClearChat?: () => void;
+  onOpenToolSettings?: () => void;
+  onOpenModelDetails?: () => void;
+  onCompactContext?: () => void;
 }
 
 const QUICK_HELPER_PROMPTS = [
   {
     icon: Folder,
-    label: 'List Directory',
-    prompt: 'List all files in the root working directory.',
+    label: 'Explore Codebase',
+    prompt: 'Examine the project structure and summarize the main modules and entry points.',
     category: 'directory',
   },
   {
-    icon: FileText,
-    label: 'Read File',
-    prompt: 'Read user_profile.json and tell me what the userId is.',
-    category: 'file',
-  },
-  {
     icon: Terminal,
-    label: 'Run Terminal Cmd',
-    prompt: 'Run a terminal command using execute_command to list directory files in long format.',
+    label: 'Run Tests & Lint',
+    prompt: 'Run the test suite and type checking to report any failing tests or TypeScript errors.',
     category: 'terminal',
   },
   {
-    icon: Edit3,
-    label: 'Edit File',
-    prompt: 'Edit config/app_settings.env to change PORT=9090 to PORT=8080.',
-    category: 'edit',
-  },
-  {
     icon: Search,
-    label: 'Search Code',
-    prompt: 'Search the workspace for the word computeHash.',
+    label: 'Find API Routes',
+    prompt: 'Grep the codebase for all REST API endpoints and list their parameters.',
     category: 'search',
   },
   {
-    icon: PlusCircle,
-    label: 'Create File',
-    prompt: 'Create a new file named services/logger.ts containing "export const log = (msg) => console.log(msg);".',
-    category: 'create',
+    icon: Globe,
+    label: 'Web Research',
+    prompt: 'Search the web for recent Ollama agent updates and summarize key best practices.',
+    category: 'web',
+  },
+  {
+    icon: FileText,
+    label: 'Package & Setup',
+    prompt: 'Read package.json and summarize the project dependencies, scripts, and build setup.',
+    category: 'file',
+  },
+  {
+    icon: Wrench,
+    label: 'Inspect MCP Tools',
+    prompt: 'Check active MCP servers and list available external tools and schemas.',
+    category: 'mcp',
+  },
+];
+
+interface SlashCommandItem {
+  cmd: string;
+  label: string;
+  description: string;
+  icon: React.ElementType;
+}
+
+const SLASH_COMMANDS: SlashCommandItem[] = [
+  {
+    cmd: '/compact',
+    label: '/compact',
+    description: 'Summarize & compress conversation context to save tokens',
+    icon: Sparkles,
+  },
+  {
+    cmd: '/clear',
+    label: '/clear',
+    description: 'Reset conversation history and start fresh context',
+    icon: RotateCcw,
+  },
+  {
+    cmd: '/settings',
+    label: '/settings',
+    description: 'Open Tool Approval & Safety Settings modal',
+    icon: Wrench,
+  },
+  {
+    cmd: '/inspect',
+    label: '/inspect',
+    description: 'Open Ollama Model Inspector modal for detailed specs',
+    icon: Eye,
   },
 ];
 
@@ -535,14 +632,66 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   onCancelGeneration,
   onApproveToolCall,
   onRejectToolCall,
+  onRewindToMessage,
+  onClearChat,
+  onOpenToolSettings,
+  onOpenModelDetails,
+  onCompactContext,
 }) => {
   const [input, setInput] = useState('');
   const [attachments, setAttachments] = useState<TextAttachment[]>([]);
-  const [viewedAttachment, setViewedAttachment] = useState<TextAttachment | null>(null);
-  const [isDragging, setIsDragging] = useState(false);
   const [attachmentError, setAttachmentError] = useState('');
+  const [viewedAttachment, setViewedAttachment] = useState<TextAttachment | null>(null);
+  const [slashMenuOpen, setSlashMenuOpen] = useState(false);
+  const [selectedSlashIndex, setSelectedSlashIndex] = useState(0);
+  const [isDragging, setIsDragging] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const dragDepth = useRef(0);
+
+  const filteredCommands = useMemo(() => {
+    if (!input.startsWith('/')) return [];
+    const query = input.toLowerCase();
+    return SLASH_COMMANDS.filter((cmd) => cmd.cmd.toLowerCase().startsWith(query));
+  }, [input]);
+
+  useEffect(() => {
+    if (input.startsWith('/') && filteredCommands.length > 0) {
+      setSlashMenuOpen(true);
+      setSelectedSlashIndex(0);
+    } else {
+      setSlashMenuOpen(false);
+    }
+  }, [input, filteredCommands.length]);
+
+  const handleSelectSlashCommand = (cmd: SlashCommandItem) => {
+    setSlashMenuOpen(false);
+    if (cmd.cmd === '/compact') {
+      setInput('');
+      if (onCompactContext) {
+        onCompactContext();
+      } else {
+        onSendMessage('/compact');
+      }
+    } else if (cmd.cmd === '/clear') {
+      setInput('');
+      if (onClearChat) onClearChat();
+    } else if (cmd.cmd === '/settings') {
+      setInput('');
+      if (onOpenToolSettings) onOpenToolSettings();
+    } else if (cmd.cmd === '/inspect') {
+      setInput('');
+      if (onOpenModelDetails) onOpenModelDetails();
+    } else {
+      setInput(`${cmd.cmd} `);
+    }
+  };
+
+  const handleRewind = (messageId: string, content: string) => {
+    if (onRewindToMessage) {
+      onRewindToMessage(messageId, content);
+      setInput(content);
+    }
+  };
 
   const addFiles = async (files: File[]) => {
     setAttachmentError('');
@@ -690,26 +839,54 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
         )}
 
         {messages.map((msg) => {
+          if (msg.role === 'system' || msg.content.startsWith('[COMPACTED CONVERSATION SUMMARY]')) {
+            return <CompactedContextCard key={msg.id} message={msg} />;
+          }
+
           if (msg.role === 'user') {
             return (
               <div key={msg.id} className="animate-fade-in" style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
-                <div style={{ maxWidth: '75%', background: 'var(--accent-gradient)', color: '#fff', padding: '12px 16px', borderRadius: '16px 16px 4px 16px', fontSize: '0.925rem', lineHeight: 1.5, boxShadow: '0 4px 12px rgba(99, 102, 241, 0.25)' }}>
-                  <div style={{ whiteSpace: 'pre-wrap' }}>{msg.displayContent ?? msg.content}</div>
-                  {msg.attachments && msg.attachments.length > 0 && (
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '9px' }}>
-                      {msg.attachments.map((file, index) => (
-                        <button
-                          type="button"
-                          key={`${file.name}-${index}`}
-                          onClick={() => setViewedAttachment(file)}
-                          title={`Open ${file.name}`}
-                          style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '4px 8px', border: '1px solid rgba(255, 255, 255, 0.18)', borderRadius: '7px', background: 'rgba(15, 23, 42, 0.28)', color: 'inherit', font: 'inherit', fontSize: '0.74rem', cursor: 'pointer' }}
-                        >
-                          <FileText size={13} /> {file.name} · {(file.size / 1024).toFixed(1)} KB
-                        </button>
-                      ))}
-                    </div>
-                  )}
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px', maxWidth: '75%' }}>
+                  <div style={{ background: 'var(--accent-gradient)', color: '#fff', padding: '12px 16px', borderRadius: '16px 16px 4px 16px', fontSize: '0.925rem', lineHeight: 1.5, boxShadow: '0 4px 12px rgba(99, 102, 241, 0.25)', width: '100%' }}>
+                    <div style={{ whiteSpace: 'pre-wrap' }}>{msg.displayContent ?? msg.content}</div>
+                    {msg.attachments && msg.attachments.length > 0 && (
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '9px' }}>
+                        {msg.attachments.map((file, index) => (
+                          <button
+                            type="button"
+                            key={`${file.name}-${index}`}
+                            onClick={() => setViewedAttachment(file)}
+                            title={`Open ${file.name}`}
+                            style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '4px 8px', border: '1px solid rgba(255, 255, 255, 0.18)', borderRadius: '7px', background: 'rgba(15, 23, 42, 0.28)', color: 'inherit', font: 'inherit', fontSize: '0.74rem', cursor: 'pointer' }}
+                          >
+                            <FileText size={13} /> {file.name} · {(file.size / 1024).toFixed(1)} KB
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleRewind(msg.id, msg.content)}
+                    disabled={isGenerating}
+                    title="Rewind context to this prompt (deletes all subsequent context)"
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      background: 'rgba(30, 41, 59, 0.4)',
+                      border: '1px solid var(--border-color)',
+                      borderRadius: '6px',
+                      padding: '2px 7px',
+                      color: 'var(--text-muted)',
+                      fontSize: '0.7rem',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease',
+                    }}
+                  >
+                    <RotateCcw size={11} />
+                    <span>Rewind to this prompt</span>
+                  </button>
                 </div>
                 <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: 'rgba(255, 255, 255, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                   <User size={18} color="#fff" />
@@ -987,12 +1164,92 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
         )}
         {attachmentError && <div style={{ color: 'var(--accent-amber)', fontSize: '0.76rem' }}>{attachmentError}</div>}
 
+        {/* Slash Command Autocomplete Popup Menu */}
+        {slashMenuOpen && filteredCommands.length > 0 && (
+          <div
+            className="animate-fade-in"
+            style={{
+              background: 'rgba(15, 23, 42, 0.95)',
+              backdropFilter: 'blur(12px)',
+              border: '1px solid var(--accent-primary)',
+              borderRadius: '10px',
+              padding: '6px',
+              boxShadow: '0 10px 25px rgba(0, 0, 0, 0.5)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '4px',
+              marginBottom: '4px',
+            }}
+          >
+            <div style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--accent-primary)', padding: '4px 8px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+              Slash Commands (Use ↑↓ Arrow Keys & Enter)
+            </div>
+            {filteredCommands.map((cmdItem: SlashCommandItem, idx: number) => {
+              const IconComp = cmdItem.icon;
+              const isSelected = idx === selectedSlashIndex;
+              return (
+                <button
+                  key={cmdItem.cmd}
+                  type="button"
+                  onClick={() => handleSelectSlashCommand(cmdItem)}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '8px 12px',
+                    borderRadius: '6px',
+                    border: 'none',
+                    background: isSelected ? 'rgba(99, 102, 241, 0.25)' : 'transparent',
+                    color: isSelected ? '#fff' : 'var(--text-muted)',
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                    width: '100%',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <IconComp size={14} color={isSelected ? 'var(--accent-primary)' : 'var(--text-muted)'} />
+                    <span style={{ fontWeight: 700, fontFamily: 'var(--font-code)', fontSize: '0.85rem', color: isSelected ? '#fff' : 'var(--text-main)' }}>
+                      {cmdItem.cmd}
+                    </span>
+                  </div>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                    {cmdItem.description}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+
         <form onSubmit={handleSubmit} style={{ display: 'flex', gap: '12px', alignItems: 'flex-end', background: 'rgba(30, 41, 59, 0.8)', padding: '8px 14px', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
           <textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="Type a message, or drag and drop text files here..."
+            onKeyDown={(e) => {
+              if (slashMenuOpen && filteredCommands.length > 0) {
+                if (e.key === 'ArrowDown') {
+                  e.preventDefault();
+                  setSelectedSlashIndex((prev) => (prev + 1) % filteredCommands.length);
+                  return;
+                }
+                if (e.key === 'ArrowUp') {
+                  e.preventDefault();
+                  setSelectedSlashIndex((prev) => (prev - 1 + filteredCommands.length) % filteredCommands.length);
+                  return;
+                }
+                if (e.key === 'Enter' || e.key === 'Tab') {
+                  e.preventDefault();
+                  handleSelectSlashCommand(filteredCommands[selectedSlashIndex]);
+                  return;
+                }
+                if (e.key === 'Escape') {
+                  setSlashMenuOpen(false);
+                  return;
+                }
+              }
+              handleKeyDown(e);
+            }}
+            placeholder="Type a message, '/' for commands (/compact, /clear...), or drag & drop files..."
             rows={2}
             style={{
               flex: 1,

@@ -2,13 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { Header } from './components/Header';
 import { ChatWindow } from './components/ChatWindow';
 import { ContextSidebar } from './components/ContextSidebar';
+import { LeftSidebar } from './components/LeftSidebar';
 import { SystemPromptModal } from './components/SystemPromptModal';
 import { BenchmarkView } from './components/BenchmarkView';
 import { ToolSettingsModal } from './components/ToolSettingsModal';
 import { ConnectionSettingsModal } from './components/ConnectionSettingsModal';
 import { DirectoryPickerModal } from './components/DirectoryPickerModal';
 import { ModelDetailsModal } from './components/ModelDetailsModal';
-import { AgentConfig, ChatMessage, ContextInfo, OllamaModelInfo, OllamaRunningModelInfo, PendingApprovalCall, TextAttachment, ToolSettings } from './types';
+import { AgentConfig, ChatMessage, ContextInfo, OllamaModelInfo, OllamaRunningModelInfo, PendingApprovalCall, SystemMetrics, TextAttachment, ToolSettings } from './types';
 
 export const App: React.FC = () => {
   const [activeView, setActiveView] = useState<'chat' | 'benchmark'>('chat');
@@ -43,6 +44,7 @@ export const App: React.FC = () => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [contextInfo, setContextInfo] = useState<ContextInfo | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [leftSidebarOpen, setLeftSidebarOpen] = useState(false);
   const [systemPromptModalOpen, setSystemPromptModalOpen] = useState(false);
   const [toolSettingsModalOpen, setToolSettingsModalOpen] = useState(false);
   const [connectionSettingsModalOpen, setConnectionSettingsModalOpen] = useState(false);
@@ -55,6 +57,7 @@ export const App: React.FC = () => {
   const [generationStatus, setGenerationStatus] =
     useState<'idle' | 'generating' | 'completed' | 'cancelled' | 'error'>('idle');
   const [pendingApprovalCall, setPendingApprovalCall] = useState<PendingApprovalCall | null>(null);
+  const [systemMetrics, setSystemMetrics] = useState<SystemMetrics | null>(null);
 
   const fetchRunningModels = async () => {
     try {
@@ -67,6 +70,28 @@ export const App: React.FC = () => {
       }
     } catch (_) {}
   };
+
+  const fetchSystemMetrics = async () => {
+    try {
+      const res = await fetch('/api/system/metrics');
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.success) {
+          setSystemMetrics(data);
+          return;
+        }
+      }
+      setSystemMetrics(null);
+    } catch (_) {
+      setSystemMetrics(null);
+    }
+  };
+
+  useEffect(() => {
+    fetchSystemMetrics();
+    const interval = setInterval(fetchSystemMetrics, 3000);
+    return () => clearInterval(interval);
+  }, []);
 
   const loadInitialState = async () => {
     try {
@@ -256,6 +281,43 @@ export const App: React.FC = () => {
     }
   };
 
+  const handleRewindToMessage = async (messageId: string) => {
+    try {
+      const res = await fetch('/api/chat/rewind', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messageId }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success) {
+          setContextInfo(data.context);
+          setMessages((prev) => {
+            const targetIdx = prev.findIndex((m) => m.id === messageId);
+            return targetIdx !== -1 ? prev.slice(0, targetIdx) : prev;
+          });
+        }
+      }
+    } catch (_) {}
+  };
+
+  const handleCompactContext = async () => {
+    try {
+      const res = await fetch('/api/chat/compact', { method: 'POST' });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success) {
+          setContextInfo(data.context);
+          if (data.messages) {
+            setMessages(data.messages);
+          } else if (data.message) {
+            setMessages([data.message]);
+          }
+        }
+      }
+    } catch (_) {}
+  };
+
   const handleUpdateToolSettings = async (newSettings: ToolSettings) => {
     setToolSettings(newSettings);
     // Sync approval modes & maxLoops to server
@@ -400,9 +462,28 @@ export const App: React.FC = () => {
         onToggleWorkingDirInfo={handleToggleWorkingDirInfo}
         onRefreshModels={loadInitialState}
         onOpenModelDetails={() => setModelDetailsModalOpen(true)}
+        systemMetrics={systemMetrics}
+        leftSidebarOpen={leftSidebarOpen}
+        onToggleLeftSidebar={() => setLeftSidebarOpen((prev) => !prev)}
       />
 
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+        <LeftSidebar
+          isOpen={leftSidebarOpen}
+          onClose={() => setLeftSidebarOpen(false)}
+          config={config}
+          activeView={activeView}
+          onSelectView={setActiveView}
+          onNewChat={handleNewChat}
+          onOpenSystemPrompt={() => setSystemPromptModalOpen(true)}
+          onOpenToolSettings={() => setToolSettingsModalOpen(true)}
+          onOpenConnectionSettings={() => setConnectionSettingsModalOpen(true)}
+          onOpenWorkingDirPicker={() => setDirectoryPickerOpen(true)}
+          onToggleWorkingDirInfo={handleToggleWorkingDirInfo}
+          onChangeTemperature={handleChangeTemperature}
+          onOpenModelDetails={() => setModelDetailsModalOpen(true)}
+          systemMetrics={systemMetrics}
+        />
         {activeView === 'chat' ? (
           <ChatWindow
             messages={messages}
@@ -416,6 +497,11 @@ export const App: React.FC = () => {
             onCancelGeneration={handleCancelGeneration}
             onApproveToolCall={handleApproveToolCall}
             onRejectToolCall={handleRejectToolCall}
+            onRewindToMessage={handleRewindToMessage}
+            onClearChat={handleNewChat}
+            onOpenToolSettings={() => setToolSettingsModalOpen(true)}
+            onOpenModelDetails={() => setModelDetailsModalOpen(true)}
+            onCompactContext={handleCompactContext}
           />
         ) : (
           <BenchmarkView
@@ -430,6 +516,7 @@ export const App: React.FC = () => {
           onClose={() => setSidebarOpen(false)}
           contextInfo={contextInfo}
           activeModel={config.model}
+          onCompactContext={handleCompactContext}
         />
       </div>
 
