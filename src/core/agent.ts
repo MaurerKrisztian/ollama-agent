@@ -8,6 +8,7 @@ export interface AgentSendMessageOptions {
   onToolStart?: (name: string, args: Record<string, any>) => void;
   onToolEnd?: (name: string, result: any) => void;
   onMessageAdded?: (message: ChatMessage) => void;
+  signal?: AbortSignal;
 }
 
 export type AgentConfigUpdate = Partial<AgentConfig> & { ollamaToken?: string };
@@ -42,7 +43,13 @@ function inferExplicitlyRequestedTools(prompt: string): string[] {
   if (/\b(?:search|grep|find)\b.*\b(?:workspace|code|file|word|symbol|for)\b/.test(normalized)) add('grep_search');
   if (/\b(?:read|inspect|open)\b/.test(normalized)) add('read_file');
   if (/\b(?:create|write|make)\b.*\b(?:new )?(?:file|implementation)\b/.test(normalized)) add('create_file');
-  if (/\b(?:edit|rewrite|refactor|update|change|delete|remove)\b/.test(normalized)) add('edit_file');
+  if (/\b(?:edit|rewrite|refactor|update|change|delete|remove)\b/.test(normalized)) {
+    // Existing content must be inspected before constructing an exact
+    // target_text replacement. This also lets the model recover when the user
+    // refers to a stale value.
+    add('read_file');
+    add('edit_file');
+  }
 
   return requested;
 }
@@ -132,6 +139,7 @@ export class AgentEngine {
     let continuationReminder: string | null = null;
 
     while (maxLoops > 0) {
+      callbacks?.signal?.throwIfAborted();
       maxLoops--;
 
       const messagesForOllama = [
@@ -155,16 +163,14 @@ export class AgentEngine {
         continuationReminder = null;
       }
 
-      const requestedWorkflowComplete =
-        requestedTools.length > 0 && requestedTools.every((toolName) => executedToolNames.has(toolName));
-
       const res = await this.ollamaClient.chatStream({
         host: this.config.ollamaHost,
         model: this.config.model,
         temperature: isContinuationAttempt ? 0 : this.config.temperature,
         messages: messagesForOllama,
-        tools: requestedWorkflowComplete ? undefined : TOOL_DEFINITIONS,
+        tools: TOOL_DEFINITIONS,
         onChunk: callbacks?.onChunk,
+        signal: callbacks?.signal,
       });
 
       // Add Assistant response message to Context
@@ -181,14 +187,29 @@ export class AgentEngine {
 
       // If Assistant requested tool calls, execute them sequentially
       if (res.tool_calls && res.tool_calls.length > 0) {
+        let anyToolFailedThisRound = false;
         for (const call of res.tool_calls) {
-          executedToolNames.add(call.name);
+          callbacks?.signal?.throwIfAborted();
 
           if (callbacks?.onToolStart) {
             callbacks.onToolStart(call.name, call.arguments);
           }
 
           const toolResult = await this.toolExecutor.executeTool(call.name, call.arguments);
+          const toolFailed =
+            toolResult !== null &&
+            typeof toolResult === 'object' &&
+            typeof toolResult.error === 'string' &&
+            toolResult.cancelled !== true;
+          if (toolFailed) anyToolFailedThisRound = true;
+          if (!toolFailed) {
+            executedToolNames.add(call.name);
+          } else if (call.name === 'edit_file') {
+            continuationReminder =
+              `The edit_file call failed and made no changes: ${toolResult.error}\n` +
+              'Retry immediately with exact literal target_text copied from the latest read_file output, without line-number prefixes or regex syntax. ' +
+              'For non-contiguous changes, issue separate edit_file calls. Do not ask the user to provide content that is already in the tool results.';
+          }
 
           if (callbacks?.onToolEnd) {
             callbacks.onToolEnd(call.name, toolResult);
@@ -208,8 +229,12 @@ export class AgentEngine {
 
         const workflowCompletedAfterThisCall =
           requestedTools.length > 0 && requestedTools.every((toolName) => executedToolNames.has(toolName));
-        if (workflowCompletedAfterThisCall && maxLoops > 0) {
-          continuationReminder = `All requested tool operations are complete. Now answer the user's original request directly using the tool results. Do not call another tool and do not merely summarize what you did.\n\nOriginal request: ${userMessage}`;
+        if (workflowCompletedAfterThisCall && !anyToolFailedThisRound && maxLoops > 0) {
+          continuationReminder =
+            'Review the original request against the successful tool results. A tool type succeeding once does not mean every requested operation is complete. ' +
+            'If any requested change or action is not yet reflected in the tool results, invoke the required tool now using the available schemas. ' +
+            'Do not ask the user for instructions already present in the original request. Only provide the final answer once every requested operation has succeeded.' +
+            `\n\nOriginal request: ${userMessage}`;
         }
       } else {
         const missingRequestedTools = requestedTools.filter((toolName) => !executedToolNames.has(toolName));

@@ -152,11 +152,11 @@ export const ToolSettingsModal: React.FC<ToolSettingsModalProps> = ({
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
               <Edit3 size={18} color="var(--accent-primary)" />
               <span style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--text-main)' }}>
-                File Modification Mode (`edit_file` / `create_file`)
+                File Edit Mode (`edit_file`)
               </span>
             </div>
             <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', lineHeight: 1.5, marginBottom: '12px' }}>
-              Configure approval requirements for creating and editing workspace code files.
+              Configure approval requirements for editing existing workspace files.
             </p>
 
             <div style={{ display: 'flex', gap: '10px' }}>
@@ -178,7 +178,7 @@ export const ToolSettingsModal: React.FC<ToolSettingsModalProps> = ({
                   gap: '6px',
                 }}
               >
-                <span>⚡ Auto-Approve (Default)</span>
+                <span>⚡ Auto-Approve</span>
               </button>
 
               <button
@@ -200,7 +200,7 @@ export const ToolSettingsModal: React.FC<ToolSettingsModalProps> = ({
                 }}
               >
                 <ShieldAlert size={16} />
-                <span>Require Confirmation</span>
+                <span>Require Confirmation (Default)</span>
               </button>
             </div>
           </div>

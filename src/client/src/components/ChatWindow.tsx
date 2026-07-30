@@ -1,13 +1,97 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Wrench, CheckCircle2, XCircle, ShieldAlert, User, Bot, Loader2, FileText, Folder, Terminal, Edit3, Search, PlusCircle, Sparkles } from 'lucide-react';
-import { ChatMessage } from '../types';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import { Send, Square, Wrench, CheckCircle2, XCircle, ShieldAlert, User, Bot, Loader2, FileText, Folder, Terminal, Edit3, Search, PlusCircle, Sparkles, Code2, Eye } from 'lucide-react';
+import { ChatMessage, FileDiffData, PendingApprovalCall } from '../types';
+
+const AssistantResponse: React.FC<{ content: string }> = ({ content }) => {
+  const [showRaw, setShowRaw] = useState(false);
+
+  return (
+    <div className="glass-panel assistant-response" style={{ padding: '12px 18px 16px', borderRadius: '16px 16px 16px 4px', fontSize: '0.925rem', lineHeight: 1.6 }}>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '6px' }}>
+        <button
+          type="button"
+          onClick={() => setShowRaw((current) => !current)}
+          title={showRaw ? 'Show rendered Markdown' : 'Show raw response'}
+          aria-label={showRaw ? 'Show rendered Markdown' : 'Show raw response'}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '5px',
+            padding: '4px 8px',
+            borderRadius: '6px',
+            border: '1px solid var(--border-color)',
+            background: 'rgba(15, 23, 42, 0.45)',
+            color: 'var(--text-muted)',
+            cursor: 'pointer',
+            fontSize: '0.72rem',
+          }}
+        >
+          {showRaw ? <Eye size={13} /> : <Code2 size={13} />}
+          {showRaw ? 'Rendered' : 'Raw'}
+        </button>
+      </div>
+      {showRaw ? (
+        <pre className="assistant-response-raw">{content}</pre>
+      ) : (
+        <div className="markdown-body">
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm]}
+            components={{
+              a: ({ children, ...props }) => <a {...props} target="_blank" rel="noreferrer">{children}</a>,
+            }}
+          >
+            {content}
+          </ReactMarkdown>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const FileDiff: React.FC<{ diff: FileDiffData }> = ({ diff }) => (
+  <div style={{ marginTop: '10px', border: '1px solid rgba(148, 163, 184, 0.25)', borderRadius: '8px', overflow: 'hidden', background: '#0b1220' }}>
+    <div style={{ padding: '8px 12px', borderBottom: '1px solid rgba(148, 163, 184, 0.2)', color: '#cbd5e1', fontFamily: 'var(--font-code)', fontSize: '0.775rem' }}>
+      <div style={{ color: '#f87171' }}>--- {diff.oldPath}</div>
+      <div style={{ color: '#4ade80' }}>+++ {diff.newPath}</div>
+    </div>
+    <div style={{ maxHeight: '360px', overflow: 'auto', fontFamily: 'var(--font-code)', fontSize: '0.775rem', lineHeight: 1.55 }}>
+      {diff.lines.map((line, index) => {
+        const isAdd = line.type === 'add';
+        const isRemove = line.type === 'remove';
+        const isMeta = line.type === 'meta';
+        const background = isAdd
+          ? 'rgba(34, 197, 94, 0.16)'
+          : isRemove
+            ? 'rgba(239, 68, 68, 0.16)'
+            : isMeta
+              ? 'rgba(59, 130, 246, 0.12)'
+              : 'transparent';
+        const color = isAdd ? '#bbf7d0' : isRemove ? '#fecaca' : isMeta ? '#93c5fd' : '#cbd5e1';
+        const marker = isAdd ? '+' : isRemove ? '-' : isMeta ? '…' : ' ';
+
+        return (
+          <div key={index} style={{ display: 'grid', gridTemplateColumns: '48px 48px 20px minmax(max-content, 1fr)', minWidth: '100%', width: 'max-content', background, color }}>
+            <span style={{ padding: '0 8px', textAlign: 'right', color: '#64748b', userSelect: 'none' }}>{line.oldLine ?? ''}</span>
+            <span style={{ padding: '0 8px', textAlign: 'right', color: '#64748b', userSelect: 'none' }}>{line.newLine ?? ''}</span>
+            <span style={{ textAlign: 'center', userSelect: 'none' }}>{marker}</span>
+            <span style={{ paddingRight: '12px', whiteSpace: 'pre' }}>{line.content || ' '}</span>
+          </div>
+        );
+      })}
+    </div>
+  </div>
+);
 
 interface ChatWindowProps {
   messages: ChatMessage[];
   streamingText: string;
   isGenerating: boolean;
-  pendingApprovalCall?: { name: string; args: Record<string, any> } | null;
+  generationStatus: 'idle' | 'generating' | 'completed' | 'cancelled' | 'error';
+  pendingApprovalCall?: PendingApprovalCall | null;
   onSendMessage: (msg: string) => void;
+  onCancelGeneration: () => void;
   onApproveToolCall?: () => void;
   onRejectToolCall?: () => void;
 }
@@ -55,8 +139,10 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   messages,
   streamingText,
   isGenerating,
+  generationStatus,
   pendingApprovalCall,
   onSendMessage,
+  onCancelGeneration,
   onApproveToolCall,
   onRejectToolCall,
 }) => {
@@ -179,9 +265,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                   )}
 
                   {msg.content && (
-                    <div className="glass-panel" style={{ padding: '14px 18px', borderRadius: '16px 16px 16px 4px', fontSize: '0.925rem', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
-                      {msg.content}
-                    </div>
+                    <AssistantResponse content={msg.content} />
                   )}
                 </div>
               </div>
@@ -193,6 +277,10 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
             try {
               parsedContent = JSON.parse(msg.content);
             } catch (_) {}
+            const fileDiff = parsedContent?.diff as FileDiffData | undefined;
+            const resultWithoutDiff = parsedContent && fileDiff
+              ? Object.fromEntries(Object.entries(parsedContent).filter(([key]) => key !== 'diff'))
+              : parsedContent;
 
             return (
               <div key={msg.id} className="animate-fade-in" style={{ marginLeft: '44px', maxWidth: '80%' }}>
@@ -205,8 +293,9 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                     <span style={{ fontSize: '0.75rem', opacity: 0.8 }}>ID: {msg.tool_call_id || 'system'}</span>
                   </div>
                   <pre style={{ margin: 0, maxHeight: '200px', fontSize: '0.775rem' }}>
-                    {parsedContent ? JSON.stringify(parsedContent, null, 2) : msg.content}
+                    {resultWithoutDiff ? JSON.stringify(resultWithoutDiff, null, 2) : msg.content}
                   </pre>
+                  {fileDiff && <FileDiff diff={fileDiff} />}
                 </div>
               </div>
             );
@@ -251,6 +340,12 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
               <div style={{ fontFamily: 'var(--font-code)', background: 'rgba(15, 23, 42, 0.8)', padding: '10px 14px', borderRadius: '8px', marginTop: '6px', color: '#fcd34d', fontSize: '0.825rem' }}>
                 {pendingApprovalCall.name}({JSON.stringify(pendingApprovalCall.args, null, 2)})
               </div>
+              {pendingApprovalCall.diff && (
+                <div style={{ marginTop: '10px' }}>
+                  <div style={{ color: 'var(--text-muted)', fontSize: '0.775rem', marginBottom: '4px' }}>Proposed changes</div>
+                  <FileDiff diff={pendingApprovalCall.diff} />
+                </div>
+              )}
             </div>
 
             <div style={{ display: 'flex', gap: '12px', marginTop: '4px' }}>
@@ -344,6 +439,37 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
           })}
         </div>
 
+        {generationStatus !== 'idle' && (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              fontSize: '0.78rem',
+              color:
+                generationStatus === 'completed'
+                  ? 'var(--accent-teal)'
+                  : generationStatus === 'cancelled' || generationStatus === 'error'
+                    ? 'var(--accent-amber)'
+                    : 'var(--text-muted)',
+            }}
+          >
+            {generationStatus === 'generating' && <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} />}
+            {generationStatus === 'completed' && <CheckCircle2 size={14} />}
+            {generationStatus === 'cancelled' && <Square size={12} />}
+            {generationStatus === 'error' && <XCircle size={14} />}
+            <span>
+              {generationStatus === 'generating'
+                ? 'Generating…'
+                : generationStatus === 'completed'
+                  ? 'Generation complete'
+                  : generationStatus === 'cancelled'
+                    ? 'Generation cancelled'
+                    : 'Generation failed'}
+            </span>
+          </div>
+        )}
+
         <form onSubmit={handleSubmit} style={{ display: 'flex', gap: '12px', alignItems: 'flex-end', background: 'rgba(30, 41, 59, 0.8)', padding: '8px 14px', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
           <textarea
             value={input}
@@ -363,24 +489,30 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
             }}
           />
           <button
-            type="submit"
-            disabled={!input.trim() || isGenerating}
+            type={isGenerating ? 'button' : 'submit'}
+            onClick={isGenerating ? onCancelGeneration : undefined}
+            disabled={!isGenerating && !input.trim()}
+            title={isGenerating ? 'Cancel generation' : 'Send message'}
             style={{
               width: '40px',
               height: '40px',
               borderRadius: '10px',
-              background: input.trim() && !isGenerating ? 'var(--accent-gradient)' : 'rgba(255, 255, 255, 0.05)',
+              background: isGenerating
+                ? 'rgba(239, 68, 68, 0.85)'
+                : input.trim()
+                  ? 'var(--accent-gradient)'
+                  : 'rgba(255, 255, 255, 0.05)',
               border: 'none',
               color: '#fff',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              cursor: input.trim() && !isGenerating ? 'pointer' : 'not-allowed',
-              opacity: input.trim() && !isGenerating ? 1 : 0.4,
+              cursor: isGenerating || input.trim() ? 'pointer' : 'not-allowed',
+              opacity: isGenerating || input.trim() ? 1 : 0.4,
               transition: 'all 0.2s',
             }}
           >
-            <Send size={18} />
+            {isGenerating ? <Square size={16} fill="currentColor" /> : <Send size={18} />}
           </button>
         </form>
       </div>

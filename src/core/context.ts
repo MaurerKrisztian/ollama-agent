@@ -41,6 +41,7 @@ export class ContextManager {
         ? 'RULE 2: When you need to inspect or modify code, ALWAYS issue a runtime-native structured tool call immediately.'
         : 'RULE 2: When you need to inspect or modify code, ALWAYS output the `<tool_call>` block immediately.',
       'RULE 3 (Line Deletion): To remove/delete lines of code or text from a file, set `replacement_text` to an empty string `""`.',
+      'RULE 3b (Literal Edits): edit_file target_text is always exact literal text, never a regex. Do not use patterns such as [0-9]+, .*, ^, or $. Use separate edit_file calls for changes that are not contiguous in the file.',
       'RULE 4 (Clean Function Rewriting): When rewriting a function, class, or code block, include the COMPLETE existing code block in `target_text` (from header to closing brace `}`) so the entire block is replaced cleanly without leaving orphaned lines.',
       useNativeTools
         ? 'RULE 5 (Multi-Step Workflows): Complete multi-step tool workflows fully. Immediately issue the next runtime-native structured tool call without asking for confirmation.'
@@ -52,7 +53,10 @@ export class ContextManager {
       lines.push(
         '',
         'Tool definitions and their parameter schemas are supplied separately by the runtime.',
-        'Use the runtime-native structured tool-call format. Do not wrap tool calls in Markdown or describe a future tool call without making it.'
+        'Use the runtime-native structured tool-call format. Do not wrap tool calls in Markdown or describe a future tool call without making it.',
+        'Before calling edit_file, first call read_file for the target file in the same workflow. Never guess target_text from memory or from the user prompt.',
+        'read_file prefixes displayed lines with "<line number>: " for reference. Never copy those display prefixes into edit_file target_text or replacement_text.',
+        'After any failed edit_file result, correct the arguments and retry immediately. Never ask the user to provide file content that read_file already returned.'
       );
       return lines.join('\n');
     }
@@ -173,10 +177,8 @@ export class ContextManager {
         lines.push(`  Parameters JSON Schema: ${JSON.stringify(t.parameters)}`);
       });
       lines.push('');
-      lines.push('Generic Syntax Example:');
-      lines.push('<tool_call>');
-      lines.push('{"name": "edit_file", "arguments": {"relative_path": "path/to/demo_script.py", "target_text": "old_val", "replacement_text": "new_val"}}');
-      lines.push('</tool_call>');
+      lines.push('Runtime Protocol: Native structured tool calls (schemas are supplied separately to Ollama).');
+      lines.push('Editing rule: read_file must inspect the target before edit_file constructs target_text.');
       lines.push('');
     }
 

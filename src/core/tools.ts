@@ -3,6 +3,116 @@ import path from 'path';
 import { exec } from 'child_process';
 import { ToolDefinition } from './types.js';
 
+type DiffLine = {
+  type: 'context' | 'add' | 'remove' | 'meta';
+  content: string;
+  oldLine?: number;
+  newLine?: number;
+};
+
+type FileDiff = {
+  path: string;
+  oldPath: string;
+  newPath: string;
+  lines: DiffLine[];
+  truncated?: boolean;
+};
+
+const MAX_DIFF_LINES = 400;
+
+function limitDiffLines(lines: DiffLine[]): Pick<FileDiff, 'lines' | 'truncated'> {
+  if (lines.length <= MAX_DIFF_LINES) return { lines };
+
+  const half = MAX_DIFF_LINES / 2;
+  return {
+    lines: [
+      ...lines.slice(0, half),
+      { type: 'meta', content: `… ${lines.length - MAX_DIFF_LINES} diff lines hidden …` },
+      ...lines.slice(-half),
+    ],
+    truncated: true,
+  };
+}
+
+function buildCreatedFileDiff(filePath: string, content: string): FileDiff {
+  const addedLines = content.split('\n').map((line, index): DiffLine => ({
+    type: 'add',
+    content: line,
+    newLine: index + 1,
+  }));
+  const limited = limitDiffLines(addedLines);
+
+  return {
+    path: filePath,
+    oldPath: '/dev/null',
+    newPath: filePath,
+    ...limited,
+  };
+}
+
+function buildEditedFileDiff(filePath: string, original: string, match: string, replacement: string): FileDiff {
+  const matchStart = original.indexOf(match);
+  const matchEnd = matchStart + match.length;
+  const lineStart = original.lastIndexOf('\n', Math.max(0, matchStart - 1)) + 1;
+  const nextNewline = original.indexOf('\n', matchEnd);
+  const lineEnd = nextNewline === -1 ? original.length : nextNewline;
+
+  const beforeLines = original.slice(0, lineStart).split('\n').slice(0, -1);
+  const afterLines = original.slice(nextNewline === -1 ? original.length : nextNewline + 1).split('\n');
+  const oldChangedLines = original.slice(lineStart, lineEnd).split('\n');
+  const newChangedText =
+    original.slice(lineStart, matchStart) + replacement + original.slice(matchEnd, lineEnd);
+  const newChangedLines = newChangedText.split('\n');
+  const contextBefore = beforeLines.slice(-3);
+  const contextAfter = afterLines.slice(0, 3);
+  const oldStartLine = beforeLines.length + 1;
+  const newStartLine = oldStartLine;
+  const lines: DiffLine[] = [];
+
+  contextBefore.forEach((line, index) => {
+    const lineNumber = oldStartLine - contextBefore.length + index;
+    lines.push({ type: 'context', content: line, oldLine: lineNumber, newLine: lineNumber });
+  });
+  oldChangedLines.forEach((line, index) => {
+    lines.push({ type: 'remove', content: line, oldLine: oldStartLine + index });
+  });
+  newChangedLines.forEach((line, index) => {
+    lines.push({ type: 'add', content: line, newLine: newStartLine + index });
+  });
+  contextAfter.forEach((line, index) => {
+    lines.push({
+      type: 'context',
+      content: line,
+      oldLine: oldStartLine + oldChangedLines.length + index,
+      newLine: newStartLine + newChangedLines.length + index,
+    });
+  });
+
+  return {
+    path: filePath,
+    oldPath: filePath,
+    newPath: filePath,
+    ...limitDiffLines(lines),
+  };
+}
+
+function stripCopiedLineNumbers(text: string): string {
+  return text
+    .split('\n')
+    .map((line) => {
+      const numberedLine = line.match(/^\s*\d+:\s?(.*)$/);
+      return numberedLine ? numberedLine[1] : line;
+    })
+    .join('\n');
+}
+
+function preserveFirstLineIndent(match: string, replacement: string): string {
+  const firstMatchLine = match.split('\n')[0] ?? '';
+  const indentation = firstMatchLine.match(/^\s*/)?.[0] ?? '';
+  if (!indentation || !replacement || /^\s/.test(replacement)) return replacement;
+  return indentation + replacement;
+}
+
 export const TOOL_DEFINITIONS: ToolDefinition[] = [
   {
     name: 'list_directory',
@@ -33,7 +143,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
   },
   {
     name: 'edit_file',
-    description: 'Partially edit a text or code file within the working directory by replacing target_text with replacement_text (supports code rewrites and line deletions).',
+    description: 'Partially edit a text or code file by literal text replacement. target_text must be exact text that exists in the latest read_file output, without display line numbers or regex patterns. Use separate edit_file calls for non-contiguous changes.',
     parameters: {
       type: 'object',
       properties: {
@@ -43,7 +153,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         },
         target_text: {
           type: 'string',
-          description: 'The exact existing text or code snippet to search for and replace.',
+          description: 'Exact literal text currently present in the file. This is not a regex: do not use patterns such as [0-9]+, .*, ^, or $.',
         },
         replacement_text: {
           type: 'string',
@@ -148,6 +258,44 @@ export class ToolExecutor {
     }
   }
 
+  public async previewFileDiff(name: string, args: Record<string, any>): Promise<FileDiff | undefined> {
+    if (name === 'create_file' && args.relative_path && args.content !== undefined) {
+      return buildCreatedFileDiff(args.relative_path, args.content);
+    }
+
+    if (name !== 'edit_file' || !args.relative_path || args.target_text === undefined || args.replacement_text === undefined) {
+      return undefined;
+    }
+
+    let filePath = path.resolve(this.workingDir, args.relative_path);
+    let actualRelativePath = args.relative_path;
+
+    try {
+      await fs.stat(filePath);
+    } catch (_) {
+      const foundPath = await this.findFileRecursive(this.workingDir, path.basename(args.relative_path));
+      if (!foundPath) return undefined;
+      filePath = foundPath;
+      actualRelativePath = path.relative(this.workingDir, foundPath);
+    }
+
+    try {
+      const content = await fs.readFile(filePath, 'utf-8');
+      const targetText = stripCopiedLineNumbers(args.target_text);
+      const replacementText = stripCopiedLineNumbers(args.replacement_text);
+      const match = this.findMatchingTargetCode(content, targetText);
+      if (!match) return undefined;
+      return buildEditedFileDiff(
+        actualRelativePath,
+        content,
+        match,
+        preserveFirstLineIndent(match, replacementText)
+      );
+    } catch (_) {
+      return undefined;
+    }
+  }
+
   private async findFileRecursive(dir: string, targetName: string, depth: number = 0): Promise<string | null> {
     if (depth > 3) return null;
     try {
@@ -176,13 +324,25 @@ export class ToolExecutor {
     if (!trimmedTarget) return null;
 
     const lines = content.split('\n');
+    const targetLines = trimmedTarget.split('\n');
 
-    // 1. Single line match with whitespace trimming
+    // 1. Multi-line block match that tolerates copied display line numbers and indentation drift.
+    if (targetLines.length > 1) {
+      const normalizedTargetLines = targetLines.map((line) => line.trim());
+      for (let start = 0; start <= lines.length - targetLines.length; start++) {
+        const candidateLines = lines.slice(start, start + targetLines.length);
+        if (candidateLines.every((line, index) => line.trim() === normalizedTargetLines[index])) {
+          return candidateLines.join('\n');
+        }
+      }
+    }
+
+    // 2. Single line match with whitespace trimming
     for (const line of lines) {
       if (line.trim() === trimmedTarget) return line;
     }
 
-    // 2. Substring statement matching fallback (e.g. return statement or function signature)
+    // 3. Substring statement matching fallback (e.g. return statement or function signature)
     if (trimmedTarget.includes('return ') || trimmedTarget.includes('function ') || trimmedTarget.includes('export ')) {
       for (const line of lines) {
         if (
@@ -334,16 +494,20 @@ export class ToolExecutor {
             return { error: `Path "${actualRelativePath}" is a directory, not a file.` };
           }
           const content = await fs.readFile(filePath, 'utf-8');
-          const matchToReplace = this.findMatchingTargetCode(content, target_text);
+          const cleanTargetText = stripCopiedLineNumbers(target_text);
+          const cleanReplacementText = stripCopiedLineNumbers(replacement_text);
+          const matchToReplace = this.findMatchingTargetCode(content, cleanTargetText);
 
           if (!matchToReplace) {
             return {
-              error: `Target text snippet "${target_text}" was not found in file "${actualRelativePath}". Please run read_file to inspect exact lines.`,
+              error: `Literal target_text "${target_text}" was not found in file "${actualRelativePath}". No changes were made. target_text does not support regex. Copy exact text from the latest read_file result (without line-number prefixes), and use separate edit_file calls for non-contiguous changes.`,
               file_path: actualRelativePath,
+              changed: false,
             };
           }
 
-          const updatedContent = content.replace(matchToReplace, replacement_text);
+          const replacementToWrite = preserveFirstLineIndent(matchToReplace, cleanReplacementText);
+          const updatedContent = content.replace(matchToReplace, replacementToWrite);
           await fs.writeFile(filePath, updatedContent, 'utf-8');
 
           return {
@@ -351,6 +515,7 @@ export class ToolExecutor {
             file_path: actualRelativePath,
             message: `Successfully updated ${actualRelativePath}.`,
             size_bytes: updatedContent.length,
+            diff: buildEditedFileDiff(actualRelativePath, content, matchToReplace, replacementToWrite),
           };
         } catch (err: any) {
           return { error: `Failed to edit file: ${err.message}` };
@@ -371,6 +536,7 @@ export class ToolExecutor {
             file_path: relative_path,
             message: `Successfully created file ${relative_path}.`,
             size_bytes: Buffer.byteLength(content, 'utf-8'),
+            diff: buildCreatedFileDiff(relative_path, content),
           };
         } catch (err: any) {
           return { error: `Failed to create file: ${err.message}` };

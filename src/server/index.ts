@@ -28,6 +28,8 @@ const getPublicConfig = () => ({
 type ApprovalDecision = 'approve' | 'reject';
 let pendingApprovalResolve: ((decision: ApprovalDecision) => void) | null = null;
 let terminalRequireConfirm = true; // matches default toolSettings.terminalMode
+let fileEditRequireConfirm = true; // matches default toolSettings.fileEditMode
+let activeGenerationController: AbortController | null = null;
 
 // GET /api/models - Fetch models from current or specified Ollama host
 app.get('/api/models', async (req, res) => {
@@ -91,6 +93,11 @@ app.get('/api/context', (req, res) => {
   res.json(agent.getContextManager().getContextInfo());
 });
 
+// GET /api/messages - Restore the visible chat after a browser reload
+app.get('/api/messages', (_req, res) => {
+  res.json({ messages: agent.getContextManager().getMessages() });
+});
+
 // GET /api/tools - List available agent tools
 app.get('/api/tools', (req, res) => {
   res.json({
@@ -122,11 +129,28 @@ app.post('/api/chat/tool-approval', (req, res) => {
 
 // POST /api/chat/tool-settings - Update tool approval preferences
 app.post('/api/chat/tool-settings', (req, res) => {
-  const { terminalMode } = req.body;
+  const { terminalMode, fileEditMode } = req.body;
   if (terminalMode === 'confirm' || terminalMode === 'auto') {
     terminalRequireConfirm = terminalMode === 'confirm';
   }
-  res.json({ success: true, terminalRequireConfirm });
+  if (fileEditMode === 'confirm' || fileEditMode === 'auto') {
+    fileEditRequireConfirm = fileEditMode === 'confirm';
+  }
+  res.json({ success: true, terminalRequireConfirm, fileEditRequireConfirm });
+});
+
+// POST /api/chat/cancel - Abort the active Ollama generation
+app.post('/api/chat/cancel', (_req, res) => {
+  if (!activeGenerationController) {
+    return res.status(409).json({ success: false, error: 'No active generation.' });
+  }
+
+  activeGenerationController.abort();
+  if (pendingApprovalResolve) {
+    pendingApprovalResolve('reject');
+    pendingApprovalResolve = null;
+  }
+  res.json({ success: true });
 });
 
 // POST /api/chat - Stream chat completion via Server-Sent Events (SSE)
@@ -145,10 +169,38 @@ app.post('/api/chat', async (req, res) => {
   const sendEvent = (event: string, data: any) => {
     res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
   };
+  const generationController = new AbortController();
+  activeGenerationController = generationController;
 
-  // Intercept execute_command to pause & ask for approval when required
+  // Intercept mutating tools to pause & ask for approval when required
   const executor = agent.getToolExecutor();
   const originalExecuteCommand = executor.executeCommand.bind(executor);
+  const originalExecuteTool = executor.executeTool.bind(executor);
+
+  executor.executeTool = async (name: string, args: Record<string, any>) => {
+    if (name === 'edit_file' && fileEditRequireConfirm) {
+      const diff = await executor.previewFileDiff(name, args);
+      // An edit without a valid preview cannot change the file. Execute it
+      // immediately so the tool error is returned to the model for correction
+      // instead of asking the user to approve a guaranteed no-op.
+      if (!diff) {
+        return originalExecuteTool(name, args);
+      }
+      sendEvent('tool_approval_required', { name, args, diff });
+      const decision = await new Promise<ApprovalDecision>((resolve) => {
+        pendingApprovalResolve = resolve;
+      });
+      if (decision === 'reject') {
+        return {
+          error: 'File edit rejected by user in Web UI.',
+          file_path: args.relative_path,
+          cancelled: true,
+        };
+      }
+    }
+    return originalExecuteTool(name, args);
+  };
+
   executor.executeCommand = async (command: string) => {
     if (terminalRequireConfirm) {
       // Notify client to show approval card
@@ -164,6 +216,7 @@ app.post('/api/chat', async (req, res) => {
           stderr: 'Execution cancelled by user in Web UI.',
           exitCode: 1,
           error: 'Rejected by user.',
+          cancelled: true,
         };
       }
     }
@@ -184,16 +237,25 @@ app.post('/api/chat', async (req, res) => {
       onToolEnd: (name, result) => {
         sendEvent('tool_end', { name, result });
       },
+      signal: generationController.signal,
     });
 
     sendEvent('context_update', agent.getContextManager().getContextInfo());
     sendEvent('done', { content: finalContent });
   } catch (err: any) {
-    sendEvent('error', { error: err.message });
+    if (err?.name === 'AbortError' || generationController.signal.aborted) {
+      sendEvent('cancelled', { message: 'Generation cancelled.' });
+    } else {
+      sendEvent('error', { error: err.message });
+    }
   } finally {
     // Restore original executor
+    executor.executeTool = originalExecuteTool;
     executor.executeCommand = originalExecuteCommand;
     pendingApprovalResolve = null;
+    if (activeGenerationController === generationController) {
+      activeGenerationController = null;
+    }
     res.end();
   }
 });

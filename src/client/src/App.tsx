@@ -6,7 +6,7 @@ import { SystemPromptModal } from './components/SystemPromptModal';
 import { BenchmarkView } from './components/BenchmarkView';
 import { ToolSettingsModal } from './components/ToolSettingsModal';
 import { ConnectionSettingsModal } from './components/ConnectionSettingsModal';
-import { AgentConfig, ChatMessage, ContextInfo, OllamaModelInfo, OllamaRunningModelInfo, ToolSettings } from './types';
+import { AgentConfig, ChatMessage, ContextInfo, OllamaModelInfo, OllamaRunningModelInfo, PendingApprovalCall, ToolSettings } from './types';
 
 export const App: React.FC = () => {
   const [activeView, setActiveView] = useState<'chat' | 'benchmark'>('chat');
@@ -21,7 +21,7 @@ export const App: React.FC = () => {
 
   const [toolSettings, setToolSettings] = useState<ToolSettings>({
     terminalMode: 'confirm',
-    fileEditMode: 'auto',
+    fileEditMode: 'confirm',
     enabledTools: {
       list_directory: true,
       read_file: true,
@@ -43,7 +43,9 @@ export const App: React.FC = () => {
 
   const [streamingText, setStreamingText] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
-  const [pendingApprovalCall, setPendingApprovalCall] = useState<{ name: string; args: Record<string, any> } | null>(null);
+  const [generationStatus, setGenerationStatus] =
+    useState<'idle' | 'generating' | 'completed' | 'cancelled' | 'error'>('idle');
+  const [pendingApprovalCall, setPendingApprovalCall] = useState<PendingApprovalCall | null>(null);
 
   const fetchRunningModels = async () => {
     try {
@@ -81,6 +83,12 @@ export const App: React.FC = () => {
       if (contextRes.ok) {
         const data = await contextRes.json();
         setContextInfo(data);
+      }
+
+      const messagesRes = await fetch('/api/messages');
+      if (messagesRes.ok) {
+        const data = await messagesRes.json();
+        setMessages(Array.isArray(data.messages) ? data.messages : []);
       }
     } catch (err) {
       console.error('Error loading initial app state:', err);
@@ -172,6 +180,7 @@ export const App: React.FC = () => {
   const handleNewChat = async () => {
     setMessages([]);
     setStreamingText('');
+    setGenerationStatus('idle');
     const res = await fetch('/api/clear', { method: 'POST' });
     if (res.ok) {
       const data = await res.json();
@@ -181,11 +190,14 @@ export const App: React.FC = () => {
 
   const handleUpdateToolSettings = async (newSettings: ToolSettings) => {
     setToolSettings(newSettings);
-    // Sync terminal mode to server
+    // Sync approval modes to server
     await fetch('/api/chat/tool-settings', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ terminalMode: newSettings.terminalMode }),
+      body: JSON.stringify({
+        terminalMode: newSettings.terminalMode,
+        fileEditMode: newSettings.fileEditMode,
+      }),
     });
   };
 
@@ -209,6 +221,7 @@ export const App: React.FC = () => {
 
   const handleSendMessage = async (userPrompt: string) => {
     setIsGenerating(true);
+    setGenerationStatus('generating');
     setStreamingText('');
 
     try {
@@ -253,18 +266,24 @@ export const App: React.FC = () => {
             } else if (eventType === 'context_update') {
               setContextInfo(eventData);
             } else if (eventType === 'tool_approval_required') {
-              setPendingApprovalCall({ name: eventData.name, args: eventData.args });
+              setPendingApprovalCall({ name: eventData.name, args: eventData.args, diff: eventData.diff });
             } else if (eventType === 'tool_start') {
               setPendingApprovalCall(null);
             } else if (eventType === 'done') {
               setStreamingText('');
+              setGenerationStatus('completed');
+            } else if (eventType === 'cancelled') {
+              setStreamingText('');
+              setGenerationStatus('cancelled');
             } else if (eventType === 'error') {
+              setGenerationStatus('error');
               alert(`Error: ${eventData.error}`);
             }
           }
         }
       }
     } catch (err: any) {
+      setGenerationStatus('error');
       alert(`Failed to send message: ${err.message}`);
     } finally {
       setIsGenerating(false);
@@ -274,6 +293,18 @@ export const App: React.FC = () => {
         const data = await ctxRes.json();
         setContextInfo(data);
       }
+    }
+  };
+
+  const handleCancelGeneration = async () => {
+    try {
+      const response = await fetch('/api/chat/cancel', { method: 'POST' });
+      if (!response.ok && response.status !== 409) {
+        throw new Error(`Server response error ${response.status}`);
+      }
+    } catch (err: any) {
+      setGenerationStatus('error');
+      alert(`Failed to cancel generation: ${err.message}`);
     }
   };
 
@@ -305,8 +336,10 @@ export const App: React.FC = () => {
             messages={messages}
             streamingText={streamingText}
             isGenerating={isGenerating}
+            generationStatus={generationStatus}
             pendingApprovalCall={pendingApprovalCall}
             onSendMessage={handleSendMessage}
+            onCancelGeneration={handleCancelGeneration}
             onApproveToolCall={handleApproveToolCall}
             onRejectToolCall={handleRejectToolCall}
           />

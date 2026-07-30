@@ -31,7 +31,7 @@ export async function setupMockEnvironment(): Promise<string> {
       content: JSON.stringify(
         {
           name: 'fixture-agent-studio',
-          version: '3.4.5',
+          version: '2.0.0',
           description:
             'Fixture Agent Studio is a local-first coding assistant used to validate project-research workflows',
           scripts: {

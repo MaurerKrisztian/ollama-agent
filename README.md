@@ -223,6 +223,7 @@ curl -X POST http://localhost:3001/api/benchmark/run-single \
 | `POST` | `/api/config` | Update model, temperature, working dir, system prompt |
 | `GET` | `/api/tools` | List available agent tools |
 | `GET` | `/api/context` | Get full context window info |
+| `GET` | `/api/messages` | Get stored conversation messages for UI restoration |
 | `POST` | `/api/clear` | Clear conversation history |
 | `POST` | `/api/chat` | Send message (SSE stream) |
 | `POST` | `/api/chat/tool-approval` | Approve or reject pending tool execution |

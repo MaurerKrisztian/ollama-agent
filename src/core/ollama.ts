@@ -15,6 +15,7 @@ export interface OllamaChatOptions {
   }>;
   tools?: ToolDefinition[];
   onChunk?: (chunk: string) => void;
+  signal?: AbortSignal;
 }
 
 export class OllamaClient {
@@ -262,6 +263,7 @@ export class OllamaClient {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...this.getHeaders() },
       body: JSON.stringify(requestBody),
+      signal: options.signal,
     });
 
     if (!response.ok) {

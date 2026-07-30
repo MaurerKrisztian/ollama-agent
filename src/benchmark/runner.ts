@@ -96,14 +96,16 @@ export async function runSingleBenchmarkTest(
     let seqMatches = true;
     let seqError = '';
 
+    let searchFrom = 0;
     for (let s = 0; s < expectedSeq.length; s++) {
       const reqTool = expectedSeq[s];
-      const hasMatch = actualNames.includes(reqTool);
-      if (!hasMatch) {
+      const matchIndex = actualNames.indexOf(reqTool, searchFrom);
+      if (matchIndex === -1) {
         seqMatches = false;
-        seqError = `Missing tool "${reqTool}" in multi-turn sequence. Called: [${actualNames.join(' -> ')}]`;
+        seqError = `Missing ordered occurrence ${s + 1} ("${reqTool}") in multi-turn sequence. Called: [${actualNames.join(' -> ')}]`;
         break;
       }
+      searchFrom = matchIndex + 1;
     }
 
     if (seqMatches) {
@@ -182,6 +184,27 @@ export async function runSingleBenchmarkTest(
       reason = `Failed Information Retrieval: Tool usage was correct, but the final response was missing: ${missingFacts.join(', ')}.`;
     } else {
       reason = `Passed Information Retrieval: Correct tool call and grounded response containing ${testCase.expectedResponseSubstrings.join(', ')}.`;
+    }
+  }
+
+  if (passed && testCase.expectedFileJson) {
+    const { relativePath, values } = testCase.expectedFileJson;
+    try {
+      const diskContent = await fs.readFile(path.join(mockDir, relativePath), 'utf-8');
+      const parsed = JSON.parse(diskContent) as Record<string, unknown>;
+      const mismatches = Object.entries(values)
+        .filter(([key, expected]) => parsed[key] !== expected)
+        .map(([key, expected]) => `${key}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(parsed[key])}`);
+
+      if (mismatches.length > 0) {
+        passed = false;
+        reason = `Failed JSON Disk Verification: ${mismatches.join('; ')}.`;
+      } else {
+        reason = `Passed Multi-Field JSON Edit: ${relativePath} contains all expected values.`;
+      }
+    } catch (err: any) {
+      passed = false;
+      reason = `Failed JSON Disk Verification: ${relativePath} could not be parsed (${err.message}).`;
     }
   }
 

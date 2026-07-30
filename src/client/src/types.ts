@@ -68,3 +68,22 @@ export interface ChatMessage {
   tool_call_id?: string;
   timestamp: number;
 }
+
+export interface FileDiffData {
+  path: string;
+  oldPath: string;
+  newPath: string;
+  lines: Array<{
+    type: 'context' | 'add' | 'remove' | 'meta';
+    content: string;
+    oldLine?: number;
+    newLine?: number;
+  }>;
+  truncated?: boolean;
+}
+
+export interface PendingApprovalCall {
+  name: string;
+  args: Record<string, any>;
+  diff?: FileDiffData;
+}

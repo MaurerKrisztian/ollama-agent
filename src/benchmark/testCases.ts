@@ -17,6 +17,10 @@ export interface BenchmarkTestCase {
   expectedToolSequence?: string[];
   expectedArgSubstrings?: Record<string, string>;
   expectedResponseSubstrings?: string[];
+  expectedFileJson?: {
+    relativePath: string;
+    values: Record<string, string | number | boolean | null>;
+  };
   description: string;
   objective: string;
   requiredOutput: string;
@@ -131,6 +135,50 @@ export const BENCHMARK_TEST_CASES: BenchmarkTestCase[] = [
     requiredOutput: 'Call edit_file for user_profile.json, replacing admin with editor.',
     evaluationCriteria:
       'PASSES if edit_file executes with the correct file and replacement, and editor is present on disk.',
+  },
+  {
+    id: 'test_edit_package_version_after_read',
+    name: 'Package Version Edit (Read Current Value First)',
+    category: 'file_editing',
+    prompt: 'Edit package.json and update its version to 2.0.1.',
+    expectedToolSequence: ['read_file', 'edit_file'],
+    expectedArgSubstrings: {
+      relative_path: 'package.json',
+      target_text: '2.0.0',
+      replacement_text: '2.0.1',
+    },
+    description:
+      'Reproduces the stale-target failure where the model guessed version 1.0.0 instead of inspecting the current package version.',
+    objective:
+      'Verifies edit workflows read the current file before constructing exact replacement text.',
+    requiredOutput:
+      'Call read_file on package.json, then edit_file using current version 2.0.0 as target_text and 2.0.1 as replacement_text.',
+    evaluationCriteria:
+      'PASSES only if package.json is read before editing and version 2.0.1 is verified on disk.',
+  },
+  {
+    id: 'test_edit_package_metadata',
+    name: 'Package Metadata Multi-Field Edit',
+    category: 'file_editing',
+    prompt:
+      'Read package.json, then update its version to "1.1.1", its description to "this is a good app", and its name to "ai-chat". Preserve the rest of the file.',
+    expectedToolSequence: ['read_file', 'edit_file'],
+    expectedFileJson: {
+      relativePath: 'package.json',
+      values: {
+        name: 'ai-chat',
+        version: '1.1.1',
+        description: 'this is a good app',
+      },
+    },
+    description:
+      'Verifies that the agent can inspect package.json and complete three distinct metadata edits without changing the real project file.',
+    objective:
+      'Tests a multi-edit JSON workflow requiring the agent to preserve unrelated package metadata.',
+    requiredOutput:
+      'Read the benchmark package.json, perform the required edit_file call(s), and leave valid JSON with name ai-chat, version 1.1.1, and the requested description.',
+    evaluationCriteria:
+      'PASSES only if read_file occurs before edit_file and all three final JSON properties exactly match on disk.',
   },
   {
     id: 'test_edit_nested_json_boolean',
