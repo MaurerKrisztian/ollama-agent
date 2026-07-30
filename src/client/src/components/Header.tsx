@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import {
   Bot,
   FolderOpen,
@@ -31,7 +31,8 @@ interface HeaderProps {
   onOpenSystemPrompt: () => void;
   onOpenToolSettings: () => void;
   onOpenConnectionSettings: () => void;
-  onChangeWorkingDir: (dir: string) => void;
+  onOpenWorkingDirPicker: () => void;
+  onToggleWorkingDirInfo: (enabled: boolean) => void;
   onRefreshModels: () => void;
 }
 
@@ -51,20 +52,10 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenSystemPrompt,
   onOpenToolSettings,
   onOpenConnectionSettings,
-  onChangeWorkingDir,
+  onOpenWorkingDirPicker,
+  onToggleWorkingDirInfo,
   onRefreshModels,
 }) => {
-  const [editingDir, setEditingDir] = useState(false);
-  const [dirInput, setDirInput] = useState(config.workingDir);
-
-  const handleDirSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (dirInput.trim()) {
-      onChangeWorkingDir(dirInput.trim());
-      setEditingDir(false);
-    }
-  };
-
   return (
     <header className="glass-panel" style={{ padding: '12px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', zIndex: 10 }}>
       {/* Brand & Logo */}
@@ -176,7 +167,7 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* VRAM Loaded Indicator Badge */}
         {(() => {
-          const loadedModel = runningModels.find((m) => m.name === config.model || m.model === config.model) || runningModels[0];
+          const loadedModel = runningModels.find((m) => m.name === config.model || m.model === config.model);
 
           if (isGenerating && (!loadedModel || loadedModel.size_vram === 0)) {
             return (
@@ -196,7 +187,7 @@ export const Header: React.FC<HeaderProps> = ({
                   color: 'var(--accent-amber)',
                 }}
               >
-                <Loader2 size={14} className="spin" style={{ animation: 'spin 1s linear infinite' }} />
+                <Loader2 size={14} className="spin" />
                 <span>Loading VRAM...</span>
               </div>
             );
@@ -274,35 +265,25 @@ export const Header: React.FC<HeaderProps> = ({
         {activeView === 'chat' && (
           <div style={{ background: 'rgba(15, 23, 42, 0.6)', padding: '6px 12px', borderRadius: '8px', border: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', gap: '8px' }}>
             <FolderOpen size={16} color="var(--accent-teal)" />
-            {editingDir ? (
-              <form onSubmit={handleDirSubmit} style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                <input
-                  type="text"
-                  value={dirInput}
-                  onChange={(e) => setDirInput(e.target.value)}
-                  autoFocus
-                  onBlur={() => setEditingDir(false)}
-                  style={{
-                    background: 'rgba(255, 255, 255, 0.1)',
-                    border: '1px solid var(--accent-teal)',
-                    color: '#fff',
-                    borderRadius: '4px',
-                    padding: '2px 6px',
-                    fontSize: '0.8rem',
-                    width: '180px',
-                    outline: 'none',
-                  }}
-                />
-              </form>
-            ) : (
-              <span
-                onClick={() => { setDirInput(config.workingDir); setEditingDir(true); }}
-                title="Click to change working directory"
-                style={{ fontSize: '0.8rem', color: 'var(--text-muted)', cursor: 'pointer', maxWidth: '220px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-              >
-                {config.workingDir}
-              </span>
-            )}
+            <button
+              onClick={onOpenWorkingDirPicker}
+              title="Click to browse and select a working directory"
+              style={{ background: 'none', border: 0, padding: 0, fontSize: '0.8rem', color: 'var(--text-muted)', cursor: 'pointer', maxWidth: '220px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+            >
+              {config.workingDir}
+            </button>
+            <label
+              title="Include project files, .agent/AGENTS.md, and .agent/skills metadata in the model context"
+              style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '0.75rem', color: 'var(--text-muted)', cursor: 'pointer' }}
+            >
+              <input
+                type="checkbox"
+                checked={config.showWorkingDirInfo}
+                onChange={(event) => onToggleWorkingDirInfo(event.target.checked)}
+                style={{ accentColor: 'var(--accent-teal)' }}
+              />
+              Context
+            </label>
           </div>
         )}
       </div>

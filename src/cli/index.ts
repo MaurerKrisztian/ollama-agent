@@ -16,6 +16,7 @@ program
   .option('-h, --host <url>', 'Ollama host URL', 'http://127.0.0.1:11434')
   .option('--token <token>', 'Optional bearer token (or set OLLAMA_TOKEN)', process.env.OLLAMA_TOKEN)
   .option('-d, --dir <path>', 'Working directory path', process.cwd())
+  .option('--workdir-info', 'Include project info, .agent instructions, and skill metadata in model context', false)
   .option('-y, --auto-approve', 'Auto-approve terminal command execution without asking', false)
   .option('-s, --system <prompt>', 'Custom system prompt')
   .option('-b, --benchmark', 'Run the benchmark suite instead of chat mode')
@@ -33,6 +34,7 @@ async function startCli() {
     ollamaToken: options.token,
     workingDir: options.dir,
     systemPrompt: options.system,
+    showWorkingDirInfo: options.workdirInfo,
   });
 
   let autoApprove = options.autoApprove === true;
@@ -109,7 +111,7 @@ async function startCli() {
     const validCategories = [
       'directory_reading', 'file_reading', 'file_creation', 'file_editing',
       'code_editing', 'code_search', 'discrimination', 'multi_step_workflow', 'terminal_execution', 'information_retrieval',
-      'web_search',
+      'project_context', 'web_search',
     ];
 
     if (category && !validCategories.includes(category)) {
@@ -230,6 +232,7 @@ async function startCli() {
           console.log('  /model <name>              - Switch active model');
           console.log('  /dir [path]                - View or set working directory');
           console.log('  /sys [prompt]              - View or update custom system prompt');
+          console.log('  /workdir-info [on|off]     - View or toggle working directory context');
           console.log('  /context                   - Show converted text context & stats');
           console.log('  /json                      - Output raw context JSON');
           console.log('  /clear                     - Reset current chat context');
@@ -284,6 +287,19 @@ async function startCli() {
           }
           break;
 
+        case '/workdir-info': {
+          const value = argString.trim().toLowerCase();
+          if (!value) {
+            console.log(chalk.yellow(`Working directory context: ${agent.getConfig().showWorkingDirInfo ? 'on' : 'off'}`));
+          } else if (value === 'on' || value === 'off') {
+            agent.updateConfig({ showWorkingDirInfo: value === 'on' });
+            console.log(chalk.green(`✓ Working directory context ${value}.`));
+          } else {
+            console.log(chalk.red('Usage: /workdir-info [on|off]'));
+          }
+          break;
+        }
+
         case '/context':
           const info = agent.getContextManager().getContextInfo();
           console.log(chalk.bold.magenta('\n=== CONVERSATION CONTEXT ==='));
@@ -307,6 +323,7 @@ async function startCli() {
           const validCats = [
             'directory_reading', 'file_reading', 'file_creation', 'file_editing',
             'code_editing', 'code_search', 'discrimination', 'multi_step_workflow', 'terminal_execution', 'information_retrieval',
+            'project_context', 'web_search',
           ];
           if (catFilter && !validCats.includes(catFilter)) {
             console.log(chalk.red(`\n❌ Unknown category: "${catFilter}"\n`));

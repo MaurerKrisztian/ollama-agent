@@ -1,5 +1,7 @@
 import express from 'express';
 import cors from 'cors';
+import fs from 'node:fs/promises';
+import path from 'node:path';
 import { AgentEngine } from '../core/agent.js';
 import { TOOL_DEFINITIONS } from '../core/tools.js';
 import { runBenchmarkSuite, runSingleBenchmarkTest } from '../benchmark/runner.js';
@@ -59,9 +61,39 @@ app.get('/api/config', (req, res) => {
   });
 });
 
+// GET /api/directories - Browse server-local directories for the workdir picker
+app.get('/api/directories', async (req, res) => {
+  const requestedPath =
+    typeof req.query.path === 'string' && req.query.path.trim()
+      ? req.query.path.trim()
+      : agent.getConfig().workingDir;
+  const resolvedPath = path.resolve(requestedPath);
+
+  try {
+    const stat = await fs.stat(resolvedPath);
+    if (!stat.isDirectory()) {
+      return res.status(400).json({ success: false, error: 'The selected path is not a directory.' });
+    }
+    const entries = await fs.readdir(resolvedPath, { withFileTypes: true });
+    const directories = entries
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => ({ name: entry.name, path: path.join(resolvedPath, entry.name) }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    const parent = path.dirname(resolvedPath);
+    res.json({
+      success: true,
+      current: resolvedPath,
+      parent: parent === resolvedPath ? null : parent,
+      directories,
+    });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: `Cannot browse directory: ${err.message}` });
+  }
+});
+
 // POST /api/config - Update configuration
 app.post('/api/config', (req, res) => {
-  const { model, systemPrompt, workingDir, ollamaHost, ollamaToken, temperature } = req.body;
+  const { model, systemPrompt, workingDir, showWorkingDirInfo, ollamaHost, ollamaToken, temperature } = req.body;
 
   if (ollamaHost !== undefined) {
     try {
@@ -79,7 +111,7 @@ app.post('/api/config', (req, res) => {
     }
   }
 
-  agent.updateConfig({ model, systemPrompt, workingDir, ollamaHost, ollamaToken, temperature });
+  agent.updateConfig({ model, systemPrompt, workingDir, showWorkingDirInfo, ollamaHost, ollamaToken, temperature });
 
   res.json({
     success: true,
@@ -91,6 +123,19 @@ app.post('/api/config', (req, res) => {
 // GET /api/context - Get detailed context info (raw JSON & converted text)
 app.get('/api/context', (req, res) => {
   res.json(agent.getContextManager().getContextInfo());
+});
+
+// GET /api/context/workdir - Preview the exact dynamic text appended to the system prompt
+app.get('/api/context/workdir', async (_req, res) => {
+  try {
+    const enabled = agent.getConfig().showWorkingDirInfo;
+    res.json({
+      enabled,
+      content: await agent.getWorkingDirectoryPromptContext(),
+    });
+  } catch (err: any) {
+    res.status(500).json({ enabled: agent.getConfig().showWorkingDirInfo, content: '', error: err.message });
+  }
 });
 
 // GET /api/messages - Restore the visible chat after a browser reload
@@ -200,7 +245,7 @@ app.post('/api/chat', async (req, res) => {
   const originalExecuteTool = executor.executeTool.bind(executor);
 
   executor.executeTool = async (name: string, args: Record<string, any>) => {
-    if (name === 'edit_file' && fileEditRequireConfirm) {
+    if ((name === 'edit_file' || name === 'replace_file') && fileEditRequireConfirm) {
       const diff = await executor.previewFileDiff(name, args);
       // An edit without a valid preview cannot change the file. Execute it
       // immediately so the tool error is returned to the model for correction
@@ -344,9 +389,22 @@ app.post('/api/benchmark/run-stream', async (req, res) => {
   };
 
   try {
-    const report = await runBenchmarkSuite(targetModel, targetHost, (current, total, trace) => {
-      sendEvent('test_complete', { current, total, trace });
-    }, tests, agent.getOllamaToken());
+    const report = await runBenchmarkSuite(
+      targetModel,
+      targetHost,
+      (current, total, trace) => {
+        sendEvent('test_complete', { current, total, trace });
+      },
+      tests,
+      agent.getOllamaToken(),
+      (current, total, testCase) => {
+        sendEvent('test_start', {
+          current,
+          total,
+          test: { id: testCase.id, name: testCase.name, category: testCase.category },
+        });
+      }
+    );
 
     sendEvent('benchmark_done', { report });
   } catch (err: any) {

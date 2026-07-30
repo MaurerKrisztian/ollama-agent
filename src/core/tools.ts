@@ -242,7 +242,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
   },
   {
     name: 'execute_command',
-    description: 'Execute a bash shell command in the working directory.',
+    description: 'Execute a bash shell command in the working directory only when the user asks to run it or local-system inspection requires it. Do not execute commands the user only asks to identify, quote, or copy.',
     parameters: {
       type: 'object',
       properties: {

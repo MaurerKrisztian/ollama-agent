@@ -1,5 +1,5 @@
-import React, { useState, useMemo } from 'react';
-import { X, Copy, Check, FileJson, AlignLeft, Layers } from 'lucide-react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import { X, Copy, Check, FileJson, AlignLeft, Layers, FolderTree, RefreshCw } from 'lucide-react';
 import { ContextInfo } from '../types';
 
 interface ContextSidebarProps {
@@ -90,8 +90,32 @@ export const ContextSidebar: React.FC<ContextSidebarProps> = ({
   onClose,
   contextInfo,
 }) => {
-  const [activeTab, setActiveTab] = useState<'formatted' | 'json'>('formatted');
+  const [activeTab, setActiveTab] = useState<'formatted' | 'json' | 'workdir'>('formatted');
   const [copied, setCopied] = useState(false);
+  const [workdirContext, setWorkdirContext] = useState('');
+  const [workdirEnabled, setWorkdirEnabled] = useState(false);
+  const [workdirLoading, setWorkdirLoading] = useState(false);
+  const [workdirError, setWorkdirError] = useState('');
+
+  const loadWorkdirContext = useCallback(async () => {
+    setWorkdirLoading(true);
+    setWorkdirError('');
+    try {
+      const response = await fetch('/api/context/workdir');
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Could not load working directory context.');
+      setWorkdirEnabled(Boolean(data.enabled));
+      setWorkdirContext(typeof data.content === 'string' ? data.content : '');
+    } catch (error: any) {
+      setWorkdirError(error.message);
+    } finally {
+      setWorkdirLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (isOpen && activeTab === 'workdir') void loadWorkdirContext();
+  }, [isOpen, activeTab, loadWorkdirContext]);
 
   const highlightedFormattedText = useMemo(() => {
     return contextInfo ? colorizeConvertedText(contextInfo.formattedText) : '';
@@ -104,8 +128,13 @@ export const ContextSidebar: React.FC<ContextSidebarProps> = ({
   if (!isOpen) return null;
 
   const handleCopy = () => {
-    if (!contextInfo) return;
-    const textToCopy = activeTab === 'formatted' ? contextInfo.formattedText : contextInfo.rawJson;
+    if (!contextInfo && activeTab !== 'workdir') return;
+    const textToCopy =
+      activeTab === 'formatted'
+        ? contextInfo!.formattedText
+        : activeTab === 'json'
+          ? contextInfo!.rawJson
+          : workdirContext;
     navigator.clipboard.writeText(textToCopy);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
@@ -196,43 +225,87 @@ export const ContextSidebar: React.FC<ContextSidebarProps> = ({
             <FileJson size={14} />
             <span>Raw JSON</span>
           </button>
+          <button
+            onClick={() => setActiveTab('workdir')}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '6px 12px',
+              borderRadius: '6px',
+              border: 'none',
+              fontSize: '0.8rem',
+              fontWeight: 500,
+              cursor: 'pointer',
+              background: activeTab === 'workdir' ? 'var(--accent-primary)' : 'transparent',
+              color: activeTab === 'workdir' ? '#fff' : 'var(--text-muted)',
+            }}
+          >
+            <FolderTree size={14} />
+            <span>Workdir</span>
+          </button>
         </div>
 
-        <button
-          onClick={handleCopy}
-          title="Copy to clipboard"
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '4px',
-            background: 'rgba(255, 255, 255, 0.05)',
-            border: '1px solid var(--border-color)',
-            color: 'var(--text-muted)',
-            padding: '4px 8px',
-            borderRadius: '6px',
-            fontSize: '0.75rem',
-            cursor: 'pointer',
-          }}
-        >
-          {copied ? <Check size={14} color="var(--accent-teal)" /> : <Copy size={14} />}
-          <span>{copied ? 'Copied' : 'Copy'}</span>
-        </button>
+        <div style={{ display: 'flex', gap: '6px' }}>
+          {activeTab === 'workdir' && (
+            <button
+              onClick={loadWorkdirContext}
+              disabled={workdirLoading}
+              title="Refresh working directory snapshot"
+              style={{ display: 'flex', alignItems: 'center', background: 'rgba(255, 255, 255, 0.05)', border: '1px solid var(--border-color)', color: 'var(--text-muted)', padding: '4px 8px', borderRadius: '6px', cursor: 'pointer' }}
+            >
+              <RefreshCw size={14} className={workdirLoading ? 'spin' : undefined} />
+            </button>
+          )}
+          <button
+            onClick={handleCopy}
+            title="Copy to clipboard"
+            disabled={activeTab === 'workdir' && !workdirContext}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+              background: 'rgba(255, 255, 255, 0.05)',
+              border: '1px solid var(--border-color)',
+              color: 'var(--text-muted)',
+              padding: '4px 8px',
+              borderRadius: '6px',
+              fontSize: '0.75rem',
+              cursor: 'pointer',
+            }}
+          >
+            {copied ? <Check size={14} color="var(--accent-teal)" /> : <Copy size={14} />}
+            <span>{copied ? 'Copied' : 'Copy'}</span>
+          </button>
+        </div>
       </div>
 
       {/* Code / Text Inspector View */}
       <div style={{ flex: 1, overflow: 'auto', padding: '16px 20px', background: 'rgba(10, 15, 28, 0.95)' }}>
-        {!contextInfo ? (
+        {!contextInfo && activeTab !== 'workdir' ? (
           <div style={{ color: 'var(--text-dim)', fontSize: '0.85rem' }}>No context loaded.</div>
         ) : activeTab === 'formatted' ? (
           <pre
             style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: '0.8rem', color: '#cbd5e1', lineHeight: 1.5, background: 'transparent', border: 'none', padding: 0 }}
             dangerouslySetInnerHTML={{ __html: highlightedFormattedText }}
           />
-        ) : (
+        ) : activeTab === 'json' ? (
           <pre
             style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: '0.8rem', color: '#cbd5e1', lineHeight: 1.5, background: 'transparent', border: 'none', padding: 0 }}
             dangerouslySetInnerHTML={{ __html: highlightedRawJson }}
           />
+        ) : workdirLoading ? (
+          <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Building current workdir snapshot…</div>
+        ) : workdirError ? (
+          <div style={{ color: '#f87171', fontSize: '0.85rem' }}>{workdirError}</div>
+        ) : !workdirEnabled ? (
+          <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem', lineHeight: 1.5 }}>
+            Working-directory context is disabled. Enable the <strong>Context</strong> checkbox beside the working directory to append it to model requests.
+          </div>
+        ) : (
+          <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: '0.8rem', color: '#cbd5e1', lineHeight: 1.5, background: 'transparent', border: 'none', padding: 0 }}>
+            {workdirContext}
+          </pre>
         )}
       </div>
     </aside>

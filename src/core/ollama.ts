@@ -153,6 +153,7 @@ export class OllamaClient {
     // 4. Some smaller models announce an action and then emit a bare tool JSON
     // object without the requested XML wrapper. Scan balanced JSON objects so
     // prose followed by a valid tool call still executes.
+    const balancedCallRanges: Array<{ start: number; end: number }> = [];
     for (let start = 0; start < text.length; start++) {
       if (text[start] !== '{') continue;
 
@@ -184,24 +185,38 @@ export class OllamaClient {
               const parsed = JSON.parse(candidate);
               if (
                 typeof parsed.name === 'string' &&
-                (parsed.arguments === undefined ||
-                  (parsed.arguments !== null &&
-                    typeof parsed.arguments === 'object' &&
-                    !Array.isArray(parsed.arguments)))
+                (parsed.arguments !== undefined || parsed.parameters !== undefined) &&
+                ((parsed.arguments !== null &&
+                  typeof parsed.arguments === 'object' &&
+                  !Array.isArray(parsed.arguments)) ||
+                  (parsed.parameters !== null &&
+                    typeof parsed.parameters === 'object' &&
+                    !Array.isArray(parsed.parameters)))
               ) {
                 calls.push({
-                  id: `call_${Date.now()}_0`,
+                  id: `call_${Date.now()}_${calls.length}`,
                   name: parsed.name,
                   arguments: parsed.arguments || parsed.parameters || {},
                 });
-                cleanedText = `${text.slice(0, start)}${text.slice(end + 1)}`.trim();
-                return { calls, cleanedText };
+                balancedCallRanges.push({ start, end: end + 1 });
+                start = end;
               }
             } catch (_) {}
             break;
           }
         }
       }
+    }
+
+    if (calls.length > 0) {
+      let cursor = 0;
+      const retainedParts: string[] = [];
+      for (const range of balancedCallRanges) {
+        retainedParts.push(text.slice(cursor, range.start));
+        cursor = range.end;
+      }
+      retainedParts.push(text.slice(cursor));
+      cleanedText = retainedParts.join('').trim();
     }
 
     return { calls, cleanedText };

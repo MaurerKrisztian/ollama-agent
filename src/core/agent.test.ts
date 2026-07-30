@@ -65,6 +65,32 @@ test('automatic grounding is traced before an ungrounded edit', async () => {
   );
 });
 
+test('working directory info is only added to the model system prompt when enabled', async () => {
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'local-model-chat-agent-context-'));
+  try {
+    await fs.mkdir(path.join(workspace, '.agent'));
+    await fs.writeFile(path.join(workspace, 'project.txt'), 'project\n');
+    await fs.writeFile(path.join(workspace, '.agent', 'AGENTS.md'), 'Always verify tests.\n');
+    const agent = new AgentEngine({ workingDir: workspace });
+    const prompts: string[] = [];
+    (agent as any).ollamaClient.chatStream = async (request: any) => {
+      prompts.push(request.messages[0].content);
+      return { content: 'Done.', tool_calls: [] };
+    };
+
+    await agent.sendMessage('Hello');
+    agent.updateConfig({ showWorkingDirInfo: true });
+    await agent.sendMessage('Hello again');
+
+    assert.doesNotMatch(prompts[0], /CURRENT WORKING DIRECTORY CONTEXT/);
+    assert.match(prompts[1], /CURRENT WORKING DIRECTORY CONTEXT/);
+    assert.match(prompts[1], /- project\.txt/);
+    assert.match(prompts[1], /Always verify tests\./);
+  } finally {
+    await fs.rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test('explicit numbered steps require repeated executions of the same tool', async () => {
   await withAgent(
     [

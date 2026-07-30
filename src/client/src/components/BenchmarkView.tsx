@@ -368,6 +368,7 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
               { id: 'multi_step_workflow', label: '⚡ Multi-Step Workflow' },
               { id: 'terminal_execution', label: '🐚 Terminal (Docker Sandbox)' },
               { id: 'information_retrieval', label: '🔎 Information Retrieval' },
+              { id: 'project_context', label: '🧭 Project Context' },
               { id: 'web_search', label: '🌐 Web Search' },
             ].map((cat) => {
               const catTotal = cat.id === 'all' ? testCasesInfo.length : testCasesInfo.filter((t) => t.category === cat.id).length;

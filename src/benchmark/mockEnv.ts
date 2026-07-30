@@ -98,6 +98,30 @@ export async function setupMockEnvironment(): Promise<string> {
       content: 'Deployment state: pending-review.\nOwner: platform-team.\nRegion: eu-central.\n',
     },
     {
+      filePath: '.agent/AGENTS.md',
+      content:
+        '# Fixture project instructions\n\nFor this project, the required verification command is `npm run fixture-check`.\n',
+    },
+    {
+      filePath: '.agent/skills/release-helper/SKILL.md',
+      content:
+        '---\n' +
+        'name: release-helper\n' +
+        'description: Use when preparing a version release or release checklist.\n' +
+        '---\n\n' +
+        '# Release Helper\n\n' +
+        'For a release, require a clean working tree, run `npm run fixture-check`, and include the approval code `SAPPHIRE-CHECK-42` in the checklist.\n',
+    },
+    {
+      filePath: '.agent/skills/theme-stylist/SKILL.md',
+      content:
+        '---\n' +
+        'name: theme-stylist\n' +
+        'description: Use only for UI theme, color palette, and visual styling work.\n' +
+        '---\n\n' +
+        '# Theme Stylist\n\nUse the fixture accent color `ultraviolet-77` for theme work.\n',
+    },
+    {
       filePath: 'retrieval/short_brief.txt',
       content: makeReport(12, 7, 'The launch codename is AURORA-LIME.'),
     },

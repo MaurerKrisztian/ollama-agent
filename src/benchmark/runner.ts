@@ -52,6 +52,7 @@ export async function runSingleBenchmarkTest(
     ollamaHost,
     ollamaToken,
     workingDir: mockDir,
+    showWorkingDirInfo: testCase.enableProjectContext ?? false,
   });
 
   // Wrap ToolExecutor with Docker Sandbox Isolation for benchmark terminal tasks
@@ -297,6 +298,22 @@ export async function runSingleBenchmarkTest(
       reason = `Failed Information Retrieval: Tool usage was correct, but the final response was missing: ${missingFacts.join(', ')}.`;
     } else {
       reason = `Passed Information Retrieval: Correct tool call and grounded response containing ${testCase.expectedResponseSubstrings.join(', ')}.`;
+    }
+  }
+
+  if (passed && testCase.forbiddenToolCalls?.length) {
+    const forbiddenCall = testCase.forbiddenToolCalls.find((forbidden) =>
+      actualToolsCalled.some(
+        (call) =>
+          call.name === forbidden.name &&
+          String(call.args[forbidden.argument] ?? '').includes(forbidden.substring)
+      )
+    );
+    if (forbiddenCall) {
+      passed = false;
+      reason =
+        `Failed Selective Skill Loading: "${forbiddenCall.name}" was called with ` +
+        `"${forbiddenCall.argument}" containing forbidden path "${forbiddenCall.substring}".`;
     }
   }
 

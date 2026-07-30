@@ -58,6 +58,7 @@ export interface AgentConfig {
   temperature: number;
   systemPrompt: string;
   workingDir: string;
+  showWorkingDirInfo: boolean;
 }
 
 export interface ContextInfo {

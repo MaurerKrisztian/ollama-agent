@@ -4,6 +4,7 @@ export interface AgentConfig {
   temperature: number;
   systemPrompt: string;
   workingDir: string;
+  showWorkingDirInfo: boolean;
   ollamaTokenConfigured?: boolean;
 }
 

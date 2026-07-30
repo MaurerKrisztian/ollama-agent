@@ -152,7 +152,7 @@ export const ToolSettingsModal: React.FC<ToolSettingsModalProps> = ({
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
               <Edit3 size={18} color="var(--accent-primary)" />
               <span style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--text-main)' }}>
-                File Edit Mode (`edit_file`)
+                File Edit Mode (`edit_file` / `replace_file`)
               </span>
             </div>
             <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', lineHeight: 1.5, marginBottom: '12px' }}>

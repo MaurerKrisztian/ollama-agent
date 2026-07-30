@@ -6,6 +6,7 @@ import { SystemPromptModal } from './components/SystemPromptModal';
 import { BenchmarkView } from './components/BenchmarkView';
 import { ToolSettingsModal } from './components/ToolSettingsModal';
 import { ConnectionSettingsModal } from './components/ConnectionSettingsModal';
+import { DirectoryPickerModal } from './components/DirectoryPickerModal';
 import { AgentConfig, ChatMessage, ContextInfo, OllamaModelInfo, OllamaRunningModelInfo, PendingApprovalCall, TextAttachment, ToolSettings } from './types';
 
 export const App: React.FC = () => {
@@ -17,6 +18,7 @@ export const App: React.FC = () => {
     temperature: 0.2,
     systemPrompt: 'You are an intelligent AI assistant with tools for workspace files, terminal commands, web search, and reading public web pages.',
     workingDir: '',
+    showWorkingDirInfo: false,
   });
 
   const [toolSettings, setToolSettings] = useState<ToolSettings>({
@@ -43,6 +45,7 @@ export const App: React.FC = () => {
   const [systemPromptModalOpen, setSystemPromptModalOpen] = useState(false);
   const [toolSettingsModalOpen, setToolSettingsModalOpen] = useState(false);
   const [connectionSettingsModalOpen, setConnectionSettingsModalOpen] = useState(false);
+  const [directoryPickerOpen, setDirectoryPickerOpen] = useState(false);
 
   const [streamingText, setStreamingText] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
@@ -67,8 +70,26 @@ export const App: React.FC = () => {
       const configRes = await fetch('/api/config');
       if (configRes.ok) {
         const data = await configRes.json();
-        setConfig(data.config);
-        setContextInfo(data.context);
+        const savedWorkingDir = localStorage.getItem('local-model-chat.workingDir');
+        if (savedWorkingDir && savedWorkingDir !== data.config.workingDir) {
+          const savedDirRes = await fetch('/api/config', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ workingDir: savedWorkingDir }),
+          });
+          const savedDirData = await savedDirRes.json();
+          if (savedDirRes.ok && savedDirData.success) {
+            setConfig(savedDirData.config);
+            setContextInfo(savedDirData.context);
+          } else {
+            localStorage.removeItem('local-model-chat.workingDir');
+            setConfig(data.config);
+            setContextInfo(data.context);
+          }
+        } else {
+          setConfig(data.config);
+          setContextInfo(data.context);
+        }
       }
 
       const modelsRes = await fetch('/api/models');
@@ -122,7 +143,7 @@ export const App: React.FC = () => {
     });
   };
 
-  const handleChangeWorkingDir = async (newDir: string) => {
+  const handleChangeWorkingDir = async (newDir: string): Promise<boolean> => {
     try {
       const res = await fetch('/api/config', {
         method: 'POST',
@@ -133,11 +154,29 @@ export const App: React.FC = () => {
       if (data.success) {
         setConfig(data.config);
         setContextInfo(data.context);
+        localStorage.setItem('local-model-chat.workingDir', data.config.workingDir);
+        return true;
       } else {
         alert(`Failed to set working directory: ${data.error}`);
+        return false;
       }
     } catch (err: any) {
       alert(`Error setting working dir: ${err.message}`);
+      return false;
+    }
+  };
+
+  const handleToggleWorkingDirInfo = async (enabled: boolean) => {
+    setConfig((prev) => ({ ...prev, showWorkingDirInfo: enabled }));
+    const res = await fetch('/api/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ showWorkingDirInfo: enabled }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      setConfig(data.config);
+      setContextInfo(data.context);
     }
   };
 
@@ -329,7 +368,8 @@ export const App: React.FC = () => {
         onOpenSystemPrompt={() => setSystemPromptModalOpen(true)}
         onOpenToolSettings={() => setToolSettingsModalOpen(true)}
         onOpenConnectionSettings={() => setConnectionSettingsModalOpen(true)}
-        onChangeWorkingDir={handleChangeWorkingDir}
+        onOpenWorkingDirPicker={() => setDirectoryPickerOpen(true)}
+        onToggleWorkingDirInfo={handleToggleWorkingDirInfo}
         onRefreshModels={loadInitialState}
       />
 
@@ -386,6 +426,13 @@ export const App: React.FC = () => {
         tokenConfigured={Boolean(config.ollamaTokenConfigured)}
         onClose={() => setConnectionSettingsModalOpen(false)}
         onSave={handleSaveConnection}
+      />
+
+      <DirectoryPickerModal
+        isOpen={directoryPickerOpen}
+        currentDir={config.workingDir}
+        onClose={() => setDirectoryPickerOpen(false)}
+        onSelect={handleChangeWorkingDir}
       />
     </div>
   );

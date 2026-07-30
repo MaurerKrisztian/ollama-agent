@@ -2,6 +2,7 @@ import { ContextManager } from './context.js';
 import { OllamaClient } from './ollama.js';
 import { TOOL_DEFINITIONS, ToolExecutor } from './tools.js';
 import { AgentConfig, ChatMessage, OllamaModelInfo, OllamaRunningModelInfo } from './types.js';
+import { buildWorkingDirectoryContext } from './workdir-context.js';
 
 export interface AgentSendMessageOptions {
   onChunk?: (chunk: string) => void;
@@ -124,6 +125,7 @@ export class AgentEngine {
         config?.systemPrompt ||
         'You are an intelligent AI assistant with tools for workspace files, terminal commands, web search, and reading public web pages. Use web tools for current online information and workspace tools only for local files. For stable general knowledge or math, answer directly without tools.',
       workingDir: config?.workingDir || process.cwd(),
+      showWorkingDirInfo: config?.showWorkingDirInfo ?? false,
     };
 
     this.toolExecutor = new ToolExecutor(this.config.workingDir);
@@ -132,7 +134,10 @@ export class AgentEngine {
   }
 
   public updateConfig(newConfig: AgentConfigUpdate): void {
-    this.config = { ...this.config, ...newConfig };
+    const definedConfig = Object.fromEntries(
+      Object.entries(newConfig).filter(([, value]) => value !== undefined)
+    ) as AgentConfigUpdate;
+    this.config = { ...this.config, ...definedConfig };
     if (newConfig.systemPrompt !== undefined) {
       this.contextManager.setSystemPrompt(newConfig.systemPrompt);
     }
@@ -165,6 +170,15 @@ export class AgentEngine {
 
   public getToolExecutor(): ToolExecutor {
     return this.toolExecutor;
+  }
+
+  public async getWorkingDirectoryPromptContext(): Promise<string> {
+    if (!this.config.showWorkingDirInfo) return '';
+    try {
+      return await buildWorkingDirectoryContext(this.toolExecutor.getWorkingDir());
+    } catch (error: any) {
+      return `# CURRENT WORKING DIRECTORY CONTEXT\nWorking directory context could not be read: ${error.message}`;
+    }
   }
 
   public async getAvailableModels(): Promise<OllamaModelInfo[]> {
@@ -209,8 +223,13 @@ export class AgentEngine {
       callbacks?.signal?.throwIfAborted();
       maxLoops--;
 
+      let effectiveSystemPrompt = this.contextManager.getEffectiveSystemPrompt(true);
+      if (this.config.showWorkingDirInfo) {
+        effectiveSystemPrompt += `\n\n${await this.getWorkingDirectoryPromptContext()}`;
+      }
+
       const messagesForOllama = [
-        { role: 'system', content: this.contextManager.getEffectiveSystemPrompt(true) },
+        { role: 'system', content: effectiveSystemPrompt },
         ...this.contextManager.getMessages().map((m) => ({
           role: m.role,
           content: m.content,

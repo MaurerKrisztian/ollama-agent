@@ -17,10 +17,13 @@ No cloud, no API keys, no data leaving your machine.
 - **⚡ Loading indicator** — shows while Ollama is loading model weights into VRAM
 - **Temperature slider** (0.0–1.0) in the header bar
 - **System Prompt editor** modal
+- **Optional project context** — send a bounded file list, package metadata, `.agent/AGENTS.md`, and on-demand project skill metadata to the model
+- **Working-directory picker** — browse server-local folders and remember the selected project per browser
 - **Remote Ollama connections** — configure an HTTP/HTTPS server URL with an optional bearer token
 - **⚙️ Tool Settings modal** — configure terminal approval mode, file edit mode, and toggle individual tools on/off
 - **⚠️ Tool Approval Cards** — approve or reject terminal commands inline in the chat before they run
 - **Context Inspector sidebar** — view token count, formatted context text, and raw JSON
+- **Workdir context preview** — inspect and copy the exact current project snapshot appended to model requests
 - **Tool call cards** — live display of every tool invocation and result in chat
 - **Benchmark dashboard** — run agent tool tests with per-category filtering
 
@@ -34,7 +37,7 @@ No cloud, no API keys, no data leaving your machine.
 
 ### 🧠 Core Agent Engine
 - Agentic multi-turn loop with automatic tool call parsing and execution
-- Configurable temperature, model, working directory, system prompt
+- Configurable temperature, model, working directory, system prompt, and automatic project context
 - Context window management with token estimation
 - Full streaming support via SSE
 
@@ -52,11 +55,12 @@ No cloud, no API keys, no data leaving your machine.
 | `read_web_page` | Extract a public page's main content as bounded Markdown |
 
 ### 🧪 Benchmark Suite
-- **43 targeted test cases** across 11 categories:
+- **46 targeted test cases** across 12 categories:
   - Directory Reading, File Reading, File Creation, File Editing
   - Code Editing, Code Search, Discrimination (no-tool), Multi-Step Workflow
   - **Terminal Execution (Isolated Docker Sandbox)**
   - **Information Retrieval** from short, medium, and long files with grounded-answer checks
+  - **Project Context** selective `.agent/AGENTS.md` and on-demand skill loading
 - Isolated Docker container sandbox for terminal benchmark tests — no host system risk
 - Per-category filter chips in the UI
 - CLI category filtering, for example: `npm run cli -- --benchmark --category web_search`
@@ -91,7 +95,7 @@ local-model-chat/
 │   │       └── types.ts
 │   └── benchmark/          # Benchmark runner + test cases
 │       ├── runner.ts       # AgentBenchmarkRunner + Docker sandbox
-│       └── testCases.ts    # 43 test cases across 11 categories
+│       └── testCases.ts    # 46 test cases across 12 categories
 ├── agent                   # Global CLI wrapper script (bash → local tsx)
 └── package.json
 ```
@@ -169,6 +173,7 @@ Options:
   -h, --host <url>         Ollama host URL            (default: http://127.0.0.1:11434)
   --token <token>          Optional bearer token      (or set OLLAMA_TOKEN)
   -d, --dir <path>         Working directory           (default: cwd)
+  --workdir-info           Include project info, .agent instructions and skills
   -y, --auto-approve       Skip terminal cmd confirmation
   -s, --system <prompt>    Custom system prompt
   -b, --benchmark          Run benchmark mode
@@ -185,9 +190,50 @@ Options:
 | `/context` | Show formatted context window |
 | `/json` | Show raw JSON context |
 | `/sys <prompt>` | Update system prompt |
+| `/workdir-info [on\|off]` | View or toggle automatic project context |
 | `/dir <path>` | Change working directory |
 | `/clear` | Clear conversation history |
 | `/help` | Show all slash commands |
+
+Working-directory context is off by default. Enable it with the Web UI **Context**
+checkbox, the CLI `--workdir-info` flag, `/workdir-info on`, or by posting
+`{"showWorkingDirInfo": true}` to `/api/config`. The snapshot is refreshed for
+each model request, lists at most 200 files to a depth of four, skips common
+generated directories, includes basic `package.json` metadata, and appends
+`.agent/AGENTS.md` when that file exists. Open Context Inspector → **Workdir**
+to preview or copy the exact text that would currently be appended.
+
+### Conventional `.agent` project metadata
+
+Projects can provide persistent instructions and reusable skills with this layout:
+
+```text
+.agent/
+├── AGENTS.md
+└── skills/
+    └── release-helper/
+        └── SKILL.md
+```
+
+`AGENTS.md` is included directly in the workdir context. Each `SKILL.md` should
+use YAML frontmatter containing `name` and `description`:
+
+```md
+---
+name: release-helper
+description: Prepare and verify project releases.
+---
+
+# Release workflow
+
+Detailed instructions...
+```
+
+Only the skill name, description, and path are appended automatically. When a
+skill matches the task, the model is instructed to read
+`.agent/skills/<skill-name>/SKILL.md` with `read_file` before using it. This
+keeps detailed skill instructions available without adding every skill’s full
+contents to every prompt.
 
 ---
 
@@ -234,9 +280,10 @@ curl -X POST http://localhost:3001/api/benchmark/run-single \
 | `GET` | `/api/models` | List installed Ollama models |
 | `GET` | `/api/models/running` | Get models currently loaded in VRAM |
 | `GET` | `/api/config` | Get current agent configuration |
-| `POST` | `/api/config` | Update model, temperature, working dir, system prompt |
+| `POST` | `/api/config` | Update model, temperature, working dir, system prompt, project context |
 | `GET` | `/api/tools` | List available agent tools |
 | `GET` | `/api/context` | Get full context window info |
+| `GET` | `/api/context/workdir` | Preview the exact dynamic workdir context |
 | `GET` | `/api/messages` | Get stored conversation messages for UI restoration |
 | `POST` | `/api/clear` | Clear conversation history |
 | `POST` | `/api/chat` | Send message (SSE stream) |

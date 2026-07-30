@@ -36,7 +36,7 @@ export class ContextManager {
       '# TOOL CALLING PROTOCOL INSTRUCTIONS',
       'You have access to tools for workspace files, terminal commands, web search, and reading public web pages as clean Markdown.',
       'RULE 1: Use tools when the user prompt requires workspace inspection or changes, terminal commands, or current/public web information. For stable general knowledge or math, respond directly without tools.',
-      'RULE 1b: When the user asks to run/execute a terminal command or inspect the local system (e.g. GPU info, disk usage, processes), use execute_command immediately.',
+      'RULE 1b (Terminal Authorization): Use execute_command immediately when the user explicitly asks to run/execute a terminal command or inspect the local system (e.g. GPU info, disk usage, processes). Asking what a command is, which command is configured, or requesting command text to copy is informational and does NOT authorize execution; answer from available context without running it.',
       'RULE 1c (Web): Use web_search with a short query to find sources. To inspect a result, copy its URL exactly into read_web_page. Never use execute_command for web access. Web page results are Markdown, not HTML.',
       'RULE 1d (Direct URL): If the user provides a URL and asks to read, inspect, summarize, or retrieve its content, call read_web_page directly. Do not search for a URL that is already provided.',
       'RULE 1e (Tool Separation): read_file is only for local workspace files. Never use read_file, list_directory, or grep_search to read a website or recover from a completed read_web_page call.',

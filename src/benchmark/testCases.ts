@@ -12,12 +12,19 @@ export interface BenchmarkTestCase {
     | 'multi_step_workflow'
     | 'terminal_execution'
     | 'information_retrieval'
+    | 'project_context'
     | 'web_search';
   prompt: string;
   expectedTool?: string | null;
   expectedToolSequence?: string[];
   expectedArgSubstrings?: Record<string, string>;
   expectedResponseSubstrings?: string[];
+  enableProjectContext?: boolean;
+  forbiddenToolCalls?: Array<{
+    name: string;
+    argument: string;
+    substring: string;
+  }>;
   expectedFileJson?: {
     relativePath: string;
     values: Record<string, string | number | boolean | null>;
@@ -584,7 +591,65 @@ export const BENCHMARK_TEST_CASES: BenchmarkTestCase[] = [
     evaluationCriteria: 'PASSES only if read_file is called for long_archive.txt and the final response contains ORBIT-CEDAR-731.',
   },
 
-  // --- CATEGORY 10: WEB SEARCH & PAGE READING ---
+  // --- CATEGORY 10: PROJECT CONTEXT & ON-DEMAND SKILLS ---
+  {
+    id: 'test_project_context_agents_instructions',
+    name: 'Project Context (.agent/AGENTS.md Instructions)',
+    category: 'project_context',
+    prompt:
+      'Which verification script is specified by the project instructions? Quote its name only; this is an information question, not a request to execute anything.',
+    expectedTool: null,
+    expectedResponseSubstrings: ['npm run fixture-check'],
+    enableProjectContext: true,
+    description:
+      'Verifies that `.agent/AGENTS.md` is injected into project context and can be followed without an unnecessary file read.',
+    objective: 'Tests automatic project-level instruction grounding.',
+    requiredOutput: 'Answer with npm run fixture-check without invoking a tool.',
+    evaluationCriteria:
+      'PASSES only if the answer contains npm run fixture-check and no tool is called.',
+  },
+  {
+    id: 'test_project_context_reads_relevant_skill',
+    name: 'Project Context (Read Relevant Skill On Demand)',
+    category: 'project_context',
+    prompt:
+      'We are preparing version 3.0. What project-specific release checklist should I follow?',
+    expectedTool: 'read_file',
+    expectedArgSubstrings: { relative_path: '.agent/skills/release-helper/SKILL.md' },
+    expectedResponseSubstrings: ['SAPPHIRE-CHECK-42', 'npm run fixture-check'],
+    enableProjectContext: true,
+    forbiddenToolCalls: [
+      {
+        name: 'read_file',
+        argument: 'relative_path',
+        substring: '.agent/skills/theme-stylist/SKILL.md',
+      },
+    ],
+    description:
+      'Verifies that matching skill metadata triggers reading the full relevant SKILL.md, without reading an unrelated skill.',
+    objective: 'Tests selective, on-demand project skill loading.',
+    requiredOutput:
+      'Read .agent/skills/release-helper/SKILL.md and answer with its checklist, including SAPPHIRE-CHECK-42; do not read theme-stylist.',
+    evaluationCriteria:
+      'PASSES only if release-helper/SKILL.md is read, theme-stylist/SKILL.md is not read, and the grounded answer contains both required facts.',
+  },
+  {
+    id: 'test_project_context_skips_irrelevant_skills',
+    name: 'Project Context (Skip Irrelevant Skills)',
+    category: 'project_context',
+    prompt: 'What is the capital of Japan?',
+    expectedTool: null,
+    expectedResponseSubstrings: ['Tokyo'],
+    enableProjectContext: true,
+    description:
+      'Verifies that the presence of advertised project skills does not cause irrelevant skill reads.',
+    objective: 'Tests discrimination against unnecessary project skill loading.',
+    requiredOutput: 'Answer Tokyo directly without invoking read_file or any other tool.',
+    evaluationCriteria:
+      'PASSES only if the model answers Tokyo without any tool calls.',
+  },
+
+  // --- CATEGORY 11: WEB SEARCH & PAGE READING ---
   {
     id: 'test_web_search_official_docs',
     name: 'Web Search (Official Ollama Documentation)',
