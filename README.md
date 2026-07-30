@@ -16,6 +16,7 @@ No cloud, no API keys, no data leaving your machine.
 - **⚡ Loading indicator** — shows while Ollama is loading model weights into VRAM
 - **Temperature slider** (0.0–1.0) in the header bar
 - **System Prompt editor** modal
+- **Remote Ollama connections** — configure an HTTP/HTTPS server URL with an optional bearer token
 - **⚙️ Tool Settings modal** — configure terminal approval mode, file edit mode, and toggle individual tools on/off
 - **⚠️ Tool Approval Cards** — approve or reject terminal commands inline in the chat before they run
 - **Context Inspector sidebar** — view token count, formatted context text, and raw JSON
@@ -160,6 +161,7 @@ Options:
   -m, --model <name>       Ollama model name         (default: qwen2.5-coder:7b)
   -t, --temperature <val>  Temperature 0.0–1.0       (default: 0.2)
   -h, --host <url>         Ollama host URL            (default: http://127.0.0.1:11434)
+  --token <token>          Optional bearer token      (or set OLLAMA_TOKEN)
   -d, --dir <path>         Working directory           (default: cwd)
   -y, --auto-approve       Skip terminal cmd confirmation
   -s, --system <prompt>    Custom system prompt

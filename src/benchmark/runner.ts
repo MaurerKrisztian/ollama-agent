@@ -36,7 +36,8 @@ export interface BenchmarkReport {
 export async function runSingleBenchmarkTest(
   testId: string,
   modelName: string,
-  ollamaHost: string = 'http://127.0.0.1:11434'
+  ollamaHost: string = 'http://127.0.0.1:11434',
+  ollamaToken?: string
 ): Promise<TestResultTrace> {
   const testCase = BENCHMARK_TEST_CASES.find((t) => t.id === testId);
   if (!testCase) {
@@ -49,6 +50,7 @@ export async function runSingleBenchmarkTest(
   const agent = new AgentEngine({
     model: modelName,
     ollamaHost,
+    ollamaToken,
     workingDir: mockDir,
   });
 
@@ -260,7 +262,8 @@ export async function runBenchmarkSuite(
   modelName: string,
   ollamaHost: string = 'http://127.0.0.1:11434',
   onProgress?: (current: number, total: number, result: TestResultTrace) => void,
-  testCases: BenchmarkTestCase[] = BENCHMARK_TEST_CASES
+  testCases: BenchmarkTestCase[] = BENCHMARK_TEST_CASES,
+  ollamaToken?: string
 ): Promise<BenchmarkReport> {
   const startTime = Date.now();
   const mockDir = await setupMockEnvironment();
@@ -270,7 +273,7 @@ export async function runBenchmarkSuite(
 
   for (let i = 0; i < testCases.length; i++) {
     const testCase = testCases[i];
-    const trace = await runSingleBenchmarkTest(testCase.id, modelName, ollamaHost);
+    const trace = await runSingleBenchmarkTest(testCase.id, modelName, ollamaHost, ollamaToken);
     if (trace.passed) passCount++;
     results.push(trace);
 

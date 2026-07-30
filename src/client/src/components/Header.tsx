@@ -11,6 +11,7 @@ import {
   Zap,
   Loader2,
   Wrench,
+  Server,
 } from 'lucide-react';
 import { AgentConfig, ContextInfo, OllamaModelInfo, OllamaRunningModelInfo } from '../types';
 
@@ -29,6 +30,7 @@ interface HeaderProps {
   onNewChat: () => void;
   onOpenSystemPrompt: () => void;
   onOpenToolSettings: () => void;
+  onOpenConnectionSettings: () => void;
   onChangeWorkingDir: (dir: string) => void;
   onRefreshModels: () => void;
 }
@@ -48,6 +50,7 @@ export const Header: React.FC<HeaderProps> = ({
   onNewChat,
   onOpenSystemPrompt,
   onOpenToolSettings,
+  onOpenConnectionSettings,
   onChangeWorkingDir,
   onRefreshModels,
 }) => {
@@ -308,6 +311,20 @@ export const Header: React.FC<HeaderProps> = ({
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
         {activeView === 'chat' && (
           <>
+            <button
+              onClick={onOpenConnectionSettings}
+              title="Ollama Server Connection"
+              style={{
+                display: 'flex', alignItems: 'center', gap: '6px',
+                background: 'rgba(255, 255, 255, 0.05)', border: '1px solid var(--border-color)',
+                color: 'var(--text-main)', padding: '8px 12px', borderRadius: '8px',
+                fontSize: '0.85rem', fontWeight: 500, cursor: 'pointer',
+              }}
+            >
+              <Server size={15} color="var(--accent-teal)" />
+              <span>Connection</span>
+            </button>
+
             <button
               onClick={onOpenToolSettings}
               title="Tool Approval & Active Toolset Settings"

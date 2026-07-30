@@ -5,6 +5,7 @@ import { ContextSidebar } from './components/ContextSidebar';
 import { SystemPromptModal } from './components/SystemPromptModal';
 import { BenchmarkView } from './components/BenchmarkView';
 import { ToolSettingsModal } from './components/ToolSettingsModal';
+import { ConnectionSettingsModal } from './components/ConnectionSettingsModal';
 import { AgentConfig, ChatMessage, ContextInfo, OllamaModelInfo, OllamaRunningModelInfo, ToolSettings } from './types';
 
 export const App: React.FC = () => {
@@ -38,6 +39,7 @@ export const App: React.FC = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [systemPromptModalOpen, setSystemPromptModalOpen] = useState(false);
   const [toolSettingsModalOpen, setToolSettingsModalOpen] = useState(false);
+  const [connectionSettingsModalOpen, setConnectionSettingsModalOpen] = useState(false);
 
   const [streamingText, setStreamingText] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
@@ -139,6 +141,32 @@ export const App: React.FC = () => {
       const data = await res.json();
       setContextInfo(data.context);
     }
+  };
+
+  const handleSaveConnection = async (ollamaHost: string, ollamaToken?: string) => {
+    const body: Record<string, string> = { ollamaHost };
+    if (ollamaToken !== undefined) body.ollamaToken = ollamaToken;
+
+    const configRes = await fetch('/api/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const configData = await configRes.json();
+    if (!configRes.ok || !configData.success) {
+      throw new Error(configData.error || 'Could not save Ollama connection.');
+    }
+
+    const modelsRes = await fetch('/api/models');
+    const modelsData = await modelsRes.json();
+    if (!modelsRes.ok || !modelsData.success) {
+      throw new Error(modelsData.error || 'Saved, but could not connect to the Ollama server.');
+    }
+
+    setConfig(configData.config);
+    setModels(modelsData.models || []);
+    setRunningModels([]);
+    await fetchRunningModels();
   };
 
   const handleNewChat = async () => {
@@ -266,6 +294,7 @@ export const App: React.FC = () => {
         onNewChat={handleNewChat}
         onOpenSystemPrompt={() => setSystemPromptModalOpen(true)}
         onOpenToolSettings={() => setToolSettingsModalOpen(true)}
+        onOpenConnectionSettings={() => setConnectionSettingsModalOpen(true)}
         onChangeWorkingDir={handleChangeWorkingDir}
         onRefreshModels={loadInitialState}
       />
@@ -308,6 +337,14 @@ export const App: React.FC = () => {
         onClose={() => setToolSettingsModalOpen(false)}
         settings={toolSettings}
         onUpdateSettings={handleUpdateToolSettings}
+      />
+
+      <ConnectionSettingsModal
+        isOpen={connectionSettingsModalOpen}
+        host={config.ollamaHost}
+        tokenConfigured={Boolean(config.ollamaTokenConfigured)}
+        onClose={() => setConnectionSettingsModalOpen(false)}
+        onSave={handleSaveConnection}
       />
     </div>
   );

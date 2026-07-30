@@ -14,8 +14,14 @@ app.use(express.json());
 // Initialize shared Agent Engine
 const agent = new AgentEngine({
   model: 'qwen2.5-coder:7b',
-  ollamaHost: 'http://127.0.0.1:11434',
+  ollamaHost: process.env.OLLAMA_HOST || 'http://127.0.0.1:11434',
+  ollamaToken: process.env.OLLAMA_TOKEN,
   workingDir: process.cwd(),
+});
+
+const getPublicConfig = () => ({
+  ...agent.getConfig(),
+  ollamaTokenConfigured: agent.hasOllamaToken(),
 });
 
 // Per-session tool approval state
@@ -26,10 +32,6 @@ let terminalRequireConfirm = true; // matches default toolSettings.terminalMode
 // GET /api/models - Fetch models from current or specified Ollama host
 app.get('/api/models', async (req, res) => {
   try {
-    const customHost = req.query.host as string;
-    if (customHost) {
-      agent.updateConfig({ ollamaHost: customHost });
-    }
     const models = await agent.getAvailableModels();
     res.json({ success: true, models, activeModel: agent.getConfig().model });
   } catch (err: any) {
@@ -50,14 +52,23 @@ app.get('/api/models/running', async (req, res) => {
 // GET /api/config - Get current configuration & context stats
 app.get('/api/config', (req, res) => {
   res.json({
-    config: agent.getConfig(),
+    config: getPublicConfig(),
     context: agent.getContextManager().getContextInfo(),
   });
 });
 
 // POST /api/config - Update configuration
 app.post('/api/config', (req, res) => {
-  const { model, systemPrompt, workingDir, ollamaHost, temperature } = req.body;
+  const { model, systemPrompt, workingDir, ollamaHost, ollamaToken, temperature } = req.body;
+
+  if (ollamaHost !== undefined) {
+    try {
+      const parsed = new URL(ollamaHost);
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') throw new Error();
+    } catch (_) {
+      return res.status(400).json({ success: false, error: 'Ollama server URL must be a valid HTTP or HTTPS URL.' });
+    }
+  }
 
   if (workingDir) {
     const dirResult = agent.getToolExecutor().setWorkingDir(workingDir);
@@ -66,11 +77,11 @@ app.post('/api/config', (req, res) => {
     }
   }
 
-  agent.updateConfig({ model, systemPrompt, workingDir, ollamaHost, temperature });
+  agent.updateConfig({ model, systemPrompt, workingDir, ollamaHost, ollamaToken, temperature });
 
   res.json({
     success: true,
-    config: agent.getConfig(),
+    config: getPublicConfig(),
     context: agent.getContextManager().getContextInfo(),
   });
 });
@@ -203,7 +214,7 @@ app.post('/api/benchmark/run', async (req, res) => {
     : BENCHMARK_TEST_CASES;
 
   try {
-    const report = await runBenchmarkSuite(targetModel, targetHost, undefined, tests);
+    const report = await runBenchmarkSuite(targetModel, targetHost, undefined, tests, agent.getOllamaToken());
     res.json({ success: true, report });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
@@ -221,7 +232,7 @@ app.post('/api/benchmark/run-single', async (req, res) => {
   const targetHost = host || agent.getConfig().ollamaHost;
 
   try {
-    const trace = await runSingleBenchmarkTest(testId, targetModel, targetHost);
+    const trace = await runSingleBenchmarkTest(testId, targetModel, targetHost, agent.getOllamaToken());
     res.json({ success: true, trace });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
@@ -249,7 +260,7 @@ app.post('/api/benchmark/run-stream', async (req, res) => {
   try {
     const report = await runBenchmarkSuite(targetModel, targetHost, (current, total, trace) => {
       sendEvent('test_complete', { current, total, trace });
-    }, tests);
+    }, tests, agent.getOllamaToken());
 
     sendEvent('benchmark_done', { report });
   } catch (err: any) {

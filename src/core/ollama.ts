@@ -4,12 +4,14 @@ export interface OllamaChatOptions {
   host: string;
   model: string;
   temperature?: number;
+  contextWindow?: number;
   messages: Array<{
     role: string;
     content: string;
     name?: string;
     images?: string[];
     tool_calls?: any[];
+    tool_call_id?: string;
   }>;
   tools?: ToolDefinition[];
   onChunk?: (chunk: string) => void;
@@ -17,9 +19,11 @@ export interface OllamaChatOptions {
 
 export class OllamaClient {
   private host: string;
+  private authToken?: string;
 
-  constructor(host: string = 'http://127.0.0.1:11434') {
+  constructor(host: string = 'http://127.0.0.1:11434', authToken?: string) {
     this.host = host.replace(/\/$/, '');
+    this.authToken = authToken?.trim() || undefined;
   }
 
   public setHost(host: string) {
@@ -30,9 +34,25 @@ export class OllamaClient {
     return this.host;
   }
 
+  public setAuthToken(token?: string): void {
+    this.authToken = token?.trim() || undefined;
+  }
+
+  public hasAuthToken(): boolean {
+    return Boolean(this.authToken);
+  }
+
+  public getAuthToken(): string | undefined {
+    return this.authToken;
+  }
+
+  private getHeaders(): Record<string, string> {
+    return this.authToken ? { Authorization: `Bearer ${this.authToken}` } : {};
+  }
+
   public async getModels(): Promise<OllamaModelInfo[]> {
     try {
-      const res = await fetch(`${this.host}/api/tags`);
+      const res = await fetch(`${this.host}/api/tags`, { headers: this.getHeaders() });
       if (!res.ok) {
         throw new Error(`Ollama server returned HTTP ${res.status}`);
       }
@@ -48,7 +68,7 @@ export class OllamaClient {
    */
   public async getRunningModels(): Promise<OllamaRunningModelInfo[]> {
     try {
-      const res = await fetch(`${this.host}/api/ps`);
+      const res = await fetch(`${this.host}/api/ps`, { headers: this.getHeaders() });
       if (!res.ok) {
         return [];
       }
@@ -140,12 +160,19 @@ export class OllamaClient {
 
     // Map system prompt & tool messages to Ollama format
     const formattedMessages = options.messages.map((m) => {
+      const hasToolCalls = Boolean(m.tool_calls && m.tool_calls.length > 0);
       const msgObj: any = {
         role: m.role,
-        content: m.content,
+        // Qwen's Ollama template renders assistant content OR tool calls.
+        // If both are present, content wins and the tool-call history is lost,
+        // leaving subsequent tool results disconnected from their requests.
+        content: m.role === 'assistant' && hasToolCalls ? '' : m.content,
       };
-      if (m.tool_calls) {
-        msgObj.tool_calls = m.tool_calls.map((tc) => ({
+      if (m.role === 'tool' && m.name) {
+        msgObj.tool_name = m.name;
+      }
+      if (hasToolCalls) {
+        msgObj.tool_calls = m.tool_calls!.map((tc) => ({
           function: {
             name: tc.name,
             arguments: tc.arguments,
@@ -161,9 +188,10 @@ export class OllamaClient {
       stream: true,
     };
 
-    if (options.temperature !== undefined) {
-      requestBody.options = { temperature: options.temperature };
-    }
+    requestBody.options = {
+      ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
+      num_ctx: options.contextWindow ?? 16384,
+    };
 
     if (options.tools && options.tools.length > 0) {
       requestBody.tools = options.tools.map((t) => ({
@@ -178,7 +206,7 @@ export class OllamaClient {
 
     const response = await fetch(endpoint, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...this.getHeaders() },
       body: JSON.stringify(requestBody),
     });
 

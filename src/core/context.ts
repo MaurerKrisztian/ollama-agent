@@ -25,7 +25,7 @@ export class ContextManager {
   /**
    * Generates effective system prompt with 5-tool core rules & generic syntax examples
    */
-  public getEffectiveSystemPrompt(): string {
+  public getEffectiveSystemPrompt(useNativeTools: boolean = false): string {
     if (!this.tools || this.tools.length === 0) {
       return this.systemPrompt;
     }
@@ -41,9 +41,19 @@ export class ContextManager {
       'RULE 3 (Line Deletion): To remove/delete lines of code or text from a file, set `replacement_text` to an empty string `""`.',
       'RULE 4 (Clean Function Rewriting): When rewriting a function, class, or code block, include the COMPLETE existing code block in `target_text` (from header to closing brace `}`) so the entire block is replaced cleanly without leaving orphaned lines.',
       'RULE 5 (Multi-Step Workflows): Complete multi-step tool workflows fully. When asked to inspect/read then edit/create, immediately issue the `<tool_call>` tag for the next action without asking for confirmation.',
-      '',
-      '## Available Tools & Schemas:',
+      'RULE 6 (No Deferred Actions): Never announce a future tool action without invoking it in the same response. Do not end a response between requested workflow steps.',
     ];
+
+    if (useNativeTools) {
+      lines.push(
+        '',
+        'Tool definitions and their parameter schemas are supplied separately by the runtime.',
+        'Use the runtime-native structured tool-call format. Do not wrap tool calls in Markdown or describe a future tool call without making it.'
+      );
+      return lines.join('\n');
+    }
+
+    lines.push('', '## Available Tools & Schemas:');
 
     this.tools.forEach((t) => {
       lines.push(`- Tool Name: "${t.name}"`);

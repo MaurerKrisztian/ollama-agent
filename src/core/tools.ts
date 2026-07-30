@@ -302,7 +302,6 @@ export class ToolExecutor {
           return {
             file_path: actualRelativePath,
             content: numberedLines,
-            raw_content: rawContent,
             size_bytes: stats.size,
           };
         } catch (err: any) {

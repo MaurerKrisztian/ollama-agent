@@ -1,6 +1,6 @@
 import { ContextManager } from './context.js';
 import { OllamaClient } from './ollama.js';
-import { ToolExecutor } from './tools.js';
+import { TOOL_DEFINITIONS, ToolExecutor } from './tools.js';
 import { AgentConfig, ChatMessage, OllamaModelInfo, OllamaRunningModelInfo } from './types.js';
 
 export interface AgentSendMessageOptions {
@@ -10,13 +10,38 @@ export interface AgentSendMessageOptions {
   onMessageAdded?: (message: ChatMessage) => void;
 }
 
+export type AgentConfigUpdate = Partial<AgentConfig> & { ollamaToken?: string };
+
+function inferExplicitlyRequestedTools(prompt: string): string[] {
+  const normalized = prompt.toLowerCase();
+
+  // Explicit shell requests should not be reinterpreted as file-tool requests
+  // merely because the command itself contains words such as "read" or "list".
+  if (/\bexecute_command\b|\bterminal\b|\bshell command\b|\brun (?:a |the )?command\b/.test(normalized)) {
+    return ['execute_command'];
+  }
+
+  const requested: string[] = [];
+  const add = (toolName: string) => {
+    if (!requested.includes(toolName)) requested.push(toolName);
+  };
+
+  if (/\b(?:list|show)\b.*\b(?:directory|folder|files)\b/.test(normalized)) add('list_directory');
+  if (/\b(?:search|grep|find)\b.*\b(?:workspace|code|file|word|symbol|for)\b/.test(normalized)) add('grep_search');
+  if (/\b(?:read|inspect|open)\b/.test(normalized)) add('read_file');
+  if (/\b(?:create|write|make)\b.*\b(?:new )?(?:file|implementation)\b/.test(normalized)) add('create_file');
+  if (/\b(?:edit|rewrite|refactor|update|change|delete|remove)\b/.test(normalized)) add('edit_file');
+
+  return requested;
+}
+
 export class AgentEngine {
   private config: AgentConfig;
   private contextManager: ContextManager;
   private ollamaClient: OllamaClient;
   private toolExecutor: ToolExecutor;
 
-  constructor(config?: Partial<AgentConfig>) {
+  constructor(config?: AgentConfigUpdate) {
     this.config = {
       ollamaHost: config?.ollamaHost || 'http://127.0.0.1:11434',
       model: config?.model || 'qwen2.5-coder:7b',
@@ -29,16 +54,19 @@ export class AgentEngine {
 
     this.toolExecutor = new ToolExecutor(this.config.workingDir);
     this.contextManager = new ContextManager(this.config.systemPrompt);
-    this.ollamaClient = new OllamaClient(this.config.ollamaHost);
+    this.ollamaClient = new OllamaClient(this.config.ollamaHost, config?.ollamaToken);
   }
 
-  public updateConfig(newConfig: Partial<AgentConfig>): void {
+  public updateConfig(newConfig: AgentConfigUpdate): void {
     this.config = { ...this.config, ...newConfig };
     if (newConfig.systemPrompt !== undefined) {
       this.contextManager.setSystemPrompt(newConfig.systemPrompt);
     }
     if (newConfig.ollamaHost !== undefined) {
       this.ollamaClient.setHost(newConfig.ollamaHost);
+    }
+    if (newConfig.ollamaToken !== undefined) {
+      this.ollamaClient.setAuthToken(newConfig.ollamaToken);
     }
     if (newConfig.workingDir !== undefined) {
       this.toolExecutor.setWorkingDir(newConfig.workingDir);
@@ -47,6 +75,14 @@ export class AgentEngine {
 
   public getConfig(): AgentConfig {
     return { ...this.config, workingDir: this.toolExecutor.getWorkingDir() };
+  }
+
+  public hasOllamaToken(): boolean {
+    return this.ollamaClient.hasAuthToken();
+  }
+
+  public getOllamaToken(): string | undefined {
+    return this.ollamaClient.getAuthToken();
   }
 
   public getContextManager(): ContextManager {
@@ -79,12 +115,15 @@ export class AgentEngine {
 
     let maxLoops = 6;
     let finalAssistantResponse = '';
+    const requestedTools = inferExplicitlyRequestedTools(userMessage);
+    const executedToolNames = new Set<string>();
+    let continuationReminder: string | null = null;
 
     while (maxLoops > 0) {
       maxLoops--;
 
       const messagesForOllama = [
-        { role: 'system', content: this.contextManager.getEffectiveSystemPrompt() },
+        { role: 'system', content: this.contextManager.getEffectiveSystemPrompt(true) },
         ...this.contextManager.getMessages().map((m) => ({
           role: m.role,
           content: m.content,
@@ -93,11 +132,26 @@ export class AgentEngine {
         })),
       ];
 
+      const isContinuationAttempt = continuationReminder !== null;
+      if (continuationReminder) {
+        messagesForOllama.push({
+          role: 'user',
+          content: continuationReminder,
+          name: undefined,
+          tool_calls: undefined,
+        });
+        continuationReminder = null;
+      }
+
+      const requestedWorkflowComplete =
+        requestedTools.length > 0 && requestedTools.every((toolName) => executedToolNames.has(toolName));
+
       const res = await this.ollamaClient.chatStream({
         host: this.config.ollamaHost,
         model: this.config.model,
-        temperature: this.config.temperature,
+        temperature: isContinuationAttempt ? 0 : this.config.temperature,
         messages: messagesForOllama,
+        tools: requestedWorkflowComplete ? undefined : TOOL_DEFINITIONS,
         onChunk: callbacks?.onChunk,
       });
 
@@ -116,6 +170,8 @@ export class AgentEngine {
       // If Assistant requested tool calls, execute them sequentially
       if (res.tool_calls && res.tool_calls.length > 0) {
         for (const call of res.tool_calls) {
+          executedToolNames.add(call.name);
+
           if (callbacks?.onToolStart) {
             callbacks.onToolStart(call.name, call.arguments);
           }
@@ -137,7 +193,22 @@ export class AgentEngine {
           });
           if (callbacks?.onMessageAdded) callbacks.onMessageAdded(toolMsg);
         }
+
+        const workflowCompletedAfterThisCall =
+          requestedTools.length > 0 && requestedTools.every((toolName) => executedToolNames.has(toolName));
+        if (workflowCompletedAfterThisCall && maxLoops > 0) {
+          continuationReminder = `All requested tool operations are complete. Now answer the user's original request directly using the tool results. Do not call another tool and do not merely summarize what you did.\n\nOriginal request: ${userMessage}`;
+        }
       } else {
+        const missingRequestedTools = requestedTools.filter((toolName) => !executedToolNames.has(toolName));
+
+        if (missingRequestedTools.length > 0 && maxLoops > 0) {
+          continuationReminder = `The requested workflow is unfinished. Your entire response must be a structured native tool call with no prose. Invoke the remaining required tool${
+            missingRequestedTools.length === 1 ? '' : 's'
+          } now: ${missingRequestedTools.join(', ')}. Use the information already returned by previous tools.`;
+          continue;
+        }
+
         // No tool calls requested, end conversation turn
         break;
       }

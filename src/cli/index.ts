@@ -14,6 +14,7 @@ program
   .option('-m, --model <name>', 'Ollama model name', 'qwen2.5-coder:7b')
   .option('-t, --temperature <val>', 'Model temperature (0.0 to 1.0)', '0.2')
   .option('-h, --host <url>', 'Ollama host URL', 'http://127.0.0.1:11434')
+  .option('--token <token>', 'Optional bearer token (or set OLLAMA_TOKEN)', process.env.OLLAMA_TOKEN)
   .option('-d, --dir <path>', 'Working directory path', process.cwd())
   .option('-y, --auto-approve', 'Auto-approve terminal command execution without asking', false)
   .option('-s, --system <prompt>', 'Custom system prompt')
@@ -28,6 +29,7 @@ async function startCli() {
   const agent = new AgentEngine({
     model: options.model,
     ollamaHost: options.host,
+    ollamaToken: options.token,
     workingDir: options.dir,
     systemPrompt: options.system,
   });
@@ -128,7 +130,7 @@ async function startCli() {
       const test = filteredTests[i];
       process.stdout.write(chalk.dim(`[${i + 1}/${filteredTests.length}] ${test.name} ... `));
       try {
-        const result = await runSingleBenchmarkTest(test.id, options.model, options.host);
+        const result = await runSingleBenchmarkTest(test.id, options.model, options.host, options.token);
         if (result.passed) {
           pass++;
           console.log(chalk.green(`PASS`) + chalk.dim(` (${result.durationMs}ms)`));
@@ -293,7 +295,7 @@ async function startCli() {
             const bt = testsToRun[bi];
             process.stdout.write(chalk.dim(`  [${bi + 1}/${testsToRun.length}] ${bt.name} ... `));
             try {
-              const res = await runSingleBenchmarkTest(bt.id, currentModel, currentHost);
+              const res = await runSingleBenchmarkTest(bt.id, currentModel, currentHost, options.token);
               if (res.passed) {
                 bPass++;
                 console.log(chalk.green('PASS') + chalk.dim(` (${res.durationMs}ms)`));
