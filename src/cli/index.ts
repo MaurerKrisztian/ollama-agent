@@ -20,6 +20,7 @@ program
   .option('-s, --system <prompt>', 'Custom system prompt')
   .option('-b, --benchmark', 'Run the benchmark suite instead of chat mode')
   .option('-c, --category <name>', 'Filter benchmark to a specific category (use with --benchmark)')
+  .option('--test <id-or-number>', 'Run one benchmark scenario by test ID or 1-based number')
   .parse(process.argv);
 
 const options = program.opts();
@@ -104,6 +105,7 @@ async function startCli() {
   // Benchmark mode
   if (options.benchmark) {
     const category = options.category as string | undefined;
+    const testSelector = options.test as string | undefined;
     const validCategories = [
       'directory_reading', 'file_reading', 'file_creation', 'file_editing',
       'code_editing', 'code_search', 'discrimination', 'multi_step_workflow', 'terminal_execution', 'information_retrieval',
@@ -117,11 +119,39 @@ async function startCli() {
       process.exit(1);
     }
 
-    const filteredTests = category
+    let filteredTests = category
       ? BENCHMARK_TEST_CASES.filter((t: BenchmarkTestCase) => t.category === category)
       : BENCHMARK_TEST_CASES;
 
-    console.log(chalk.bold.cyan(`\n🧪 Benchmark Suite${category ? ` — Category: ${chalk.yellow(category)}` : ''}`));
+    if (testSelector) {
+      if (/^\d+$/.test(testSelector)) {
+        const scenarioNumber = Number(testSelector);
+        const selected = filteredTests[scenarioNumber - 1];
+        if (!selected) {
+          console.log(chalk.red(
+            `\n❌ Scenario number ${scenarioNumber} is outside the available range 1-${filteredTests.length}` +
+            `${category ? ` for category "${category}"` : ''}.\n`
+          ));
+          process.exit(1);
+        }
+        filteredTests = [selected];
+      } else {
+        const selected = filteredTests.find((test) => test.id === testSelector);
+        if (!selected) {
+          console.log(chalk.red(
+            `\n❌ Benchmark test ID "${testSelector}" was not found` +
+            `${category ? ` in category "${category}"` : ''}.\n`
+          ));
+          process.exit(1);
+        }
+        filteredTests = [selected];
+      }
+    }
+
+    console.log(chalk.bold.cyan(
+      `\n🧪 Benchmark Suite${category ? ` — Category: ${chalk.yellow(category)}` : ''}` +
+      `${testSelector ? ` — Single scenario: ${chalk.yellow(filteredTests[0].id)}` : ''}`
+    ));
     console.log(chalk.dim(`Model: ${options.model} | Tests: ${filteredTests.length}\n`));
 
     let pass = 0;

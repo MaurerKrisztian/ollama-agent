@@ -51,7 +51,7 @@ No cloud, no API keys, no data leaving your machine.
 | `read_web_page` | Extract a public page's main content as bounded Markdown |
 
 ### 🧪 Benchmark Suite
-- **42 targeted test cases** across 11 categories:
+- **43 targeted test cases** across 11 categories:
   - Directory Reading, File Reading, File Creation, File Editing
   - Code Editing, Code Search, Discrimination (no-tool), Multi-Step Workflow
   - **Terminal Execution (Isolated Docker Sandbox)**
@@ -90,7 +90,7 @@ local-model-chat/
 │   │       └── types.ts
 │   └── benchmark/          # Benchmark runner + test cases
 │       ├── runner.ts       # AgentBenchmarkRunner + Docker sandbox
-│       └── testCases.ts    # 42 test cases across 11 categories
+│       └── testCases.ts    # 43 test cases across 11 categories
 ├── agent                   # Global CLI wrapper script (bash → local tsx)
 └── package.json
 ```
@@ -170,6 +170,9 @@ Options:
   -d, --dir <path>         Working directory           (default: cwd)
   -y, --auto-approve       Skip terminal cmd confirmation
   -s, --system <prompt>    Custom system prompt
+  -b, --benchmark          Run benchmark mode
+  -c, --category <name>    Run one benchmark category
+  --test <id-or-number>    Run one benchmark scenario
   --help                   Show help
 ```
 
@@ -204,6 +207,12 @@ Shell command execution (`execute_command` tool) has a built-in approval gate:
 Run from the Web UI → **Benchmark** tab, or via the server API:
 
 ```bash
+# Run one scenario by its number within a category
+npm run cli -- --benchmark --category web_search --test 4
+
+# Run one scenario by its stable test ID
+npm run cli -- --benchmark --test test_web_real_life_deep_research
+
 # Run full suite via API
 curl -X POST http://localhost:3001/api/benchmark/run
 
@@ -213,7 +222,7 @@ curl -X POST http://localhost:3001/api/benchmark/run-single \
   -d '{"testId": "dir_read_1", "model": "qwen2.5-coder:7b"}'
 ```
 
-**Latest `qwen2.5-coder:7b` targeted run:** web search 3/3. Local-model results can vary between runs.
+**Latest `qwen2.5-coder:7b` targeted run:** web search 4/4. Local-model results can vary between runs.
 
 ---
 

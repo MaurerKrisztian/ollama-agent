@@ -241,3 +241,99 @@ test('a direct URL content request is completed with read_web_page after an unhe
     }
   );
 });
+
+test('time-sensitive research cannot finish after search snippets without reading a source', async () => {
+  await withAgent(
+    [
+      {
+        content: '',
+        tool_calls: [{
+          id: 'research-search',
+          name: 'web_search',
+          arguments: { query: 'Node.js 22 security support end date' },
+        }],
+      },
+      { content: 'The search snippet suggests a support date.', tool_calls: [] },
+      {
+        content: '',
+        tool_calls: [{
+          id: 'research-read',
+          name: 'read_web_page',
+          arguments: { url: 'https://benchmark.example/node-release-schedule' },
+        }],
+      },
+      { content: 'Security support ends on 30 April 2027.', tool_calls: [] },
+    ],
+    async (agent) => {
+      const executor = agent.getToolExecutor();
+      const originalExecuteTool = executor.executeTool.bind(executor);
+      executor.executeTool = async (name, args) => {
+        if (name === 'web_search') {
+          return {
+            query: args.query,
+            result_count: 1,
+            results: [{
+              title: 'Node.js releases',
+              url: 'https://benchmark.example/node-release-schedule',
+              snippet: 'Official release schedule.',
+            }],
+          };
+        }
+        if (name === 'read_web_page') {
+          return {
+            title: 'Node.js releases',
+            url: args.url,
+            markdown: 'Node.js 22 security support ends on 30 April 2027.',
+            truncated: false,
+          };
+        }
+        return originalExecuteTool(name, args);
+      };
+
+      const calls: string[] = [];
+      await agent.sendMessage(
+        "We're still running Node.js 22 in production. Can you look into how long we have before it stops receiving security updates?",
+        { onToolStart: (name) => calls.push(name) }
+      );
+
+      assert.deepEqual(calls, ['web_search', 'read_web_page']);
+    }
+  );
+});
+
+test('simple navigational web search does not require opening a result page', async () => {
+  await withAgent(
+    [
+      {
+        content: '',
+        tool_calls: [{
+          id: 'navigation-search',
+          name: 'web_search',
+          arguments: { query: 'official Ollama website' },
+        }],
+      },
+      { content: 'The official website is https://ollama.com/.', tool_calls: [] },
+    ],
+    async (agent) => {
+      const executor = agent.getToolExecutor();
+      const originalExecuteTool = executor.executeTool.bind(executor);
+      executor.executeTool = async (name, args) => {
+        if (name === 'web_search') {
+          return {
+            query: args.query,
+            result_count: 1,
+            results: [{ title: 'Ollama', url: 'https://ollama.com/' }],
+          };
+        }
+        return originalExecuteTool(name, args);
+      };
+
+      const calls: string[] = [];
+      await agent.sendMessage('Search the web for the official Ollama website and give me its URL.', {
+        onToolStart: (name) => calls.push(name),
+      });
+
+      assert.deepEqual(calls, ['web_search']);
+    }
+  );
+});

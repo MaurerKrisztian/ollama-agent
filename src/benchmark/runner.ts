@@ -61,6 +61,24 @@ export async function runSingleBenchmarkTest(
   executor.executeTool = async (name: string, args: Record<string, any>) => {
     if (name === 'web_search') {
       const query = String(args.query || '');
+      if (query.toLowerCase().includes('node')) {
+        return {
+          query,
+          result_count: 2,
+          results: [
+            {
+              title: 'Node.js releases',
+              url: 'https://benchmark.example/node-release-schedule',
+              snippet: 'Official release schedule and support status for Node.js versions.',
+            },
+            {
+              title: 'Node.js 22 release announcement',
+              url: 'https://benchmark.example/node-22-announcement',
+              snippet: 'Highlights from the original Node.js 22 release.',
+            },
+          ],
+        };
+      }
       if (query.toLowerCase().includes('lighthouse')) {
         return {
           query,
@@ -97,6 +115,22 @@ export async function runSingleBenchmarkTest(
       };
     }
     if (name === 'read_web_page') {
+      if (String(args.url || '').includes('node-release-schedule')) {
+        return {
+          title: 'Node.js releases',
+          url: String(args.url || ''),
+          byline: 'Node.js Release Working Group',
+          excerpt: 'Release schedule and support status for Node.js versions.',
+          markdown:
+            '# Node.js releases\n\n' +
+            'Production applications should use Active LTS or Maintenance LTS releases.\n\n' +
+            '## Release schedule\n\n' +
+            '| Version | Status | End of security support |\n' +
+            '| --- | --- | --- |\n' +
+            '| Node.js 22 | Maintenance LTS | **30 April 2027** |\n',
+          truncated: false,
+        };
+      }
       return {
         title: 'Project Lighthouse release notes',
         url: String(args.url || ''),

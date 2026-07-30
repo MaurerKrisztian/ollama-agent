@@ -638,4 +638,25 @@ export const BENCHMARK_TEST_CASES: BenchmarkTestCase[] = [
     evaluationCriteria:
       'PASSES only if read_web_page is invoked for the supplied URL and the final response contains 17 October 2026.',
   },
+  {
+    id: 'test_web_real_life_deep_research',
+    name: 'Real-Life Web Research (Implicit Search → Verify Source)',
+    category: 'web_search',
+    prompt:
+      "We're still running Node.js 22 in production. Can you look into how long we have before it stops receiving security updates?",
+    expectedToolSequence: ['web_search', 'read_web_page'],
+    expectedArgSubstrings: {
+      query: 'Node',
+      url: 'https://benchmark.example/node-release-schedule',
+    },
+    expectedResponseSubstrings: ['30 April 2027'],
+    description:
+      'Uses a natural maintenance question without naming tools, a website, or the required research steps.',
+    objective:
+      'Tests whether the agent independently recognizes that a time-sensitive real-life question requires web search, opens an authoritative result, and grounds its answer in page content.',
+    requiredOutput:
+      'Search for the Node.js 22 support timeline, read the relevant release-schedule page, and answer that security support ends on 30 April 2027.',
+    evaluationCriteria:
+      'PASSES only if web_search precedes read_web_page, the result URL is reused, and the final response contains 30 April 2027. A memory-only answer or search-snippet-only answer fails.',
+  },
 ];

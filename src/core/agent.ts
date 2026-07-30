@@ -29,6 +29,11 @@ function inferExplicitlyRequestedTools(prompt: string): string[] {
 
   const hasUrl = /https?:\/\/[^\s)>\]}]+/.test(prompt);
   const hasWebNoun = /\b(?:web\s?page|webpage|website|url|internet|online)\b/.test(normalized);
+  const hasWorkspaceNoun = /\b(?:workspace|codebase|repository|repo|local file|directory|folder)\b/.test(normalized);
+  const hasResearchCue =
+    /\b(?:look into|find out|research|investigate|verify|fact[- ]?check)\b/.test(normalized);
+  const hasExternalFactCue =
+    /\b(?:latest|current|today|news|price|release|support|security updates?|end of life|eol|schedule|version|documentation)\b/.test(normalized);
   const webSearchIntent =
     /\b(?:web|internet|online)\b.*\b(?:search|find|look up|research)\b/.test(normalized) ||
     /\b(?:search|find|look up|research)\b.*\b(?:web|internet|online)\b/.test(normalized) ||
@@ -38,12 +43,17 @@ function inferExplicitlyRequestedTools(prompt: string): string[] {
     /\b(?:read|open|inspect|check|summari[sz]e|content of)\b.*\b(?:web\s?page|webpage|website|url)\b/.test(normalized) ||
     /\b(?:web\s?page|webpage|website|url)\b.*\b(?:read|open|inspect|check|summari[sz]e|content)\b/.test(normalized) ||
     (hasUrl && /\b(?:read|open|inspect|check|summari[sz]e|content|what is)\b/.test(normalized));
-  const hasWebIntent = webSearchIntent || webPageReadIntent || (hasUrl && hasWebNoun);
+  const requiresVerifiedWebResearch =
+    !hasWorkspaceNoun &&
+    ((hasResearchCue && hasExternalFactCue) ||
+      (webSearchIntent && /\b(?:research|verify|compare|when|how long|why|how)\b/.test(normalized)));
+  const hasWebIntent =
+    webSearchIntent || webPageReadIntent || requiresVerifiedWebResearch || (hasUrl && hasWebNoun);
 
-  if (webSearchIntent) {
+  if (webSearchIntent || requiresVerifiedWebResearch) {
     add('web_search');
   }
-  if (webPageReadIntent) {
+  if (webPageReadIntent || requiresVerifiedWebResearch) {
     add('read_web_page');
   }
 
@@ -63,7 +73,9 @@ function inferExplicitlyRequestedTools(prompt: string): string[] {
   }
 
   if (/\b(?:list|show)\b.*\b(?:directory|folder|files)\b/.test(normalized)) add('list_directory');
-  if (/\b(?:search|grep|find)\b.*\b(?:workspace|code|file|word|symbol|for)\b/.test(normalized)) add('grep_search');
+  if (!hasWebIntent && /\b(?:search|grep|find)\b.*\b(?:workspace|code|file|word|symbol|for)\b/.test(normalized)) {
+    add('grep_search');
+  }
   // "read the web page" must never create a local read_file obligation. That
   // obligation previously caused a successful web answer to cascade into
   // guessed local filenames and directory exploration.
@@ -397,9 +409,12 @@ export class AgentEngine {
         }
 
         if (missingRequestedTools.length > 0 && maxLoops > 0) {
+          const webVerificationInstruction = missingRequestedTools.includes('read_web_page')
+            ? ' Copy the full URL of the most relevant source from the latest web_search results into read_web_page. Do not answer from a search snippet or memory.'
+            : '';
           continuationReminder = `The requested workflow is unfinished. Your entire response must be a structured native tool call with no prose. Invoke the remaining required tool${
             missingRequestedTools.length === 1 ? '' : 's'
-          } now: ${missingRequestedTools.join(', ')}. For a multi-change edit, reread the modified file and compare every requested value with the original request before claiming completion. Use the information already returned by previous tools. ` +
+          } now: ${missingRequestedTools.join(', ')}.${webVerificationInstruction} For a multi-change edit, reread the modified file and compare every requested value with the original request before claiming completion. Use the information already returned by previous tools. ` +
             'Text that merely claims a <tool_response> is not execution; invoke the real runtime tool.';
           continue;
         }
