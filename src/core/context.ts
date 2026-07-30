@@ -1,5 +1,6 @@
 import { ChatMessage, ContextInfo, Role, ToolDefinition } from './types.js';
 import { TOOL_DEFINITIONS } from './tools.js';
+import { getSystemEnvironmentSummary } from './workdir-context.js';
 
 export class ContextManager {
   private systemPrompt: string;
@@ -69,6 +70,8 @@ export class ContextManager {
 
     const lines: string[] = [
       this.systemPrompt.trim(),
+      '',
+      getSystemEnvironmentSummary(),
       '',
       '# TOOL CALLING PROTOCOL INSTRUCTIONS',
       'You have access to tools for workspace files, terminal commands, web search, and reading public web pages as clean Markdown.',

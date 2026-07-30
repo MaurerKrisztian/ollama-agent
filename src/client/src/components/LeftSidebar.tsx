@@ -12,6 +12,7 @@ import {
   Bot,
   Cpu,
   Layers,
+  Terminal,
 } from 'lucide-react';
 import { AgentConfig, SystemMetrics } from '../types';
 
@@ -30,6 +31,8 @@ interface LeftSidebarProps {
   onChangeTemperature: (temp: number) => void;
   onOpenModelDetails: () => void;
   systemMetrics?: SystemMetrics | null;
+  activeTerminalCount?: number;
+  onOpenTerminalSessions?: () => void;
 }
 
 export const LeftSidebar: React.FC<LeftSidebarProps> = ({
@@ -47,6 +50,8 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
   onChangeTemperature,
   onOpenModelDetails,
   systemMetrics,
+  activeTerminalCount = 0,
+  onOpenTerminalSessions,
 }) => {
   if (!isOpen) return null;
 
@@ -255,6 +260,31 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
               <Wrench size={15} color="var(--accent-primary)" />
               <span>Tool Approval & Safety Settings</span>
             </button>
+
+            {onOpenTerminalSessions && (
+              <button
+                onClick={() => {
+                  onOpenTerminalSessions();
+                  onClose();
+                }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '10px',
+                  padding: '9px 12px',
+                  borderRadius: '8px',
+                  border: '1px solid var(--border-color)',
+                  background: 'rgba(30, 41, 59, 0.4)',
+                  color: 'var(--text-main)',
+                  fontSize: '0.825rem',
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                }}
+              >
+                <Terminal size={15} color="#10b981" />
+                <span>Active Terminal Sessions ({activeTerminalCount})</span>
+              </button>
+            )}
 
             <button
               onClick={onOpenSystemPrompt}

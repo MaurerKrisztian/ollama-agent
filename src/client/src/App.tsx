@@ -9,14 +9,16 @@ import { ToolSettingsModal } from './components/ToolSettingsModal';
 import { ConnectionSettingsModal } from './components/ConnectionSettingsModal';
 import { DirectoryPickerModal } from './components/DirectoryPickerModal';
 import { ModelDetailsModal } from './components/ModelDetailsModal';
-import { AgentConfig, ChatMessage, ContextInfo, OllamaModelInfo, OllamaRunningModelInfo, PendingApprovalCall, SystemMetrics, TextAttachment, ToolSettings } from './types';
+import { TerminalSessionsModal } from './components/TerminalSessionsModal';
+import { RightTerminalSidebar } from './components/RightTerminalSidebar';
+import { AgentConfig, ChatMessage, ContextInfo, OllamaModelInfo, OllamaRunningModelInfo, PendingApprovalCall, SystemMetrics, TerminalSessionInfo, TextAttachment, ToolSettings } from './types';
 
 export const App: React.FC = () => {
   const [activeView, setActiveView] = useState<'chat' | 'benchmark'>('chat');
 
   const [config, setConfig] = useState<AgentConfig>({
     ollamaHost: 'http://127.0.0.1:11434',
-    model: 'qwen2.5-coder:7b',
+    model: 'qwen3.5:9b',
     temperature: 0.2,
     systemPrompt: 'You are an intelligent AI assistant with tools for workspace files, terminal commands, web search, and reading public web pages.',
     workingDir: '',
@@ -58,6 +60,9 @@ export const App: React.FC = () => {
     useState<'idle' | 'generating' | 'completed' | 'cancelled' | 'error'>('idle');
   const [pendingApprovalCall, setPendingApprovalCall] = useState<PendingApprovalCall | null>(null);
   const [systemMetrics, setSystemMetrics] = useState<SystemMetrics | null>(null);
+  const [terminalSessions, setTerminalSessions] = useState<TerminalSessionInfo[]>([]);
+  const [terminalSessionsModalOpen, setTerminalSessionsModalOpen] = useState(false);
+  const [terminalSidebarOpen, setTerminalSidebarOpen] = useState(false);
 
   const fetchRunningModels = async () => {
     try {
@@ -87,9 +92,34 @@ export const App: React.FC = () => {
     }
   };
 
+  const fetchTerminalSessions = async () => {
+    try {
+      const res = await fetch('/api/terminal/sessions');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && data.sessions) {
+          setTerminalSessions(data.sessions);
+        }
+      }
+    } catch (_) {}
+  };
+
+  const handleTerminateTerminalSession = async (sessionId: string) => {
+    try {
+      await fetch(`/api/terminal/sessions/${encodeURIComponent(sessionId)}`, {
+        method: 'DELETE',
+      });
+      fetchTerminalSessions();
+    } catch (_) {}
+  };
+
   useEffect(() => {
     fetchSystemMetrics();
-    const interval = setInterval(fetchSystemMetrics, 3000);
+    fetchTerminalSessions();
+    const interval = setInterval(() => {
+      fetchSystemMetrics();
+      fetchTerminalSessions();
+    }, 3000);
     return () => clearInterval(interval);
   }, []);
 
@@ -274,6 +304,9 @@ export const App: React.FC = () => {
     setMessages([]);
     setStreamingText('');
     setGenerationStatus('idle');
+    setTerminalSessions([]);
+    setTerminalSidebarOpen(false);
+    setTerminalSessionsModalOpen(false);
     const res = await fetch('/api/clear', { method: 'POST' });
     if (res.ok) {
       const data = await res.json();
@@ -465,6 +498,8 @@ export const App: React.FC = () => {
         systemMetrics={systemMetrics}
         leftSidebarOpen={leftSidebarOpen}
         onToggleLeftSidebar={() => setLeftSidebarOpen((prev) => !prev)}
+        activeTerminalCount={terminalSessions.filter((s) => s.status === 'running').length}
+        onOpenTerminalSessions={() => setTerminalSidebarOpen((prev) => !prev)}
       />
 
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
@@ -483,6 +518,8 @@ export const App: React.FC = () => {
           onChangeTemperature={handleChangeTemperature}
           onOpenModelDetails={() => setModelDetailsModalOpen(true)}
           systemMetrics={systemMetrics}
+          activeTerminalCount={terminalSessions.filter((s) => s.status === 'running').length}
+          onOpenTerminalSessions={() => setTerminalSidebarOpen((prev) => !prev)}
         />
         {activeView === 'chat' ? (
           <ChatWindow
@@ -517,6 +554,18 @@ export const App: React.FC = () => {
           contextInfo={contextInfo}
           activeModel={config.model}
           onCompactContext={handleCompactContext}
+        />
+
+        <RightTerminalSidebar
+          isOpen={terminalSidebarOpen}
+          onClose={() => setTerminalSidebarOpen(false)}
+          sessions={terminalSessions}
+          onRefreshSessions={fetchTerminalSessions}
+          onTerminateSession={handleTerminateTerminalSession}
+          onOpenModal={() => {
+            setTerminalSidebarOpen(false);
+            setTerminalSessionsModalOpen(true);
+          }}
         />
       </div>
 
@@ -555,6 +604,14 @@ export const App: React.FC = () => {
         selectedModel={config.model}
         installedModels={models}
         runningModels={runningModels}
+      />
+
+      <TerminalSessionsModal
+        isOpen={terminalSessionsModalOpen}
+        onClose={() => setTerminalSessionsModalOpen(false)}
+        sessions={terminalSessions}
+        onRefreshSessions={fetchTerminalSessions}
+        onTerminateSession={handleTerminateTerminalSession}
       />
     </div>
   );

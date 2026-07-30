@@ -19,6 +19,10 @@ export type AgentConfigUpdate = Partial<AgentConfig> & { ollamaToken?: string };
 function inferExplicitlyRequestedTools(prompt: string): string[] {
   const normalized = prompt.toLowerCase();
 
+  if (/\bstart_terminal_session\b|\bbackground\b|\binteractive\b|\blong[- ]running\b|\bterminal session\b/.test(normalized)) {
+    return ['start_terminal_session'];
+  }
+
   // Explicit shell requests should not be reinterpreted as file-tool requests
   // merely because the command itself contains words such as "read" or "list".
   if (/\bexecute_command\b|\bterminal\b|\bshell command\b|\brun (?:a |the )?command\b/.test(normalized)) {
@@ -119,7 +123,7 @@ export class AgentEngine {
   constructor(config?: AgentConfigUpdate) {
     this.config = {
       ollamaHost: config?.ollamaHost || 'http://127.0.0.1:11434',
-      model: config?.model || 'qwen2.5-coder:7b',
+      model: config?.model || 'qwen3.5:9b',
       temperature: config?.temperature !== undefined ? config.temperature : 0.2,
       systemPrompt:
         config?.systemPrompt ||

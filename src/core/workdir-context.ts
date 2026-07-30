@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import os from 'node:os';
 
 const MAX_FILES = 200;
 const MAX_DEPTH = 4;
@@ -7,6 +8,37 @@ const MAX_INSTRUCTIONS_CHARS = 12_000;
 const MAX_SKILLS = 50;
 const MAX_SKILL_HEADER_CHARS = 16_000;
 const SKIPPED_DIRECTORIES = new Set(['.git', 'node_modules', 'dist', 'build', 'coverage']);
+
+export function getSystemEnvironmentSummary(): string {
+  const platformNames: Record<string, string> = {
+    linux: 'Linux',
+    win32: 'Windows (win32)',
+    darwin: 'macOS (darwin)',
+  };
+  const osName = platformNames[process.platform] || process.platform;
+  const osType = os.type();
+  const osRelease = os.release();
+  const arch = process.arch;
+  const cpus = os.cpus();
+  const cpuModel = cpus && cpus.length > 0 ? cpus[0].model.trim() : 'Unknown CPU';
+  const cpuCores = cpus ? cpus.length : 0;
+  const totalMemGb = (os.totalmem() / (1024 * 1024 * 1024)).toFixed(1);
+  let username = 'user';
+  try {
+    username = os.userInfo?.()?.username || process.env.USER || process.env.USERNAME || 'user';
+  } catch (_) {}
+  const shell = process.env.SHELL || (process.platform === 'win32' ? 'cmd.exe / PowerShell' : '/bin/bash');
+
+  return [
+    '## System Environment & PC Info',
+    `- Operating System: ${osName} (${osType} ${osRelease})`,
+    `- Architecture: ${arch}`,
+    `- CPU: ${cpuModel} (${cpuCores} cores)`,
+    `- Memory: ${totalMemGb} GB RAM`,
+    `- System User: ${username}`,
+    `- Default Shell: ${shell}`,
+  ].join('\n');
+}
 
 interface ProjectSkillMetadata {
   name: string;
@@ -120,6 +152,8 @@ export async function buildWorkingDirectoryContext(workingDir: string): Promise<
 
   const lines = [
     '# CURRENT WORKING DIRECTORY CONTEXT',
+    getSystemEnvironmentSummary(),
+    '',
     `Working directory: ${resolvedDir}`,
     packageSummary,
     `Project files (up to ${MAX_FILES}, depth ${MAX_DEPTH}):`,

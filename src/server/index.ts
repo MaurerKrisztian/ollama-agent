@@ -18,7 +18,7 @@ app.use(express.json({ limit: '2mb' }));
 
 // Initialize shared Agent Engine
 const agent = new AgentEngine({
-  model: 'qwen2.5-coder:7b',
+  model: 'qwen3.5:9b',
   ollamaHost: process.env.OLLAMA_HOST || 'http://127.0.0.1:11434',
   ollamaToken: process.env.OLLAMA_TOKEN,
   workingDir: process.cwd(),
@@ -285,6 +285,61 @@ app.get('/api/tools', (req, res) => {
   });
 });
 
+// GET /api/terminal/sessions - List active & background terminal sessions
+app.get('/api/terminal/sessions', (_req, res) => {
+  const terminalManager = agent.getToolExecutor().getTerminalManager();
+  res.json({ success: true, sessions: terminalManager.listSessions() });
+});
+
+// GET /api/terminal/sessions/:id/output - Fetch log output for terminal session
+app.get('/api/terminal/sessions/:id/output', (req, res) => {
+  const terminalManager = agent.getToolExecutor().getTerminalManager();
+  const tailLines = req.query.tail_lines ? parseInt(req.query.tail_lines as string, 10) : 100;
+  const result = terminalManager.readOutput(req.params.id, tailLines);
+  if (!result.success) {
+    return res.status(404).json({ success: false, error: result.error });
+  }
+  res.json({ success: true, output: result.output });
+});
+
+// POST /api/terminal/sessions - Start new terminal session
+app.post('/api/terminal/sessions', (req, res) => {
+  const { command, sessionId } = req.body || {};
+  if (!command || typeof command !== 'string') {
+    return res.status(400).json({ success: false, error: 'command (string) is required.' });
+  }
+  const terminalManager = agent.getToolExecutor().getTerminalManager();
+  const result = terminalManager.startSession(command, sessionId, agent.getConfig().workingDir);
+  if (!result.success) {
+    return res.status(400).json({ success: false, error: result.error });
+  }
+  res.json({ success: true, session: result.session });
+});
+
+// POST /api/terminal/sessions/:id/input - Send stdin input to terminal session
+app.post('/api/terminal/sessions/:id/input', (req, res) => {
+  const { input } = req.body || {};
+  if (input === undefined || typeof input !== 'string') {
+    return res.status(400).json({ success: false, error: 'input (string) is required.' });
+  }
+  const terminalManager = agent.getToolExecutor().getTerminalManager();
+  const result = terminalManager.sendInput(req.params.id, input);
+  if (!result.success) {
+    return res.status(400).json({ success: false, error: result.error });
+  }
+  res.json({ success: true });
+});
+
+// DELETE /api/terminal/sessions/:id - Terminate session
+app.delete('/api/terminal/sessions/:id', (req, res) => {
+  const terminalManager = agent.getToolExecutor().getTerminalManager();
+  const result = terminalManager.terminateSession(req.params.id);
+  if (!result.success) {
+    return res.status(404).json({ success: false, error: result.error });
+  }
+  res.json({ success: true });
+});
+
 // GET /api/mcp/servers - Status of connected MCP servers and tools
 app.get('/api/mcp/servers', async (req, res) => {
   const mcpManager = agent.getToolExecutor().getMcpManager();
@@ -402,9 +457,11 @@ app.post('/api/mcp/toggle-tool', (req, res) => {
   });
 });
 
-// POST /api/clear - Clear chat history context
+// POST /api/clear - Clear chat history context & terminal sessions
 app.post('/api/clear', (req, res) => {
   agent.resetChat();
+  const terminalManager = agent.getToolExecutor().getTerminalManager();
+  terminalManager.clearAllSessions();
   res.json({
     success: true,
     context: agent.getContextManager().getContextInfo(),
@@ -562,6 +619,19 @@ app.post('/api/chat', async (req, res) => {
   const originalExecuteTool = executor.executeTool.bind(executor);
 
   executor.executeTool = async (name: string, args: Record<string, any>) => {
+    if (name === 'start_terminal_session' && terminalRequireConfirm) {
+      sendEvent('tool_approval_required', { name, args });
+      const decision = await new Promise<ApprovalDecision>((resolve) => {
+        pendingApprovalResolve = resolve;
+      });
+      if (decision === 'reject') {
+        return {
+          error: 'Terminal session execution rejected by user in Web UI.',
+          command: args.command,
+          cancelled: true,
+        };
+      }
+    }
     if ((name === 'edit_file' || name === 'replace_file') && fileEditRequireConfirm) {
       const diff = await executor.previewFileDiff(name, args);
       // An edit without a valid preview cannot change the file. Execute it

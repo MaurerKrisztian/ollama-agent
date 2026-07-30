@@ -96,3 +96,24 @@ export interface OllamaRunningModelInfo {
     quantization_level?: string;
   };
 }
+
+export interface TerminalSessionInfo {
+  sessionId: string;
+  command: string;
+  pid: number | undefined;
+  status: 'running' | 'exited';
+  exitCode: number | null;
+  startedAt: string;
+  workingDir: string;
+  lineCount: number;
+}
+
+export interface TerminalSessionOutput {
+  sessionId: string;
+  command: string;
+  status: 'running' | 'exited';
+  exitCode: number | null;
+  lines: string[];
+  lineCount: number;
+}
+

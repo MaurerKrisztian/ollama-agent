@@ -8,6 +8,9 @@ import {
   Info,
   Menu,
   PlusCircle,
+  Terminal,
+  MessageSquare,
+  Zap,
 } from 'lucide-react';
 import { AgentConfig, ContextInfo, OllamaModelInfo, OllamaRunningModelInfo, SystemMetrics } from '../types';
 
@@ -35,6 +38,8 @@ interface HeaderProps {
   systemMetrics?: SystemMetrics | null;
   leftSidebarOpen?: boolean;
   onToggleLeftSidebar?: () => void;
+  activeTerminalCount?: number;
+  onOpenTerminalSessions?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -61,6 +66,8 @@ export const Header: React.FC<HeaderProps> = ({
   systemMetrics,
   leftSidebarOpen = false,
   onToggleLeftSidebar,
+  activeTerminalCount = 0,
+  onOpenTerminalSessions,
 }) => {
   return (
     <header className="glass-panel" style={{ padding: '12px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', zIndex: 10 }}>
@@ -108,6 +115,54 @@ export const Header: React.FC<HeaderProps> = ({
             </span>
           </div>
         </div>
+      </div>
+
+      {/* Navigation View Switcher Tabs: Chat Agent Studio & Benchmark Runner */}
+      <div style={{ display: 'flex', alignItems: 'center', background: 'rgba(15, 23, 42, 0.7)', padding: '4px', borderRadius: '10px', border: '1px solid var(--border-color)', gap: '4px' }}>
+        <button
+          onClick={() => onSelectView('chat')}
+          title="Switch to Chat Agent Studio View"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            padding: '6px 12px',
+            borderRadius: '8px',
+            border: 'none',
+            fontSize: '0.825rem',
+            fontWeight: 600,
+            cursor: 'pointer',
+            background: activeView === 'chat' ? 'var(--accent-gradient)' : 'transparent',
+            color: activeView === 'chat' ? '#fff' : 'var(--text-muted)',
+            boxShadow: activeView === 'chat' ? '0 2px 10px rgba(99, 102, 241, 0.3)' : 'none',
+            transition: 'all 0.15s ease',
+          }}
+        >
+          <MessageSquare size={15} />
+          <span>Chat Agent Studio</span>
+        </button>
+
+        <button
+          onClick={() => onSelectView('benchmark')}
+          title="Switch to Benchmark Runner View"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            padding: '6px 12px',
+            borderRadius: '8px',
+            border: activeView === 'benchmark' ? '1px solid rgba(245, 158, 11, 0.5)' : '1px solid transparent',
+            fontSize: '0.825rem',
+            fontWeight: 600,
+            cursor: 'pointer',
+            background: activeView === 'benchmark' ? 'rgba(245, 158, 11, 0.2)' : 'transparent',
+            color: activeView === 'benchmark' ? 'var(--accent-amber)' : 'var(--text-muted)',
+            transition: 'all 0.15s ease',
+          }}
+        >
+          <Zap size={15} color={activeView === 'benchmark' ? 'var(--accent-amber)' : 'var(--text-muted)'} />
+          <span>Benchmark Runner</span>
+        </button>
       </div>
 
       {/* Center Controls: Model Selector & VRAM Status */}
@@ -274,6 +329,29 @@ export const Header: React.FC<HeaderProps> = ({
           >
             <PlusCircle size={15} />
             <span className="header-btn-text">New Chat</span>
+          </button>
+        )}
+
+        {onOpenTerminalSessions && (
+          <button
+            onClick={onOpenTerminalSessions}
+            title="Manage Long-Running Terminal Sessions"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              background: activeTerminalCount > 0 ? 'rgba(16, 185, 129, 0.15)' : 'rgba(15, 23, 42, 0.8)',
+              border: `1px solid ${activeTerminalCount > 0 ? 'rgba(16, 185, 129, 0.4)' : 'var(--border-color)'}`,
+              color: activeTerminalCount > 0 ? '#10b981' : 'var(--text-main)',
+              padding: '6px 12px',
+              borderRadius: '8px',
+              fontSize: '0.825rem',
+              fontWeight: 600,
+              cursor: 'pointer',
+            }}
+          >
+            <Terminal size={15} color={activeTerminalCount > 0 ? '#10b981' : 'var(--text-muted)'} />
+            <span className="header-btn-text">Terminal ({activeTerminalCount})</span>
           </button>
         )}
 

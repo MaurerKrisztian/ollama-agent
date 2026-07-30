@@ -168,7 +168,7 @@ Arguments:
   prompt                   Optional single-shot prompt (executes and exits)
 
 Options:
-  -m, --model <name>       Ollama model name         (default: qwen2.5-coder:7b)
+  -m, --model <name>       Ollama model name         (default: qwen3.5:9b)
   -t, --temperature <val>  Temperature 0.0–1.0       (default: 0.2)
   -h, --host <url>         Ollama host URL            (default: http://127.0.0.1:11434)
   --token <token>          Optional bearer token      (or set OLLAMA_TOKEN)

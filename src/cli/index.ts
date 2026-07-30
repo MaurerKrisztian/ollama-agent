@@ -11,7 +11,7 @@ program
   .name('ollama-agent-cli')
   .description('Interactive CLI agent powered by Ollama and shared Core Agent Engine')
   .argument('[prompt]', 'Optional single-shot prompt to execute')
-  .option('-m, --model <name>', 'Ollama model name', 'qwen2.5-coder:7b')
+  .option('-m, --model <name>', 'Ollama model name', 'qwen3.5:9b')
   .option('-t, --temperature <val>', 'Model temperature (0.0 to 1.0)', '0.2')
   .option('-h, --host <url>', 'Ollama host URL', 'http://127.0.0.1:11434')
   .option('--token <token>', 'Optional bearer token (or set OLLAMA_TOKEN)', process.env.OLLAMA_TOKEN)

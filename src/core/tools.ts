@@ -4,6 +4,7 @@ import { exec } from 'child_process';
 import { ToolDefinition } from './types.js';
 import { WebClient } from './web.js';
 import { McpClientManager } from './mcp.js';
+import { TerminalSessionManager } from './terminalManager.js';
 
 type DiffLine = {
   type: 'context' | 'add' | 'remove' | 'meta';
@@ -243,7 +244,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
   },
   {
     name: 'execute_command',
-    description: 'Execute a bash shell command in the working directory only when the user asks to run it or local-system inspection requires it. Do not execute commands the user only asks to identify, quote, or copy.',
+    description: 'Execute a single-shot synchronous bash shell command. Do NOT use execute_command for background, persistent, long-running, interactive, server, or watcher processes (e.g. commands with & or interactive test runners). Use start_terminal_session for long-running, background, or interactive processes.',
     parameters: {
       type: 'object',
       properties: {
@@ -283,21 +284,104 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
       required: ['url'],
     },
   },
+  {
+    name: 'start_terminal_session',
+    description: 'Start a long-running background or interactive terminal session (e.g. dev servers, interactive tests like test:interactive, log tailing, background builds with &). Prefer this over execute_command for any background or interactive processes.',
+    parameters: {
+      type: 'object',
+      properties: {
+        command: {
+          type: 'string',
+          description: 'The shell command line to run in background.',
+        },
+        session_id: {
+          type: 'string',
+          description: 'Optional custom short ID/name for the session (e.g. "dev-server"). Auto-generated if omitted.',
+        },
+      },
+      required: ['command'],
+    },
+  },
+  {
+    name: 'send_terminal_input',
+    description: 'Send input text or control characters (e.g. CTRL+C) to a running background terminal session.',
+    parameters: {
+      type: 'object',
+      properties: {
+        session_id: {
+          type: 'string',
+          description: 'Target session ID.',
+        },
+        input: {
+          type: 'string',
+          description: 'Input text to send. Include \\n for ENTER. Use "CTRL+C" to interrupt.',
+        },
+      },
+      required: ['session_id', 'input'],
+    },
+  },
+  {
+    name: 'read_terminal_output',
+    description: 'Read bounded recent output lines from a background terminal session. Designed to keep context small.',
+    parameters: {
+      type: 'object',
+      properties: {
+        session_id: {
+          type: 'string',
+          description: 'Target session ID.',
+        },
+        tail_lines: {
+          type: 'number',
+          description: 'Number of recent lines to return (default 50, max 200).',
+        },
+      },
+      required: ['session_id'],
+    },
+  },
+  {
+    name: 'list_terminal_sessions',
+    description: 'List all active and recent background terminal sessions.',
+    parameters: {
+      type: 'object',
+      properties: {},
+    },
+  },
+  {
+    name: 'terminate_terminal_session',
+    description: 'Kill and terminate a running background terminal session.',
+    parameters: {
+      type: 'object',
+      properties: {
+        session_id: {
+          type: 'string',
+          description: 'Target session ID to kill.',
+        },
+      },
+      required: ['session_id'],
+    },
+  },
 ];
 
 export class ToolExecutor {
   private workingDir: string;
   private webClient: WebClient;
   private mcpManager: McpClientManager;
+  private terminalManager: TerminalSessionManager;
 
   constructor(
     initialWorkingDir: string = process.cwd(),
     webClient: WebClient = new WebClient(),
-    mcpManager: McpClientManager = new McpClientManager(initialWorkingDir)
+    mcpManager: McpClientManager = new McpClientManager(initialWorkingDir),
+    terminalManager: TerminalSessionManager = new TerminalSessionManager(initialWorkingDir)
   ) {
     this.workingDir = path.resolve(initialWorkingDir);
     this.webClient = webClient;
     this.mcpManager = mcpManager;
+    this.terminalManager = terminalManager;
+  }
+
+  public getTerminalManager(): TerminalSessionManager {
+    return this.terminalManager;
   }
 
   public getMcpManager(): McpClientManager {
@@ -313,6 +397,7 @@ export class ToolExecutor {
       const resolved = path.resolve(newDir);
       this.workingDir = resolved;
       this.mcpManager.setWorkingDir(resolved);
+      this.terminalManager.setDefaultWorkingDir(resolved);
       return { success: true, path: this.workingDir };
     } catch (err: any) {
       return { success: false, path: this.workingDir, error: err.message };
@@ -738,6 +823,11 @@ export class ToolExecutor {
       case 'execute_command': {
         const cmdStr = args.command;
         if (!cmdStr) return { error: 'Parameter command is required.' };
+        const trimmed = cmdStr.trim();
+        if (trimmed.endsWith('&') || trimmed.includes('test:interactive') || trimmed.includes('--profile')) {
+          const cleanCmd = trimmed.replace(/\s*&\s*$/, '');
+          return this.terminalManager.startSession(cleanCmd, undefined, this.workingDir);
+        }
         return await this.executeCommand(cmdStr);
       }
 
@@ -758,6 +848,34 @@ export class ToolExecutor {
         } catch (err: any) {
           return { error: `Web page read failed: ${err.message}`, url: args.url };
         }
+      }
+
+      case 'start_terminal_session': {
+        const { command, session_id } = args;
+        if (!command) return { error: 'Parameter command is required.' };
+        return this.terminalManager.startSession(command, session_id, this.workingDir);
+      }
+
+      case 'send_terminal_input': {
+        const { session_id, input } = args;
+        if (!session_id || input === undefined) return { error: 'Parameters session_id and input are required.' };
+        return this.terminalManager.sendInput(session_id, input);
+      }
+
+      case 'read_terminal_output': {
+        const { session_id, tail_lines } = args;
+        if (!session_id) return { error: 'Parameter session_id is required.' };
+        return this.terminalManager.readOutput(session_id, tail_lines || 50);
+      }
+
+      case 'list_terminal_sessions': {
+        return { sessions: this.terminalManager.listSessions() };
+      }
+
+      case 'terminate_terminal_session': {
+        const { session_id } = args;
+        if (!session_id) return { error: 'Parameter session_id is required.' };
+        return this.terminalManager.terminateSession(session_id);
       }
 
       default:
