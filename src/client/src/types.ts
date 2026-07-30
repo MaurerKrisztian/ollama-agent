@@ -5,12 +5,14 @@ export interface AgentConfig {
   systemPrompt: string;
   workingDir: string;
   showWorkingDirInfo: boolean;
+  maxLoops?: number;
   ollamaTokenConfigured?: boolean;
 }
 
 export interface ToolSettings {
   terminalMode: 'confirm' | 'auto';
   fileEditMode: 'confirm' | 'auto';
+  maxLoops?: number;
   enabledTools: {
     list_directory: boolean;
     read_file: boolean;

@@ -59,6 +59,7 @@ export interface AgentConfig {
   systemPrompt: string;
   workingDir: string;
   showWorkingDirInfo: boolean;
+  maxLoops?: number;
 }
 
 export interface ContextInfo {

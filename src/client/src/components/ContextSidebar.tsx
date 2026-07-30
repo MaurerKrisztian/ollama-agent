@@ -1,11 +1,12 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import { X, Copy, Check, FileJson, AlignLeft, Layers, FolderTree, RefreshCw } from 'lucide-react';
+import { X, Copy, Check, FileJson, AlignLeft, Layers, FolderTree, RefreshCw, Cpu } from 'lucide-react';
 import { ContextInfo } from '../types';
 
 interface ContextSidebarProps {
   isOpen: boolean;
   onClose: () => void;
   contextInfo: ContextInfo | null;
+  activeModel?: string;
 }
 
 function escapeHtml(str: string): string {
@@ -89,6 +90,7 @@ export const ContextSidebar: React.FC<ContextSidebarProps> = ({
   isOpen,
   onClose,
   contextInfo,
+  activeModel,
 }) => {
   const [activeTab, setActiveTab] = useState<'formatted' | 'json' | 'workdir'>('formatted');
   const [copied, setCopied] = useState(false);
@@ -96,6 +98,38 @@ export const ContextSidebar: React.FC<ContextSidebarProps> = ({
   const [workdirEnabled, setWorkdirEnabled] = useState(false);
   const [workdirLoading, setWorkdirLoading] = useState(false);
   const [workdirError, setWorkdirError] = useState('');
+  const [maxContextTokens, setMaxContextTokens] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!activeModel) return;
+
+    const fetchModelContext = async () => {
+      try {
+        const res = await fetch(`/api/models/show?name=${encodeURIComponent(activeModel)}`);
+        const data = await res.json();
+        if (data.success && data.details) {
+          let foundMax: number | null = null;
+          if (data.details.model_info && typeof data.details.model_info === 'object') {
+            for (const [key, value] of Object.entries(data.details.model_info)) {
+              if (key.endsWith('.context_length') && typeof value === 'number') {
+                foundMax = value;
+                break;
+              }
+            }
+          }
+          if (!foundMax && typeof data.details.parameters === 'string') {
+            const match = data.details.parameters.match(/num_ctx\s+(\d+)/i);
+            if (match) {
+              foundMax = parseInt(match[1], 10);
+            }
+          }
+          setMaxContextTokens(foundMax);
+        }
+      } catch (_) {}
+    };
+
+    fetchModelContext();
+  }, [activeModel]);
 
   const loadWorkdirContext = useCallback(async () => {
     setWorkdirLoading(true);
@@ -166,20 +200,71 @@ export const ContextSidebar: React.FC<ContextSidebarProps> = ({
         </button>
       </div>
 
+      {/* Context & Token Progress Bar */}
+      {contextInfo && (
+        <div style={{ padding: '12px 20px', background: 'rgba(15, 23, 42, 0.5)', borderBottom: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          {(() => {
+            const tokensUsed = contextInfo.estimatedTokens;
+            const tokensLeft = maxContextTokens ? Math.max(0, maxContextTokens - tokensUsed) : 0;
+            const pctUsed = maxContextTokens ? Math.min(100, Number(((tokensUsed / maxContextTokens) * 100).toFixed(1))) : 0;
+            const pctRemaining = maxContextTokens ? Math.max(0, Number((100 - pctUsed).toFixed(1))) : 0;
+
+            return (
+              <>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '0.8rem' }}>
+                  <span style={{ fontWeight: 600, color: 'var(--text-main)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <Cpu size={14} color="var(--accent-primary)" />
+                    <span>Token Context Usage</span>
+                  </span>
+                  <span style={{ fontFamily: 'var(--font-code)', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                    {maxContextTokens
+                      ? `${tokensUsed.toLocaleString()} / ${maxContextTokens.toLocaleString()} tokens`
+                      : `~${tokensUsed.toLocaleString()} tokens`}
+                  </span>
+                </div>
+
+                {maxContextTokens && (
+                  <div style={{ width: '100%', height: '8px', borderRadius: '4px', background: 'rgba(30, 41, 59, 0.8)', overflow: 'hidden', border: '1px solid var(--border-color)', position: 'relative' }}>
+                    <div
+                      style={{
+                        width: `${pctUsed}%`,
+                        height: '100%',
+                        background: pctUsed > 85 ? '#ef4444' : pctUsed > 65 ? '#f59e0b' : 'var(--accent-gradient)',
+                        transition: 'width 0.3s ease',
+                        borderRadius: '4px',
+                      }}
+                    />
+                  </div>
+                )}
+
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '0.725rem', color: 'var(--text-muted)' }}>
+                  <span>Used: <strong style={{ color: '#fff' }}>~{tokensUsed.toLocaleString()}</strong> {maxContextTokens ? `(${pctUsed}%)` : ''}</span>
+                  {maxContextTokens ? (
+                    <span>Remaining: <strong style={{ color: pctRemaining < 15 ? '#ef4444' : '#4ade80' }}>{tokensLeft.toLocaleString()}</strong> ({pctRemaining}%)</span>
+                  ) : (
+                    <span>Messages: <strong style={{ color: '#fff' }}>{contextInfo.totalMessages}</strong></span>
+                  )}
+                </div>
+              </>
+            );
+          })()}
+        </div>
+      )}
+
       {/* Live Stats Overview Badges */}
       {contextInfo && (
-        <div style={{ padding: '12px 20px', display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px', background: 'rgba(15, 23, 42, 0.4)', borderBottom: '1px solid var(--border-color)' }}>
-          <div style={{ background: 'rgba(99, 102, 241, 0.1)', border: '1px solid rgba(99, 102, 241, 0.2)', padding: '8px', borderRadius: '6px', textAlign: 'center' }}>
-            <span style={{ fontSize: '0.7rem', color: 'var(--accent-primary)', display: 'block', textTransform: 'uppercase', fontWeight: 600 }}>Tokens</span>
-            <span style={{ fontSize: '1rem', fontWeight: 700, color: '#fff' }}>~{contextInfo.estimatedTokens.toLocaleString()}</span>
+        <div style={{ padding: '10px 20px', display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px', background: 'rgba(15, 23, 42, 0.4)', borderBottom: '1px solid var(--border-color)' }}>
+          <div style={{ background: 'rgba(99, 102, 241, 0.1)', border: '1px solid rgba(99, 102, 241, 0.2)', padding: '6px 8px', borderRadius: '6px', textAlign: 'center' }}>
+            <span style={{ fontSize: '0.675rem', color: 'var(--accent-primary)', display: 'block', textTransform: 'uppercase', fontWeight: 600 }}>Tokens</span>
+            <span style={{ fontSize: '0.9rem', fontWeight: 700, color: '#fff' }}>~{contextInfo.estimatedTokens.toLocaleString()}</span>
           </div>
-          <div style={{ background: 'rgba(20, 184, 166, 0.1)', border: '1px solid rgba(20, 184, 166, 0.2)', padding: '8px', borderRadius: '6px', textAlign: 'center' }}>
-            <span style={{ fontSize: '0.7rem', color: 'var(--accent-teal)', display: 'block', textTransform: 'uppercase', fontWeight: 600 }}>Chars</span>
-            <span style={{ fontSize: '1rem', fontWeight: 700, color: '#fff' }}>{contextInfo.charCount.toLocaleString()}</span>
+          <div style={{ background: 'rgba(20, 184, 166, 0.1)', border: '1px solid rgba(20, 184, 166, 0.2)', padding: '6px 8px', borderRadius: '6px', textAlign: 'center' }}>
+            <span style={{ fontSize: '0.675rem', color: 'var(--accent-teal)', display: 'block', textTransform: 'uppercase', fontWeight: 600 }}>Chars</span>
+            <span style={{ fontSize: '0.9rem', fontWeight: 700, color: '#fff' }}>{contextInfo.charCount.toLocaleString()}</span>
           </div>
-          <div style={{ background: 'rgba(245, 158, 11, 0.1)', border: '1px solid rgba(245, 158, 11, 0.2)', padding: '8px', borderRadius: '6px', textAlign: 'center' }}>
-            <span style={{ fontSize: '0.7rem', color: 'var(--accent-amber)', display: 'block', textTransform: 'uppercase', fontWeight: 600 }}>Messages</span>
-            <span style={{ fontSize: '1rem', fontWeight: 700, color: '#fff' }}>{contextInfo.totalMessages}</span>
+          <div style={{ background: 'rgba(245, 158, 11, 0.1)', border: '1px solid rgba(245, 158, 11, 0.2)', padding: '6px 8px', borderRadius: '6px', textAlign: 'center' }}>
+            <span style={{ fontSize: '0.675rem', color: 'var(--accent-amber)', display: 'block', textTransform: 'uppercase', fontWeight: 600 }}>Messages</span>
+            <span style={{ fontSize: '0.9rem', fontWeight: 700, color: '#fff' }}>{contextInfo.totalMessages}</span>
           </div>
         </div>
       )}

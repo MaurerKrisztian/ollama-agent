@@ -81,6 +81,28 @@ export class OllamaClient {
   }
 
   /**
+   * Fetch full model details (Modelfile, parameters, template, model_info) via POST /api/show
+   */
+  public async getModelDetails(modelName: string): Promise<any> {
+    try {
+      const res = await fetch(`${this.host}/api/show`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...this.getHeaders(),
+        },
+        body: JSON.stringify({ name: modelName }),
+      });
+      if (!res.ok) {
+        throw new Error(`Ollama server returned HTTP ${res.status}`);
+      }
+      return await res.json();
+    } catch (err: any) {
+      throw new Error(`Failed to fetch model details for "${modelName}": ${err.message}`);
+    }
+  }
+
+  /**
    * Helper method to parse tool calls from model output text
    * Supports XML tags, Markdown JSON codeblocks, and raw JSON objects
    */

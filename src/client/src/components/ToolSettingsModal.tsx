@@ -1,5 +1,5 @@
 import React from 'react';
-import { X, ShieldAlert, Terminal, Edit3, Wrench, Check, RefreshCw, Cpu } from 'lucide-react';
+import { X, ShieldAlert, Terminal, Edit3, Wrench, Check, RefreshCw, Cpu, RotateCcw } from 'lucide-react';
 import { ToolSettings } from '../types';
 import { JsonEditor } from './JsonEditor';
 
@@ -206,7 +206,49 @@ export const ToolSettingsModal: React.FC<ToolSettingsModalProps> = ({
             </div>
           </div>
 
-          {/* Section 3: Enabled Toolset Toggles */}
+          {/* Section 3: Max Tool Call Iterations */}
+          <div style={{ background: 'rgba(15, 23, 42, 0.6)', padding: '16px', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <RotateCcw size={18} color="var(--accent-primary)" />
+                <span style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--text-main)' }}>
+                  Max Tool Call Iterations (`maxLoops`)
+                </span>
+              </div>
+              <span
+                style={{
+                  fontSize: '0.8rem',
+                  fontWeight: 700,
+                  fontFamily: 'var(--font-code)',
+                  color: 'var(--accent-primary)',
+                  background: 'rgba(99, 102, 241, 0.15)',
+                  padding: '2px 8px',
+                  borderRadius: '6px',
+                  border: '1px solid rgba(99, 102, 241, 0.3)',
+                }}
+              >
+                {settings.maxLoops ?? 10} iterations
+              </span>
+            </div>
+            <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', lineHeight: 1.5, marginBottom: '12px' }}>
+              Limits the maximum number of sequential tool calls the agent can perform in a single user turn. Increase for complex multi-file refactoring or deep research tasks.
+            </p>
+            <input
+              type="range"
+              min="1"
+              max="30"
+              step="1"
+              value={settings.maxLoops ?? 10}
+              onChange={(e) => onUpdateSettings({ ...settings, maxLoops: Number(e.target.value) })}
+              style={{
+                width: '100%',
+                accentColor: 'var(--accent-primary)',
+                cursor: 'pointer',
+              }}
+            />
+          </div>
+
+          {/* Section 4: Enabled Toolset Toggles */}
           <div style={{ background: 'rgba(15, 23, 42, 0.6)', padding: '16px', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
             <span style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--text-main)', display: 'block', marginBottom: '10px' }}>
               Active Toolset Controls

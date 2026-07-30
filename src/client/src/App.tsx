@@ -7,6 +7,7 @@ import { BenchmarkView } from './components/BenchmarkView';
 import { ToolSettingsModal } from './components/ToolSettingsModal';
 import { ConnectionSettingsModal } from './components/ConnectionSettingsModal';
 import { DirectoryPickerModal } from './components/DirectoryPickerModal';
+import { ModelDetailsModal } from './components/ModelDetailsModal';
 import { AgentConfig, ChatMessage, ContextInfo, OllamaModelInfo, OllamaRunningModelInfo, PendingApprovalCall, TextAttachment, ToolSettings } from './types';
 
 export const App: React.FC = () => {
@@ -46,6 +47,7 @@ export const App: React.FC = () => {
   const [toolSettingsModalOpen, setToolSettingsModalOpen] = useState(false);
   const [connectionSettingsModalOpen, setConnectionSettingsModalOpen] = useState(false);
   const [directoryPickerOpen, setDirectoryPickerOpen] = useState(false);
+  const [modelDetailsModalOpen, setModelDetailsModalOpen] = useState(false);
 
   const [streamingText, setStreamingText] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
@@ -256,13 +258,14 @@ export const App: React.FC = () => {
 
   const handleUpdateToolSettings = async (newSettings: ToolSettings) => {
     setToolSettings(newSettings);
-    // Sync approval modes to server
+    // Sync approval modes & maxLoops to server
     await fetch('/api/chat/tool-settings', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         terminalMode: newSettings.terminalMode,
         fileEditMode: newSettings.fileEditMode,
+        maxLoops: newSettings.maxLoops,
       }),
     });
   };
@@ -396,6 +399,7 @@ export const App: React.FC = () => {
         onOpenWorkingDirPicker={() => setDirectoryPickerOpen(true)}
         onToggleWorkingDirInfo={handleToggleWorkingDirInfo}
         onRefreshModels={loadInitialState}
+        onOpenModelDetails={() => setModelDetailsModalOpen(true)}
       />
 
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
@@ -425,6 +429,7 @@ export const App: React.FC = () => {
           isOpen={sidebarOpen}
           onClose={() => setSidebarOpen(false)}
           contextInfo={contextInfo}
+          activeModel={config.model}
         />
       </div>
 
@@ -455,6 +460,14 @@ export const App: React.FC = () => {
         currentDir={config.workingDir}
         onClose={() => setDirectoryPickerOpen(false)}
         onSelect={handleChangeWorkingDir}
+      />
+
+      <ModelDetailsModal
+        isOpen={modelDetailsModalOpen}
+        onClose={() => setModelDetailsModalOpen(false)}
+        selectedModel={config.model}
+        installedModels={models}
+        runningModels={runningModels}
       />
     </div>
   );

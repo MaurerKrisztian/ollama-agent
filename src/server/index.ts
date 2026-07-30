@@ -56,6 +56,17 @@ app.get('/api/models/running', async (req, res) => {
   }
 });
 
+// GET /api/models/show - Fetch detailed spec (Modelfile, parameters, template, model_info) for a model
+app.get('/api/models/show', async (req, res) => {
+  try {
+    const modelName = typeof req.query.name === 'string' ? req.query.name : agent.getConfig().model;
+    const details = await agent.getModelDetails(modelName);
+    res.json({ success: true, name: modelName, details });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // GET /api/config - Get current configuration & context stats
 app.get('/api/config', (req, res) => {
   res.json({
@@ -96,7 +107,7 @@ app.get('/api/directories', async (req, res) => {
 
 // POST /api/config - Update configuration
 app.post('/api/config', (req, res) => {
-  const { model, systemPrompt, workingDir, showWorkingDirInfo, ollamaHost, ollamaToken, temperature } = req.body;
+  const { model, systemPrompt, workingDir, showWorkingDirInfo, ollamaHost, ollamaToken, temperature, maxLoops } = req.body;
 
   if (ollamaHost !== undefined) {
     try {
@@ -114,7 +125,7 @@ app.post('/api/config', (req, res) => {
     }
   }
 
-  agent.updateConfig({ model, systemPrompt, workingDir, showWorkingDirInfo, ollamaHost, ollamaToken, temperature });
+  agent.updateConfig({ model, systemPrompt, workingDir, showWorkingDirInfo, ollamaHost, ollamaToken, temperature, maxLoops });
 
   res.json({
     success: true,
@@ -266,16 +277,24 @@ app.post('/api/chat/tool-approval', (req, res) => {
   }
 });
 
-// POST /api/chat/tool-settings - Update tool approval preferences
+// POST /api/chat/tool-settings - Update tool approval preferences & max loops
 app.post('/api/chat/tool-settings', (req, res) => {
-  const { terminalMode, fileEditMode } = req.body;
+  const { terminalMode, fileEditMode, maxLoops } = req.body;
   if (terminalMode === 'confirm' || terminalMode === 'auto') {
     terminalRequireConfirm = terminalMode === 'confirm';
   }
   if (fileEditMode === 'confirm' || fileEditMode === 'auto') {
     fileEditRequireConfirm = fileEditMode === 'confirm';
   }
-  res.json({ success: true, terminalRequireConfirm, fileEditRequireConfirm });
+  if (typeof maxLoops === 'number' && maxLoops >= 1 && maxLoops <= 50) {
+    agent.updateConfig({ maxLoops });
+  }
+  res.json({
+    success: true,
+    terminalRequireConfirm,
+    fileEditRequireConfirm,
+    config: getPublicConfig(),
+  });
 });
 
 // POST /api/chat/cancel - Abort the active Ollama generation

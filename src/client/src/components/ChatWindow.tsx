@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Send, Square, Wrench, CheckCircle2, XCircle, ShieldAlert, User, Bot, Loader2, FileText, Folder, Terminal, Edit3, Search, PlusCircle, Sparkles, Code2, Eye, ChevronDown, X } from 'lucide-react';
+import { Send, Square, Wrench, CheckCircle2, XCircle, ShieldAlert, User, Bot, Loader2, FileText, Folder, Terminal, Edit3, Search, PlusCircle, Sparkles, Code2, Eye, ChevronDown, X, Globe, ExternalLink, Layers } from 'lucide-react';
 import { ChatMessage, FileDiffData, PendingApprovalCall, TextAttachment } from '../types';
 
 const compactValue = (value: unknown, maxLength = 64): string => {
@@ -116,11 +116,150 @@ const getToolResultSummary = (
   }
 };
 
+const WebSearchResultsView: React.FC<{
+  query: string;
+  results: Array<{ title: string; url: string; snippet: string }>;
+}> = ({ query, results }) => (
+  <div style={{ marginTop: '10px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+    {/* Query Header */}
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        padding: '6px 10px',
+        background: 'rgba(15, 23, 42, 0.6)',
+        borderRadius: '6px',
+        border: '1px solid rgba(20, 184, 166, 0.2)',
+        fontSize: '0.775rem',
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', overflow: 'hidden' }}>
+        <Search size={13} color="var(--accent-teal)" />
+        <span style={{ color: 'var(--text-muted)' }}>Query:</span>
+        <span style={{ fontWeight: 600, color: 'var(--text-main)', fontFamily: 'var(--font-code)', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
+          "{query}"
+        </span>
+      </div>
+      <span
+        style={{
+          fontSize: '0.7rem',
+          padding: '2px 8px',
+          borderRadius: '10px',
+          background: 'rgba(20, 184, 166, 0.15)',
+          color: 'var(--accent-teal)',
+          fontWeight: 600,
+          flexShrink: 0,
+        }}
+      >
+        {results.length} result{results.length === 1 ? '' : 's'}
+      </span>
+    </div>
+
+    {/* Results Cards List */}
+    {results.length === 0 ? (
+      <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontStyle: 'italic', padding: '8px' }}>
+        No search results found.
+      </div>
+    ) : (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        {results.map((r, idx) => {
+          let domain = '';
+          try {
+            domain = new URL(r.url).hostname.replace(/^www\./, '');
+          } catch (_) {}
+
+          return (
+            <div
+              key={idx}
+              style={{
+                padding: '10px 12px',
+                borderRadius: '8px',
+                background: 'rgba(15, 23, 42, 0.5)',
+                border: '1px solid var(--border-color)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '4px',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+                <a
+                  href={r.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{
+                    fontSize: '0.875rem',
+                    fontWeight: 600,
+                    color: '#38bdf8',
+                    textDecoration: 'none',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    lineHeight: 1.3,
+                  }}
+                >
+                  <Globe size={13} style={{ flexShrink: 0, color: 'var(--accent-teal)' }} />
+                  <span>{r.title}</span>
+                  <ExternalLink size={11} style={{ flexShrink: 0, opacity: 0.7 }} />
+                </a>
+                {domain && (
+                  <span
+                    style={{
+                      fontSize: '0.7rem',
+                      fontFamily: 'var(--font-code)',
+                      color: 'var(--text-dim)',
+                      background: 'rgba(30, 41, 59, 0.6)',
+                      padding: '2px 6px',
+                      borderRadius: '4px',
+                      border: '1px solid var(--border-color)',
+                      flexShrink: 0,
+                    }}
+                  >
+                    {domain}
+                  </span>
+                )}
+              </div>
+              <p style={{ margin: 0, fontSize: '0.8rem', color: '#cbd5e1', lineHeight: 1.45 }}>
+                {r.snippet}
+              </p>
+            </div>
+          );
+        })}
+      </div>
+    )}
+  </div>
+);
+
+const WebPageReaderView: React.FC<{
+  title?: string;
+  url?: string;
+  markdown?: string;
+}> = ({ title, url, markdown }) => (
+  <div style={{ marginTop: '10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+    {url && (
+      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.775rem' }}>
+        <Globe size={13} color="var(--accent-teal)" />
+        <a href={url} target="_blank" rel="noreferrer" style={{ color: '#38bdf8', textDecoration: 'none', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}>
+          <span>{title || url}</span>
+          <ExternalLink size={11} />
+        </a>
+      </div>
+    )}
+    {markdown && (
+      <div style={{ padding: '12px', background: 'rgba(15, 23, 42, 0.5)', borderRadius: '8px', border: '1px solid var(--border-color)', maxHeight: '360px', overflowY: 'auto' }}>
+        <MarkdownContent content={markdown} />
+      </div>
+    )}
+  </div>
+);
+
 const ToolResultCard: React.FC<{
   message: ChatMessage;
   args: Record<string, any>;
 }> = ({ message, args }) => {
   const [expanded, setExpanded] = useState(false);
+  const [viewMode, setViewMode] = useState<'formatted' | 'raw'>('formatted');
+
   let parsedContent: any = null;
   try {
     parsedContent = JSON.parse(message.content);
@@ -132,6 +271,10 @@ const ToolResultCard: React.FC<{
     : parsedContent;
   const summary = getToolResultSummary(message.name, args, parsedContent);
 
+  const isWebSearch = message.name === 'web_search' && parsedContent?.results;
+  const isWebPageRead = message.name === 'read_web_page' && parsedContent?.markdown;
+  const hasFormattedView = isWebSearch || isWebPageRead || fileDiff;
+
   return (
     <div className="animate-fade-in" style={{ marginLeft: '44px', maxWidth: '80%' }}>
       <div style={{ background: 'rgba(20, 184, 166, 0.08)', border: '1px solid rgba(20, 184, 166, 0.25)', borderRadius: '8px', fontSize: '0.825rem', overflow: 'hidden' }}>
@@ -139,7 +282,7 @@ const ToolResultCard: React.FC<{
           type="button"
           onClick={() => setExpanded((current) => !current)}
           aria-expanded={expanded}
-          title={expanded ? 'Hide raw tool result' : 'Show raw tool result'}
+          title={expanded ? 'Hide tool result' : 'Show tool result'}
           style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '7px', padding: '7px 10px', border: 0, background: 'transparent', color: 'var(--accent-teal)', cursor: 'pointer', textAlign: 'left', font: 'inherit' }}
         >
           <CheckCircle2 size={14} style={{ flexShrink: 0 }} />
@@ -151,12 +294,88 @@ const ToolResultCard: React.FC<{
           )}
           <ChevronDown size={15} style={{ marginLeft: 'auto', flexShrink: 0, transform: expanded ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s ease' }} />
         </button>
+
         {expanded && (
           <div style={{ padding: '0 12px 12px', borderTop: '1px solid rgba(20, 184, 166, 0.18)' }}>
-            <pre style={{ margin: '10px 0 0', maxHeight: '320px', overflow: 'auto', fontSize: '0.775rem' }}>
-              {resultWithoutDiff ? JSON.stringify(resultWithoutDiff, null, 2) : message.content}
-            </pre>
-            {fileDiff && <FileDiff diff={fileDiff} />}
+            {/* View Mode Toggle Header Bar */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: '8px' }}>
+              <div style={{ display: 'flex', gap: '6px' }}>
+                <button
+                  type="button"
+                  onClick={() => setViewMode('formatted')}
+                  style={{
+                    padding: '3px 9px',
+                    borderRadius: '4px',
+                    border: '1px solid',
+                    borderColor: viewMode === 'formatted' ? 'var(--accent-teal)' : 'transparent',
+                    background: viewMode === 'formatted' ? 'rgba(20, 184, 166, 0.2)' : 'transparent',
+                    color: viewMode === 'formatted' ? 'var(--accent-teal)' : 'var(--text-muted)',
+                    fontSize: '0.725rem',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                  }}
+                >
+                  <Eye size={12} />
+                  <span>Formatted</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewMode('raw')}
+                  style={{
+                    padding: '3px 9px',
+                    borderRadius: '4px',
+                    border: '1px solid',
+                    borderColor: viewMode === 'raw' ? 'var(--accent-teal)' : 'transparent',
+                    background: viewMode === 'raw' ? 'rgba(20, 184, 166, 0.2)' : 'transparent',
+                    color: viewMode === 'raw' ? 'var(--accent-teal)' : 'var(--text-muted)',
+                    fontSize: '0.725rem',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                  }}
+                >
+                  <Code2 size={12} />
+                  <span>Raw JSON</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Formatted View Content */}
+            {viewMode === 'formatted' ? (
+              <>
+                {isWebSearch && (
+                  <WebSearchResultsView
+                    query={parsedContent?.query || args?.query || ''}
+                    results={parsedContent?.results || []}
+                  />
+                )}
+                {isWebPageRead && (
+                  <WebPageReaderView
+                    title={parsedContent?.title}
+                    url={parsedContent?.url || args?.url}
+                    markdown={parsedContent?.markdown}
+                  />
+                )}
+                {!isWebSearch && !isWebPageRead && fileDiff && (
+                  <FileDiff diff={fileDiff} />
+                )}
+                {!isWebSearch && !isWebPageRead && !fileDiff && (
+                  <pre style={{ margin: '10px 0 0', maxHeight: '320px', overflow: 'auto', fontSize: '0.775rem' }}>
+                    {resultWithoutDiff ? JSON.stringify(resultWithoutDiff, null, 2) : message.content}
+                  </pre>
+                )}
+              </>
+            ) : (
+              /* Raw View Content */
+              <pre style={{ margin: '10px 0 0', maxHeight: '320px', overflow: 'auto', fontSize: '0.775rem' }}>
+                {resultWithoutDiff ? JSON.stringify(resultWithoutDiff, null, 2) : message.content}
+              </pre>
+            )}
           </div>
         )}
       </div>

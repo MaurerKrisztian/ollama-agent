@@ -126,6 +126,7 @@ export class AgentEngine {
         'You are an intelligent AI assistant with tools for workspace files, terminal commands, web search, and reading public web pages. Use web tools for current online information and workspace tools only for local files. For stable general knowledge or math, answer directly without tools.',
       workingDir: config?.workingDir || process.cwd(),
       showWorkingDirInfo: config?.showWorkingDirInfo ?? false,
+      maxLoops: config?.maxLoops !== undefined ? config.maxLoops : 10,
     };
 
     this.toolExecutor = new ToolExecutor(this.config.workingDir);
@@ -197,6 +198,11 @@ export class AgentEngine {
     return this.ollamaClient.getRunningModels();
   }
 
+  public async getModelDetails(name?: string): Promise<any> {
+    const targetModel = name || this.config.model;
+    return this.ollamaClient.getModelDetails(targetModel);
+  }
+
   public resetChat(): void {
     this.contextManager.clear();
   }
@@ -211,7 +217,7 @@ export class AgentEngine {
     });
     if (callbacks?.onMessageAdded) callbacks.onMessageAdded(userMsg);
 
-    let maxLoops = 8;
+    let maxLoops = this.config.maxLoops ?? 10;
     let finalAssistantResponse = '';
     const requestedTools = inferExplicitlyRequestedTools(userMessage);
     const requiredToolCounts = inferRequiredToolCounts(userMessage, requestedTools);

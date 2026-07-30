@@ -12,6 +12,7 @@ import {
   Loader2,
   Wrench,
   Server,
+  Info,
 } from 'lucide-react';
 import { AgentConfig, ContextInfo, OllamaModelInfo, OllamaRunningModelInfo } from '../types';
 
@@ -35,6 +36,7 @@ interface HeaderProps {
   onOpenWorkingDirPicker: () => void;
   onToggleWorkingDirInfo: (enabled: boolean) => void;
   onRefreshModels: () => void;
+  onOpenModelDetails: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -57,6 +59,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenWorkingDirPicker,
   onToggleWorkingDirInfo,
   onRefreshModels,
+  onOpenModelDetails,
 }) => {
   return (
     <header className="glass-panel" style={{ padding: '12px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', zIndex: 10 }}>
@@ -164,6 +167,26 @@ export const Header: React.FC<HeaderProps> = ({
             style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '2px', display: 'flex' }}
           >
             <RefreshCw size={14} />
+          </button>
+          <button
+            onClick={onOpenModelDetails}
+            title="Inspect Model Details (Modelfile, GGUF specs, parameters)"
+            style={{
+              background: 'rgba(30, 41, 59, 0.8)',
+              border: '1px solid var(--border-color)',
+              color: 'var(--accent-primary)',
+              borderRadius: '6px',
+              padding: '4px 8px',
+              fontSize: '0.75rem',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+              fontWeight: 600,
+            }}
+          >
+            <Info size={13} />
+            <span>Inspect Specs</span>
           </button>
         </div>
 
