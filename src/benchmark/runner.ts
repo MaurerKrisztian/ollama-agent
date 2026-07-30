@@ -172,6 +172,19 @@ export async function runSingleBenchmarkTest(
     }
   }
 
+  if (passed && testCase.expectedResponseSubstrings?.length) {
+    const normalizedResponse = responseContent.toLowerCase();
+    const missingFacts = testCase.expectedResponseSubstrings.filter(
+      (expected) => !normalizedResponse.includes(expected.toLowerCase())
+    );
+    if (missingFacts.length > 0) {
+      passed = false;
+      reason = `Failed Information Retrieval: Tool usage was correct, but the final response was missing: ${missingFacts.join(', ')}.`;
+    } else {
+      reason = `Passed Information Retrieval: Correct tool call and grounded response containing ${testCase.expectedResponseSubstrings.join(', ')}.`;
+    }
+  }
+
   // Disk Verification Assertion for edit_file tasks
   if (passed && actualToolsCalled.some((t) => t.name === 'edit_file')) {
     if (testCase.expectedArgSubstrings && testCase.expectedArgSubstrings.replacement_text !== undefined) {

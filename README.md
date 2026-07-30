@@ -48,10 +48,11 @@ No cloud, no API keys, no data leaving your machine.
 | `execute_command` | Run terminal shell commands (with approval gate) |
 
 ### 🧪 Benchmark Suite
-- **15 targeted test cases** across 8 categories:
+- **28 targeted test cases** across 10 categories:
   - Directory Reading, File Reading, File Creation, File Editing
   - Code Editing, Code Search, Discrimination (no-tool), Multi-Step Workflow
   - **Terminal Execution (Isolated Docker Sandbox)**
+  - **Information Retrieval** from short, medium, and long files with grounded-answer checks
 - Isolated Docker container sandbox for terminal benchmark tests — no host system risk
 - Per-category filter chips in the UI
 
@@ -85,7 +86,7 @@ local-model-chat/
 │   │       └── types.ts
 │   └── benchmark/          # Benchmark runner + test cases
 │       ├── runner.ts       # AgentBenchmarkRunner + Docker sandbox
-│       └── testCases.ts    # 15 test cases across 8 categories
+│       └── testCases.ts    # 28 test cases across 10 categories
 ├── agent                   # Global CLI wrapper script (bash → local tsx)
 └── package.json
 ```
@@ -208,7 +209,7 @@ curl -X POST http://localhost:3001/api/benchmark/run-single \
   -d '{"testId": "dir_read_1", "model": "qwen2.5-coder:7b"}'
 ```
 
-**Tested model (`qwen2.5-coder:7b`) benchmark results: 100% pass rate across all 15 tasks.**
+**Latest `qwen2.5-coder:7b` run:** information retrieval 3/3; full suite 27/28 (96%). Local-model results can vary between runs.
 
 ---
 

@@ -349,6 +349,7 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
               { id: 'discrimination', label: 'Discrimination' },
               { id: 'multi_step_workflow', label: '⚡ Multi-Step Workflow' },
               { id: 'terminal_execution', label: '🐚 Terminal (Docker Sandbox)' },
+              { id: 'information_retrieval', label: '🔎 Information Retrieval' },
             ].map((cat) => {
               const catTotal = cat.id === 'all' ? testCasesInfo.length : testCasesInfo.filter((t) => t.category === cat.id).length;
               const catPassed = cat.id === 'all'

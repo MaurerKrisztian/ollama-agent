@@ -13,6 +13,13 @@ export async function setupMockEnvironment(): Promise<string> {
   await fs.mkdir(MOCK_ENV_DIR, { recursive: true });
 
   // Create distinct mock files and subdirectories (zero overlap with system prompt examples)
+  const makeReport = (lineCount: number, factLine: number, fact: string) =>
+    Array.from({ length: lineCount }, (_, index) => {
+      const line = index + 1;
+      if (line === factLine) return `IMPORTANT RECORD: ${fact}`;
+      return `Record ${String(line).padStart(4, '0')}: routine operational telemetry was reviewed and no exception was recorded.`;
+    }).join('\n');
+
   const mockFiles = [
     {
       filePath: 'user_profile.json',
@@ -38,6 +45,18 @@ export async function setupMockEnvironment(): Promise<string> {
     {
       filePath: 'modules/utility.js',
       content: 'export function computeHash(input) { return "hash_" + input.length; }',
+    },
+    {
+      filePath: 'retrieval/short_brief.txt',
+      content: makeReport(12, 7, 'The launch codename is AURORA-LIME.'),
+    },
+    {
+      filePath: 'retrieval/medium_report.txt',
+      content: makeReport(140, 83, 'The scheduled backup window is Thursday at 02:30 UTC.'),
+    },
+    {
+      filePath: 'retrieval/long_archive.txt',
+      content: makeReport(420, 397, 'The emergency recovery phrase is ORBIT-CEDAR-731.'),
     },
   ];
 

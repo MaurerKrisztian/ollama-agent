@@ -10,11 +10,13 @@ export interface BenchmarkTestCase {
     | 'code_search'
     | 'discrimination'
     | 'multi_step_workflow'
-    | 'terminal_execution';
+    | 'terminal_execution'
+    | 'information_retrieval';
   prompt: string;
   expectedTool?: string | null;
   expectedToolSequence?: string[];
   expectedArgSubstrings?: Record<string, string>;
+  expectedResponseSubstrings?: string[];
   description: string;
   objective: string;
   requiredOutput: string;
@@ -333,5 +335,45 @@ export const BENCHMARK_TEST_CASES: BenchmarkTestCase[] = [
     objective: 'Tests chained shell commands where the output of one informs the next.',
     requiredOutput: 'Two sequential execute_command calls: grep userId user_profile.json, then echo "User ID is 9482".',
     evaluationCriteria: 'PASSES if execute_command is called at least twice. FAILS if only one command is issued or file tools are used.',
+  },
+  // --- CATEGORY 9: INFORMATION RETRIEVAL ---
+  {
+    id: 'test_retrieval_short_file',
+    name: 'Information Retrieval (Short File)',
+    category: 'information_retrieval',
+    prompt: 'Read retrieval/short_brief.txt and tell me the launch codename. Answer using the file content.',
+    expectedTool: 'read_file',
+    expectedArgSubstrings: { relative_path: 'short_brief.txt' },
+    expectedResponseSubstrings: ['AURORA-LIME'],
+    description: 'Retrieves a precise fact from a short text fixture.',
+    objective: 'Tests grounded question answering over a short file.',
+    requiredOutput: 'The final answer must contain AURORA-LIME.',
+    evaluationCriteria: 'PASSES only if read_file is called for short_brief.txt and the final response contains AURORA-LIME.',
+  },
+  {
+    id: 'test_retrieval_medium_file',
+    name: 'Information Retrieval (Medium File)',
+    category: 'information_retrieval',
+    prompt: 'Read retrieval/medium_report.txt and report the scheduled backup day and time. Answer using the file content.',
+    expectedTool: 'read_file',
+    expectedArgSubstrings: { relative_path: 'medium_report.txt' },
+    expectedResponseSubstrings: ['Thursday', '02:30 UTC'],
+    description: 'Retrieves a precise fact embedded near the middle of a medium text fixture.',
+    objective: 'Tests grounded question answering over a medium file.',
+    requiredOutput: 'The final answer must contain Thursday and 02:30 UTC.',
+    evaluationCriteria: 'PASSES only if read_file is called for medium_report.txt and the final response contains both expected facts.',
+  },
+  {
+    id: 'test_retrieval_long_file',
+    name: 'Information Retrieval (Long File, Near-End Fact)',
+    category: 'information_retrieval',
+    prompt: 'Read retrieval/long_archive.txt and return the exact emergency recovery phrase. Answer using the file content.',
+    expectedTool: 'read_file',
+    expectedArgSubstrings: { relative_path: 'long_archive.txt' },
+    expectedResponseSubstrings: ['ORBIT-CEDAR-731'],
+    description: 'Retrieves a unique fact placed near the end of a long text fixture.',
+    objective: 'Tests long-context grounded retrieval without relying on tool-call success alone.',
+    requiredOutput: 'The final answer must contain ORBIT-CEDAR-731.',
+    evaluationCriteria: 'PASSES only if read_file is called for long_archive.txt and the final response contains ORBIT-CEDAR-731.',
   },
 ];
