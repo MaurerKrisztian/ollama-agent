@@ -9,7 +9,7 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '2mb' }));
 
 // Initialize shared Agent Engine
 const agent = new AgentEngine({
@@ -155,11 +155,33 @@ app.post('/api/chat/cancel', (_req, res) => {
 
 // POST /api/chat - Stream chat completion via Server-Sent Events (SSE)
 app.post('/api/chat', async (req, res) => {
-  const { message } = req.body;
+  const { message, attachments = [] } = req.body;
 
   if (!message || typeof message !== 'string') {
     return res.status(400).json({ error: 'Field "message" is required.' });
   }
+  if (!Array.isArray(attachments) || attachments.length > 10) {
+    return res.status(400).json({ error: 'Attachments must be an array of at most 10 text files.' });
+  }
+  const validAttachments = attachments.every((file: any) =>
+    file && typeof file.name === 'string' && file.name.length <= 255 &&
+    typeof file.content === 'string' && typeof file.size === 'number' &&
+    file.size >= 0 && Buffer.byteLength(file.content, 'utf8') <= 512 * 1024
+  );
+  const totalAttachmentSize = attachments.reduce(
+    (total: number, file: any) =>
+      total + (typeof file?.content === 'string' ? Buffer.byteLength(file.content, 'utf8') : 0),
+    0,
+  );
+  if (!validAttachments || totalAttachmentSize > 1024 * 1024) {
+    return res.status(400).json({ error: 'Invalid attachment or attachment size limit exceeded (512 KB each, 1 MB total).' });
+  }
+
+  const modelMessage = attachments.length
+    ? `${message}\n\nThe user attached the following text files. Use their contents to answer the request.\n\n${attachments
+        .map((file: any) => `<attached_file name=${JSON.stringify(file.name)}>\n${file.content}\n</attached_file>`)
+        .join('\n\n')}`
+    : message;
 
   // Setup Server-Sent Events headers
   res.setHeader('Content-Type', 'text/event-stream');
@@ -224,7 +246,9 @@ app.post('/api/chat', async (req, res) => {
   };
 
   try {
-    const finalContent = await agent.sendMessage(message, {
+    const finalContent = await agent.sendMessage(modelMessage, {
+      userDisplayContent: message,
+      userAttachments: attachments,
       onChunk: (chunk) => {
         sendEvent('chunk', { chunk });
       },

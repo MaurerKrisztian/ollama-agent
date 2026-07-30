@@ -10,6 +10,7 @@ No cloud, no API keys, no data leaving your machine.
 
 ### 🖥️ Web UI (React + Vite)
 - **Live streaming chat** with glassmorphism dark UI
+- **Drag-and-drop text attachments** — send up to 10 text files with a prompt and ask the model about their contents
 - **Quick prompt chips** — 1-click: List Directory, Read File, Run Terminal Cmd, Edit File, Search Code, Create File
 - **Welcome starter grid** — 6 interactive template cards on empty chat sessions
 - **🟢 VRAM Loaded Model Badge** — shows which model is hot in GPU VRAM, memory size, quantization level

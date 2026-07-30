@@ -6,7 +6,7 @@ import { SystemPromptModal } from './components/SystemPromptModal';
 import { BenchmarkView } from './components/BenchmarkView';
 import { ToolSettingsModal } from './components/ToolSettingsModal';
 import { ConnectionSettingsModal } from './components/ConnectionSettingsModal';
-import { AgentConfig, ChatMessage, ContextInfo, OllamaModelInfo, OllamaRunningModelInfo, PendingApprovalCall, ToolSettings } from './types';
+import { AgentConfig, ChatMessage, ContextInfo, OllamaModelInfo, OllamaRunningModelInfo, PendingApprovalCall, TextAttachment, ToolSettings } from './types';
 
 export const App: React.FC = () => {
   const [activeView, setActiveView] = useState<'chat' | 'benchmark'>('chat');
@@ -222,7 +222,7 @@ export const App: React.FC = () => {
     });
   };
 
-  const handleSendMessage = async (userPrompt: string) => {
+  const handleSendMessage = async (userPrompt: string, attachments: TextAttachment[] = []) => {
     setIsGenerating(true);
     setGenerationStatus('generating');
     setStreamingText('');
@@ -231,7 +231,7 @@ export const App: React.FC = () => {
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: userPrompt }),
+        body: JSON.stringify({ message: userPrompt, attachments }),
       });
 
       if (!response.ok || !response.body) {

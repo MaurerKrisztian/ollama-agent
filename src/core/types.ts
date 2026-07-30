@@ -14,8 +14,16 @@ export interface ChatMessage {
   tool_calls?: ToolCall[];
   tool_call_id?: string;
   timestamp: number;
+  displayContent?: string;
+  attachments?: TextAttachment[];
 }
 
+export interface TextAttachment {
+  name: string;
+  content: string;
+  size: number;
+  type?: string;
+}
 export interface ToolParameter {
   type: string;
   description: string;

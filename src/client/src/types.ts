@@ -70,8 +70,16 @@ export interface ChatMessage {
   }>;
   tool_call_id?: string;
   timestamp: number;
+  displayContent?: string;
+  attachments?: TextAttachment[];
 }
 
+export interface TextAttachment {
+  name: string;
+  content: string;
+  size: number;
+  type?: string;
+}
 export interface FileDiffData {
   path: string;
   oldPath: string;

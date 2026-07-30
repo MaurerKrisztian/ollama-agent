@@ -9,6 +9,8 @@ export interface AgentSendMessageOptions {
   onToolEnd?: (name: string, result: any) => void;
   onMessageAdded?: (message: ChatMessage) => void;
   signal?: AbortSignal;
+  userDisplayContent?: string;
+  userAttachments?: ChatMessage['attachments'];
 }
 
 export type AgentConfigUpdate = Partial<AgentConfig> & { ollamaToken?: string };
@@ -182,6 +184,8 @@ export class AgentEngine {
     const userMsg = this.contextManager.addMessage({
       role: 'user',
       content: userMessage,
+      displayContent: callbacks?.userDisplayContent,
+      attachments: callbacks?.userAttachments,
     });
     if (callbacks?.onMessageAdded) callbacks.onMessageAdded(userMsg);
 

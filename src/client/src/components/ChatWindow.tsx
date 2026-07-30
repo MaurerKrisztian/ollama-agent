@@ -1,14 +1,61 @@
 import React, { useState, useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Send, Square, Wrench, CheckCircle2, XCircle, ShieldAlert, User, Bot, Loader2, FileText, Folder, Terminal, Edit3, Search, PlusCircle, Sparkles, Code2, Eye, ChevronDown } from 'lucide-react';
-import { ChatMessage, FileDiffData, PendingApprovalCall } from '../types';
+import { Send, Square, Wrench, CheckCircle2, XCircle, ShieldAlert, User, Bot, Loader2, FileText, Folder, Terminal, Edit3, Search, PlusCircle, Sparkles, Code2, Eye, ChevronDown, X } from 'lucide-react';
+import { ChatMessage, FileDiffData, PendingApprovalCall, TextAttachment } from '../types';
 
 const compactValue = (value: unknown, maxLength = 64): string => {
   if (value === undefined || value === null || value === '') return '';
   const text = typeof value === 'string' ? value : JSON.stringify(value);
   const singleLine = text.replace(/\s+/g, ' ').trim();
   return `"${singleLine.length > maxLength ? `${singleLine.slice(0, maxLength - 1)}…` : singleLine}"`;
+};
+
+const EXTENSION_LANGUAGES: Record<string, { label: string; color: string; keywords: string[] }> = {
+  js: { label: 'JavaScript', color: '#f7df1e', keywords: ['const', 'let', 'var', 'function', 'return', 'async', 'await', 'if', 'else', 'for', 'while', 'class', 'new', 'import', 'export', 'from', 'default', 'throw', 'try', 'catch', 'true', 'false', 'null', 'undefined'] },
+  jsx: { label: 'JSX', color: '#61dafb', keywords: ['const', 'let', 'function', 'return', 'async', 'await', 'if', 'else', 'class', 'new', 'import', 'export', 'from', 'default', 'true', 'false', 'null'] },
+  ts: { label: 'TypeScript', color: '#3178c6', keywords: ['const', 'let', 'function', 'return', 'async', 'await', 'if', 'else', 'for', 'while', 'class', 'interface', 'type', 'extends', 'implements', 'new', 'import', 'export', 'from', 'default', 'public', 'private', 'readonly', 'string', 'number', 'boolean', 'unknown', 'any', 'true', 'false', 'null', 'undefined'] },
+  tsx: { label: 'TSX', color: '#3178c6', keywords: ['const', 'let', 'function', 'return', 'async', 'await', 'if', 'else', 'class', 'interface', 'type', 'extends', 'import', 'export', 'from', 'default', 'string', 'number', 'boolean', 'true', 'false', 'null'] },
+  py: { label: 'Python', color: '#3776ab', keywords: ['def', 'return', 'async', 'await', 'if', 'elif', 'else', 'for', 'while', 'class', 'from', 'import', 'as', 'try', 'except', 'finally', 'raise', 'with', 'lambda', 'yield', 'in', 'is', 'and', 'or', 'not', 'True', 'False', 'None'] },
+  json: { label: 'JSON', color: '#facc15', keywords: ['true', 'false', 'null'] },
+  css: { label: 'CSS', color: '#663399', keywords: ['var', 'calc', 'inherit', 'initial', 'unset', 'transparent', 'important'] },
+  html: { label: 'HTML', color: '#e34f26', keywords: ['doctype', 'html', 'head', 'body', 'script', 'style', 'div', 'span', 'class', 'id'] },
+  htm: { label: 'HTML', color: '#e34f26', keywords: ['doctype', 'html', 'head', 'body', 'script', 'style', 'div', 'span', 'class', 'id'] },
+  md: { label: 'Markdown', color: '#60a5fa', keywords: [] },
+  sql: { label: 'SQL', color: '#e38c00', keywords: ['SELECT', 'FROM', 'WHERE', 'INSERT', 'INTO', 'UPDATE', 'DELETE', 'CREATE', 'TABLE', 'JOIN', 'ON', 'AS', 'AND', 'OR', 'NULL', 'VALUES', 'GROUP', 'ORDER', 'BY', 'LIMIT'] },
+  sh: { label: 'Shell', color: '#4eaa25', keywords: ['if', 'then', 'else', 'fi', 'for', 'while', 'do', 'done', 'case', 'esac', 'function', 'in', 'export'] },
+  bash: { label: 'Bash', color: '#4eaa25', keywords: ['if', 'then', 'else', 'fi', 'for', 'while', 'do', 'done', 'case', 'esac', 'function', 'in', 'export'] },
+  yaml: { label: 'YAML', color: '#cb171e', keywords: ['true', 'false', 'null'] },
+  yml: { label: 'YAML', color: '#cb171e', keywords: ['true', 'false', 'null'] },
+  xml: { label: 'XML', color: '#f97316', keywords: [] },
+};
+
+const getAttachmentLanguage = (name: string) => {
+  const extension = name.toLowerCase().split('.').pop() || '';
+  return EXTENSION_LANGUAGES[extension] || { label: extension ? extension.toUpperCase() : 'Text', color: '#94a3b8', keywords: [] };
+};
+
+const HighlightedAttachment: React.FC<{ file: TextAttachment }> = ({ file }) => {
+  const language = getAttachmentLanguage(file.name);
+  const keywords = new Set(language.keywords.map((keyword) => keyword.toLowerCase()));
+  const tokenPattern = /(\/\*[\s\S]*?\*\/|\/\/[^\n]*|#[^\n]*|<!--[\s\S]*?-->|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`|\b\d+(?:\.\d+)?\b|\b[A-Za-z_$][\w$]*\b)/g;
+  const nodes: React.ReactNode[] = [];
+  let lastIndex = 0;
+
+  for (const match of file.content.matchAll(tokenPattern)) {
+    const index = match.index ?? 0;
+    if (index > lastIndex) nodes.push(file.content.slice(lastIndex, index));
+    const token = match[0];
+    let color: string | undefined;
+    if (/^(?:\/[/*]|#|<!--)/.test(token)) color = '#64748b';
+    else if (/^["'`]/.test(token)) color = '#86efac';
+    else if (/^\d/.test(token)) color = '#fbbf24';
+    else if (keywords.has(token.toLowerCase())) color = '#c084fc';
+    nodes.push(color ? <span key={`${index}-${token.length}`} style={{ color }}>{token}</span> : token);
+    lastIndex = index + token.length;
+  }
+  if (lastIndex < file.content.length) nodes.push(file.content.slice(lastIndex));
+  return <>{nodes}</>;
 };
 
 const getToolResultSummary = (
@@ -211,7 +258,7 @@ interface ChatWindowProps {
   isModelLoaded: boolean;
   generationStatus: 'idle' | 'generating' | 'completed' | 'cancelled' | 'error';
   pendingApprovalCall?: PendingApprovalCall | null;
-  onSendMessage: (msg: string) => void;
+  onSendMessage: (msg: string, attachments?: TextAttachment[]) => void;
   onCancelGeneration: () => void;
   onApproveToolCall?: () => void;
   onRejectToolCall?: () => void;
@@ -269,7 +316,44 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   onRejectToolCall,
 }) => {
   const [input, setInput] = useState('');
+  const [attachments, setAttachments] = useState<TextAttachment[]>([]);
+  const [viewedAttachment, setViewedAttachment] = useState<TextAttachment | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const [attachmentError, setAttachmentError] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const dragDepth = useRef(0);
+
+  const addFiles = async (files: File[]) => {
+    setAttachmentError('');
+    const remainingSlots = 10 - attachments.length;
+    const selected = files.slice(0, remainingSlots);
+    if (files.length > remainingSlots) setAttachmentError('You can attach at most 10 files.');
+
+    const accepted: TextAttachment[] = [];
+    for (const file of selected) {
+      if (file.size > 512 * 1024) {
+        setAttachmentError(`${file.name} is larger than 512 KB.`);
+        continue;
+      }
+      const content = await file.text();
+      if (content.includes('\u0000')) {
+        setAttachmentError(`${file.name} does not appear to be a text file.`);
+        continue;
+      }
+      accepted.push({ name: file.name, content, size: file.size, type: file.type });
+    }
+    const currentSize = attachments.reduce((sum, file) => sum + file.size, 0);
+    let addedSize = 0;
+    const withinTotalLimit = accepted.filter((file) => {
+      if (currentSize + addedSize + file.size > 1024 * 1024) {
+        setAttachmentError('Attachments cannot exceed 1 MB in total.');
+        return false;
+      }
+      addedSize += file.size;
+      return true;
+    });
+    setAttachments((current) => [...current, ...withinTotalLimit]);
+  };
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -282,8 +366,10 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!input.trim() || isGenerating) return;
-    onSendMessage(input.trim());
+    onSendMessage(input.trim(), attachments);
     setInput('');
+    setAttachments([]);
+    setAttachmentError('');
   };
 
   const handleSelectHelperPrompt = (promptText: string) => {
@@ -298,9 +384,40 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   };
 
   return (
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', position: 'relative' }}>
+    <div
+      onDragEnter={(event) => {
+        event.preventDefault();
+        dragDepth.current += 1;
+        if (event.dataTransfer.types.includes('Files')) setIsDragging(true);
+      }}
+      onDragOver={(event) => {
+        event.preventDefault();
+        event.dataTransfer.dropEffect = 'copy';
+      }}
+      onDragLeave={(event) => {
+        event.preventDefault();
+        dragDepth.current -= 1;
+        if (dragDepth.current <= 0) setIsDragging(false);
+      }}
+      onDrop={(event) => {
+        event.preventDefault();
+        dragDepth.current = 0;
+        setIsDragging(false);
+        if (!isGenerating) void addFiles(Array.from(event.dataTransfer.files));
+      }}
+      style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', position: 'relative' }}
+    >
+      {isDragging && (
+        <div style={{ position: 'absolute', inset: '12px', zIndex: 20, border: '2px dashed var(--accent-primary)', borderRadius: '16px', background: 'rgba(15, 23, 42, 0.94)', display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: 'var(--accent-primary)', fontWeight: 700 }}>
+            <FileText size={26} />
+            Drop text files to attach
+          </div>
+        </div>
+      )}
+      <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
       {/* Messages Scrollable Container */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '24px 32px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+      <div style={{ flex: 1, minWidth: 0, overflowY: 'auto', padding: '24px 32px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
         {messages.length === 0 && !streamingText && (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '80%', color: 'var(--text-dim)', textAlign: 'center', gap: '20px' }}>
             <div style={{ width: '64px', height: '64px', borderRadius: '16px', background: 'rgba(99, 102, 241, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -356,7 +473,22 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
             return (
               <div key={msg.id} className="animate-fade-in" style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
                 <div style={{ maxWidth: '75%', background: 'var(--accent-gradient)', color: '#fff', padding: '12px 16px', borderRadius: '16px 16px 4px 16px', fontSize: '0.925rem', lineHeight: 1.5, boxShadow: '0 4px 12px rgba(99, 102, 241, 0.25)' }}>
-                  {msg.content}
+                  <div style={{ whiteSpace: 'pre-wrap' }}>{msg.displayContent ?? msg.content}</div>
+                  {msg.attachments && msg.attachments.length > 0 && (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '9px' }}>
+                      {msg.attachments.map((file, index) => (
+                        <button
+                          type="button"
+                          key={`${file.name}-${index}`}
+                          onClick={() => setViewedAttachment(file)}
+                          title={`Open ${file.name}`}
+                          style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '4px 8px', border: '1px solid rgba(255, 255, 255, 0.18)', borderRadius: '7px', background: 'rgba(15, 23, 42, 0.28)', color: 'inherit', font: 'inherit', fontSize: '0.74rem', cursor: 'pointer' }}
+                        >
+                          <FileText size={13} /> {file.name} · {(file.size / 1024).toFixed(1)} KB
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
                 <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: 'rgba(255, 255, 255, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                   <User size={18} color="#fff" />
@@ -505,6 +637,38 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
         <div ref={messagesEndRef} />
       </div>
 
+      {viewedAttachment && (
+        <aside style={{ width: 'min(420px, 42vw)', flexShrink: 0, display: 'flex', flexDirection: 'column', borderLeft: '1px solid var(--border-color)', background: 'rgba(15, 23, 42, 0.96)', minHeight: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '9px', padding: '14px 16px', borderBottom: '1px solid var(--border-color)' }}>
+            <FileText size={18} color="var(--accent-primary)" />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div title={viewedAttachment.name} style={{ color: 'var(--text-main)', fontWeight: 650, fontSize: '0.875rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {viewedAttachment.name}
+              </div>
+              <div style={{ color: 'var(--text-muted)', fontSize: '0.72rem', marginTop: '2px' }}>
+                {(viewedAttachment.size / 1024).toFixed(1)} KB
+                <span style={{ marginLeft: '7px', color: getAttachmentLanguage(viewedAttachment.name).color }}>
+                  • {getAttachmentLanguage(viewedAttachment.name).label}
+                </span>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setViewedAttachment(null)}
+              aria-label="Close attachment viewer"
+              title="Close"
+              style={{ display: 'flex', padding: '6px', border: '1px solid var(--border-color)', borderRadius: '7px', background: 'rgba(30, 41, 59, 0.7)', color: 'var(--text-muted)', cursor: 'pointer' }}
+            >
+              <X size={16} />
+            </button>
+          </div>
+          <pre style={{ flex: 1, minHeight: 0, margin: 0, padding: '16px', overflow: 'auto', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', color: 'var(--text-main)', background: 'transparent', fontFamily: 'var(--font-code)', fontSize: '0.8rem', lineHeight: 1.55 }}>
+            <HighlightedAttachment file={viewedAttachment} />
+          </pre>
+        </aside>
+      )}
+      </div>
+
       {/* Input Prompt Box */}
       <div style={{ padding: '14px 24px', background: 'rgba(15, 23, 42, 0.8)', borderTop: '1px solid var(--border-color)', zIndex: 5, display: 'flex', flexDirection: 'column', gap: '10px' }}>
         {/* Quick Helper Chips Bar */}
@@ -575,12 +739,29 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
           </div>
         )}
 
+        {attachments.length > 0 && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '7px' }}>
+            {attachments.map((file, index) => (
+              <span key={`${file.name}-${index}`} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '3px 5px 3px 8px', border: '1px solid var(--border-color)', borderRadius: '8px', color: 'var(--text-muted)', background: 'rgba(30, 41, 59, 0.7)', fontSize: '0.76rem' }}>
+                <button type="button" onClick={() => setViewedAttachment(file)} title={`Open ${file.name}`} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '2px 0', border: 0, background: 'transparent', color: 'inherit', font: 'inherit', cursor: 'pointer' }}>
+                  <FileText size={13} color="var(--accent-primary)" />
+                  {file.name} · {(file.size / 1024).toFixed(1)} KB
+                </button>
+                <button type="button" aria-label={`Remove ${file.name}`} onClick={() => setAttachments((current) => current.filter((_, itemIndex) => itemIndex !== index))} style={{ display: 'flex', padding: 0, border: 0, background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer' }}>
+                  <X size={13} />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+        {attachmentError && <div style={{ color: 'var(--accent-amber)', fontSize: '0.76rem' }}>{attachmentError}</div>}
+
         <form onSubmit={handleSubmit} style={{ display: 'flex', gap: '12px', alignItems: 'flex-end', background: 'rgba(30, 41, 59, 0.8)', padding: '8px 14px', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
           <textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Type your message or ask to read files / list directory..."
+            placeholder="Type a message, or drag and drop text files here..."
             rows={2}
             style={{
               flex: 1,

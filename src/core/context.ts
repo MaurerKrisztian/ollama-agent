@@ -143,6 +143,8 @@ export class ContextManager {
     name?: string;
     tool_calls?: any[];
     tool_call_id?: string;
+    displayContent?: string;
+    attachments?: ChatMessage['attachments'];
   }): ChatMessage {
     const newMessage: ChatMessage = {
       id: `msg_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
@@ -152,6 +154,8 @@ export class ContextManager {
       tool_calls: msg.tool_calls,
       tool_call_id: msg.tool_call_id,
       timestamp: Date.now(),
+      displayContent: msg.displayContent,
+      attachments: msg.attachments,
     };
     this.messages.push(newMessage);
     return newMessage;
