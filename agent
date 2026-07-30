@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# agent — CLI wrapper for local-model-chat agent
+# Always runs the latest TypeScript source via tsx (no compilation needed)
+# Uses the project-local tsx install so it works from any directory
+
+PROJECT_DIR="/media/zero/EXTERNAL_MAIN/local-model-chat"
+TSX="$PROJECT_DIR/node_modules/.bin/tsx"
+
+exec "$TSX" "$PROJECT_DIR/src/cli/index.ts" "$@"

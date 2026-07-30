@@ -1,0 +1,40 @@
+{
+  "name": "local-model-chat",
+  "version": "1.0.0",
+  "description": "React + Node.js + TS Ollama Agent Chat UI & CLI",
+  "type": "module",
+  "bin": {
+    "agent": "./agent"
+  },
+  "scripts": {
+    "dev:server": "tsx watch src/server/index.ts",
+    "dev:client": "vite --config src/client/vite.config.ts src/client",
+    "cli": "tsx src/cli/index.ts",
+    "build:client": "vite build --config src/client/vite.config.ts src/client",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "cors": "^2.8.5",
+    "ollama": "^0.5.2",
+    "zod": "^3.23.8",
+    "commander": "^12.1.0",
+    "inquirer": "^9.3.2",
+    "chalk": "^5.3.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "lucide-react": "^0.395.0"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/inquirer": "^9.0.7",
+    "@types/node": "^20.14.9",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "typescript": "^5.5.2",
+    "tsx": "^4.16.2",
+    "vite": "^5.3.1"
+  }
+}

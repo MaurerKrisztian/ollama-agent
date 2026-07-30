@@ -1,0 +1,296 @@
+import fs from 'fs/promises';
+import path from 'path';
+import { AgentEngine } from '../core/agent.js';
+import { setupMockEnvironment } from './mockEnv.js';
+import { BENCHMARK_TEST_CASES, BenchmarkTestCase } from './testCases.js';
+
+export interface TestResultTrace {
+  testId: string;
+  testName: string;
+  category: string;
+  prompt: string;
+  expectedTool: string | null;
+  expectedToolSequence?: string[];
+  actualToolsCalled: Array<{ name: string; args: Record<string, any> }>;
+  passed: boolean;
+  reason: string;
+  durationMs: number;
+  responseContent: string;
+  objective: string;
+  requiredOutput: string;
+  evaluationCriteria: string;
+}
+
+export interface BenchmarkReport {
+  timestamp: number;
+  model: string;
+  mockWorkingDir: string;
+  totalTests: number;
+  passCount: number;
+  failCount: number;
+  accuracyPercentage: number;
+  totalDurationMs: number;
+  results: TestResultTrace[];
+}
+
+export async function runSingleBenchmarkTest(
+  testId: string,
+  modelName: string,
+  ollamaHost: string = 'http://127.0.0.1:11434'
+): Promise<TestResultTrace> {
+  const testCase = BENCHMARK_TEST_CASES.find((t) => t.id === testId);
+  if (!testCase) {
+    throw new Error(`Test case "${testId}" not found.`);
+  }
+
+  const mockDir = await setupMockEnvironment();
+  const testStart = Date.now();
+
+  const agent = new AgentEngine({
+    model: modelName,
+    ollamaHost,
+    workingDir: mockDir,
+  });
+
+  // Wrap ToolExecutor with Docker Sandbox Isolation for benchmark terminal tasks
+  const executor = agent.getToolExecutor();
+  const originalExecuteCommand = executor.executeCommand.bind(executor);
+  executor.executeCommand = async (command: string) => {
+    const dockerCmd = `docker run --rm -v "${mockDir}":/workspace -w /workspace alpine sh -c ${JSON.stringify(command)}`;
+    try {
+      const res = await originalExecuteCommand(dockerCmd);
+      return { ...res, command };
+    } catch (_) {
+      return await originalExecuteCommand(command);
+    }
+  };
+
+  const actualToolsCalled: Array<{ name: string; args: Record<string, any> }> = [];
+  let responseContent = '';
+  let testError: string | null = null;
+
+  try {
+    responseContent = await agent.sendMessage(testCase.prompt, {
+      onToolStart: (name, args) => {
+        actualToolsCalled.push({ name, args });
+      },
+    });
+  } catch (err: any) {
+    testError = err.message;
+  }
+
+  const durationMs = Date.now() - testStart;
+
+  let passed = false;
+  let reason = '';
+
+  if (testError) {
+    passed = false;
+    reason = `Execution error: ${testError}`;
+  } else if (testCase.expectedToolSequence) {
+    const expectedSeq = testCase.expectedToolSequence;
+    const actualNames = actualToolsCalled.map((t) => t.name);
+
+    let seqMatches = true;
+    let seqError = '';
+
+    for (let s = 0; s < expectedSeq.length; s++) {
+      const reqTool = expectedSeq[s];
+      const hasMatch = actualNames.includes(reqTool);
+      if (!hasMatch) {
+        seqMatches = false;
+        seqError = `Missing tool "${reqTool}" in multi-turn sequence. Called: [${actualNames.join(' -> ')}]`;
+        break;
+      }
+    }
+
+    if (seqMatches) {
+      let argsValid = true;
+      let argMismatchDetail = '';
+
+      if (testCase.expectedArgSubstrings) {
+        for (const [key, expectedSub] of Object.entries(testCase.expectedArgSubstrings)) {
+          const matchingCall = actualToolsCalled.find((t) => String(t.args[key] ?? '').includes(expectedSub));
+          if (!matchingCall && expectedSub !== '') {
+            argsValid = false;
+            argMismatchDetail = `Expected argument "${key}" with substring "${expectedSub}" was not found in tool calls.`;
+            break;
+          }
+        }
+      }
+
+      if (argsValid) {
+        passed = true;
+        reason = `Passed Multi-Step Workflow: Successfully executed tool chain [${actualNames.join(' -> ')}].`;
+      } else {
+        passed = false;
+        reason = `Failed Multi-Step Workflow: Executed tools [${actualNames.join(' -> ')}], but argument check failed: ${argMismatchDetail}`;
+      }
+    } else {
+      passed = false;
+      reason = `Failed Multi-Step Workflow: ${seqError}`;
+    }
+  } else if (testCase.expectedTool === null) {
+    if (actualToolsCalled.length === 0) {
+      passed = true;
+      reason = 'Passed: Correctly answered without invoking unnecessary tools.';
+    } else {
+      passed = false;
+      reason = `Failed: Expected 0 tool calls, but model invoked [${actualToolsCalled.map((t) => t.name).join(', ')}].`;
+    }
+  } else {
+    const matchedTool = actualToolsCalled.find((t) => t.name === testCase.expectedTool);
+
+    if (!matchedTool) {
+      passed = false;
+      const calledNames = actualToolsCalled.map((t) => t.name).join(', ') || 'none';
+      reason = `Failed: Expected tool "${testCase.expectedTool}", but model called [${calledNames}].`;
+    } else {
+      let argsValid = true;
+      let argMismatchDetail = '';
+
+      if (testCase.expectedArgSubstrings) {
+        for (const [key, expectedSub] of Object.entries(testCase.expectedArgSubstrings)) {
+          const actualVal = String(matchedTool.args[key] ?? '');
+          if (expectedSub !== '' && !actualVal.includes(expectedSub)) {
+            argsValid = false;
+            argMismatchDetail = `Argument "${key}" expected substring "${expectedSub}", got "${actualVal}".`;
+            break;
+          }
+        }
+      }
+
+      if (argsValid) {
+        passed = true;
+        reason = `Passed: Correctly invoked "${matchedTool.name}" with valid parameters.`;
+      } else {
+        passed = false;
+        reason = `Failed: Invoked "${matchedTool.name}", but parameter check failed: ${argMismatchDetail}`;
+      }
+    }
+  }
+
+  // Disk Verification Assertion for edit_file tasks
+  if (passed && actualToolsCalled.some((t) => t.name === 'edit_file')) {
+    if (testCase.expectedArgSubstrings && testCase.expectedArgSubstrings.replacement_text !== undefined) {
+      const expectedReplacement = testCase.expectedArgSubstrings.replacement_text;
+      const targetRelPath = testCase.expectedArgSubstrings.relative_path || '';
+      const diskFilePath = path.join(mockDir, targetRelPath);
+
+      if (expectedReplacement !== '') {
+        try {
+          const diskContent = await fs.readFile(diskFilePath, 'utf-8');
+          if (!diskContent.includes(expectedReplacement)) {
+            passed = false;
+            reason = `Failed Disk Verification: edit_file tool was called, but replacement text "${expectedReplacement}" was not found in mock disk file.`;
+          }
+        } catch (_) {
+          const baseName = path.basename(targetRelPath);
+          try {
+            const files = await fs.readdir(mockDir, { recursive: true });
+            let fileFound = false;
+            for (const f of files) {
+              if (typeof f === 'string' && f.endsWith(baseName)) {
+                const content = await fs.readFile(path.join(mockDir, f), 'utf-8');
+                if (content.includes(expectedReplacement)) {
+                  fileFound = true;
+                  break;
+                }
+              }
+            }
+            if (!fileFound) {
+              passed = false;
+              reason = `Failed Disk Verification: Replacement text "${expectedReplacement}" was not found in mock disk file.`;
+            }
+          } catch (_) {}
+        }
+      } else if (testCase.expectedArgSubstrings.target_text) {
+        const deletedTarget = testCase.expectedArgSubstrings.target_text;
+        try {
+          const diskContent = await fs.readFile(diskFilePath, 'utf-8');
+          if (diskContent.includes(deletedTarget)) {
+            passed = false;
+            reason = `Failed Disk Verification: Deletion requested, but target text "${deletedTarget}" still exists in mock disk file.`;
+          }
+        } catch (_) {}
+      }
+    }
+  }
+
+  // Disk Verification Assertion for create_file tasks
+  if (passed && actualToolsCalled.some((t) => t.name === 'create_file')) {
+    if (testCase.expectedArgSubstrings && testCase.expectedArgSubstrings.relative_path) {
+      const targetRelPath = testCase.expectedArgSubstrings.relative_path || '';
+      const diskFilePath = path.join(mockDir, targetRelPath);
+      try {
+        await fs.stat(diskFilePath);
+      } catch (_) {
+        const baseName = path.basename(targetRelPath);
+        try {
+          const files = await fs.readdir(mockDir, { recursive: true });
+          const found = files.some((f) => typeof f === 'string' && f.endsWith(baseName));
+          if (!found) {
+            passed = false;
+            reason = `Failed Disk Verification: create_file tool was called, but created file "${targetRelPath}" was not found on disk.`;
+          }
+        } catch (_) {}
+      }
+    }
+  }
+
+  return {
+    testId: testCase.id,
+    testName: testCase.name,
+    category: testCase.category,
+    prompt: testCase.prompt,
+    expectedTool: testCase.expectedToolSequence ? testCase.expectedToolSequence.join(' -> ') : (testCase.expectedTool ?? null),
+    expectedToolSequence: testCase.expectedToolSequence,
+    actualToolsCalled,
+    passed,
+    reason,
+    durationMs,
+    responseContent,
+    objective: testCase.objective,
+    requiredOutput: testCase.requiredOutput,
+    evaluationCriteria: testCase.evaluationCriteria,
+  };
+}
+
+export async function runBenchmarkSuite(
+  modelName: string,
+  ollamaHost: string = 'http://127.0.0.1:11434',
+  onProgress?: (current: number, total: number, result: TestResultTrace) => void,
+  testCases: BenchmarkTestCase[] = BENCHMARK_TEST_CASES
+): Promise<BenchmarkReport> {
+  const startTime = Date.now();
+  const mockDir = await setupMockEnvironment();
+
+  const results: TestResultTrace[] = [];
+  let passCount = 0;
+
+  for (let i = 0; i < testCases.length; i++) {
+    const testCase = testCases[i];
+    const trace = await runSingleBenchmarkTest(testCase.id, modelName, ollamaHost);
+    if (trace.passed) passCount++;
+    results.push(trace);
+
+    if (onProgress) {
+      onProgress(i + 1, testCases.length, trace);
+    }
+  }
+
+  const totalDurationMs = Date.now() - startTime;
+  const accuracyPercentage = Math.round((passCount / testCases.length) * 100);
+
+  return {
+    timestamp: Date.now(),
+    model: modelName,
+    mockWorkingDir: mockDir,
+    totalTests: testCases.length,
+    passCount,
+    failCount: testCases.length - passCount,
+    accuracyPercentage,
+    totalDurationMs,
+    results,
+  };
+}
