@@ -20,6 +20,7 @@ export interface McpServerStatus {
   status: 'connected' | 'error' | 'disabled';
   error?: string;
   toolsCount: number;
+  disabled?: boolean;
 }
 
 interface JsonRpcRequest {
@@ -355,6 +356,30 @@ export class McpClientManager {
     }
   }
 
+  public async toggleServer(serverName: string, enabled: boolean): Promise<{ success: boolean; error?: string }> {
+    if (!this.configPath) {
+      return { success: false, error: 'No MCP configuration file loaded.' };
+    }
+
+    try {
+      const content = await fs.readFile(this.configPath, 'utf-8');
+      const parsed: McpConfig = JSON.parse(content);
+      if (!parsed || typeof parsed.mcpServers !== 'object' || !parsed.mcpServers[serverName]) {
+        return { success: false, error: `MCP server "${serverName}" not found in config.` };
+      }
+
+      if (enabled) {
+        delete parsed.mcpServers[serverName].disabled;
+      } else {
+        parsed.mcpServers[serverName].disabled = true;
+      }
+
+      return await this.saveRawConfig(JSON.stringify(parsed, null, 2));
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
   public getServersStatus(): McpServerStatus[] {
     const statusList: McpServerStatus[] = [];
     for (const [name, client] of this.clients.entries()) {
@@ -362,11 +387,13 @@ export class McpClientManager {
       for (const entry of this.tools.values()) {
         if (entry.client === client && !this.disabledTools.has(entry.definition.name)) toolsCount++;
       }
+      const isDisabled = Boolean(client.config.disabled);
       statusList.push({
         name,
-        status: client.status,
+        status: isDisabled ? 'disabled' : client.status,
         error: client.lastError,
         toolsCount,
+        disabled: isDisabled,
       });
     }
     return statusList;

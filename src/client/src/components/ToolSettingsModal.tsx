@@ -332,7 +332,7 @@ export const ToolSettingsModal: React.FC<ToolSettingsModalProps> = ({
 
 const McpServersSection: React.FC = () => {
   const [mcpEnabled, setMcpEnabled] = React.useState<boolean>(true);
-  const [servers, setServers] = React.useState<Array<{ name: string; status: string; error?: string; toolsCount: number }>>([]);
+  const [servers, setServers] = React.useState<Array<{ name: string; status: string; error?: string; toolsCount: number; disabled?: boolean }>>([]);
   const [allToolDetails, setAllToolDetails] = React.useState<Array<{ name: string; serverName: string; description: string; parameters: any; enabled: boolean }>>([]);
   const [configPath, setConfigPath] = React.useState<string | null>(null);
   const [rawConfig, setRawConfig] = React.useState<string>('{\n  "mcpServers": {}\n}');
@@ -407,6 +407,22 @@ const McpServersSection: React.FC = () => {
       if (data.success) {
         setAllToolDetails(data.allToolDetails || []);
         setServers(data.servers || []);
+      }
+    } catch (_) {}
+  };
+
+  const handleToggleServer = async (serverName: string, currentDisabled: boolean) => {
+    try {
+      const res = await fetch('/api/mcp/toggle-server', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: serverName, enabled: currentDisabled }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setServers(data.servers || []);
+        if (data.rawConfig) setRawConfig(data.rawConfig);
+        setAllToolDetails(data.allToolDetails || []);
       }
     } catch (_) {}
   };
@@ -590,43 +606,76 @@ const McpServersSection: React.FC = () => {
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '12px' }}>
-          {servers.map((s) => (
-            <div
-              key={s.name}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                padding: '8px 12px',
-                borderRadius: '8px',
-                background: 'rgba(30, 41, 59, 0.5)',
-                border: '1px solid var(--border-color)',
-              }}
-            >
-              <div>
-                <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-main)' }}>{s.name}</span>
-                {s.error && (
-                  <div style={{ fontSize: '0.725rem', color: '#f87171', marginTop: '2px' }}>{s.error}</div>
-                )}
+          {servers.map((s) => {
+            const isDisabled = s.status === 'disabled' || Boolean(s.disabled);
+            return (
+              <div
+                key={s.name}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '8px 12px',
+                  borderRadius: '8px',
+                  background: isDisabled ? 'rgba(30, 41, 59, 0.25)' : 'rgba(30, 41, 59, 0.5)',
+                  border: `1px solid ${isDisabled ? 'rgba(239, 68, 68, 0.2)' : 'var(--border-color)'}`,
+                  opacity: isDisabled ? 0.75 : 1,
+                  transition: 'all 0.2s ease',
+                }}
+              >
+                <div>
+                  <span style={{ fontSize: '0.85rem', fontWeight: 600, color: isDisabled ? 'var(--text-muted)' : 'var(--text-main)' }}>
+                    {s.name}
+                  </span>
+                  {s.error && !isDisabled && (
+                    <div style={{ fontSize: '0.725rem', color: '#f87171', marginTop: '2px' }}>{s.error}</div>
+                  )}
+                  {isDisabled && (
+                    <div style={{ fontSize: '0.725rem', color: 'var(--text-dim)', marginTop: '2px' }}>Server is disabled</div>
+                  )}
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{s.toolsCount} tools</span>
+                  <span
+                    style={{
+                      fontSize: '0.7rem',
+                      padding: '2px 8px',
+                      borderRadius: '12px',
+                      fontWeight: 600,
+                      background: s.status === 'connected' ? 'rgba(34, 197, 94, 0.15)' : isDisabled ? 'rgba(100, 116, 139, 0.2)' : 'rgba(239, 68, 68, 0.15)',
+                      color: s.status === 'connected' ? '#4ade80' : isDisabled ? 'var(--text-dim)' : '#f87171',
+                      border: `1px solid ${s.status === 'connected' ? 'rgba(34, 197, 94, 0.3)' : isDisabled ? 'var(--border-color)' : 'rgba(239, 68, 68, 0.3)'}`,
+                    }}
+                  >
+                    {s.status}
+                  </span>
+
+                  {/* Enable / Disable Server Toggle Switch */}
+                  <button
+                    onClick={() => handleToggleServer(s.name, isDisabled)}
+                    title={isDisabled ? `Enable ${s.name} server` : `Disable ${s.name} server`}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      padding: '3px 8px',
+                      borderRadius: '6px',
+                      border: `1px solid ${isDisabled ? 'rgba(34, 197, 94, 0.4)' : 'rgba(239, 68, 68, 0.4)'}`,
+                      background: isDisabled ? 'rgba(34, 197, 94, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+                      color: isDisabled ? '#4ade80' : '#ef4444',
+                      fontSize: '0.725rem',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease',
+                    }}
+                  >
+                    {isDisabled ? 'Enable' : 'Disable'}
+                  </button>
+                </div>
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{s.toolsCount} tools</span>
-                <span
-                  style={{
-                    fontSize: '0.7rem',
-                    padding: '2px 8px',
-                    borderRadius: '12px',
-                    fontWeight: 600,
-                    background: s.status === 'connected' ? 'rgba(34, 197, 94, 0.15)' : 'rgba(239, 68, 68, 0.15)',
-                    color: s.status === 'connected' ? '#4ade80' : '#f87171',
-                    border: `1px solid ${s.status === 'connected' ? 'rgba(34, 197, 94, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`,
-                  }}
-                >
-                  {s.status}
-                </span>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 

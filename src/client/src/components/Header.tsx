@@ -7,6 +7,7 @@ import {
   Loader2,
   Info,
   Menu,
+  PlusCircle,
 } from 'lucide-react';
 import { AgentConfig, ContextInfo, OllamaModelInfo, OllamaRunningModelInfo, SystemMetrics } from '../types';
 
@@ -249,8 +250,33 @@ export const Header: React.FC<HeaderProps> = ({
         })()}
       </div>
 
-      {/* Right Controls: Context Inspector Sidebar Toggle */}
+      {/* Right Controls: New Chat Session & Context Inspector Sidebar Toggle */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+        {activeView === 'chat' && (
+          <button
+            onClick={onNewChat}
+            title="Start New Chat Session"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              background: 'var(--accent-gradient)',
+              border: 'none',
+              color: '#fff',
+              padding: '6px 12px',
+              borderRadius: '8px',
+              fontSize: '0.825rem',
+              fontWeight: 600,
+              cursor: 'pointer',
+              boxShadow: '0 2px 10px rgba(99, 102, 241, 0.3)',
+              transition: 'transform 0.15s ease',
+            }}
+          >
+            <PlusCircle size={15} />
+            <span className="header-btn-text">New Chat</span>
+          </button>
+        )}
+
         <button
           onClick={onToggleSidebar}
           style={{
@@ -260,9 +286,9 @@ export const Header: React.FC<HeaderProps> = ({
             background: sidebarOpen ? 'rgba(99, 102, 241, 0.2)' : 'rgba(15, 23, 42, 0.8)',
             border: `1px solid ${sidebarOpen ? 'var(--accent-primary)' : 'var(--border-color)'}`,
             color: 'var(--text-main)',
-            padding: '8px 12px',
+            padding: '6px 12px',
             borderRadius: '8px',
-            fontSize: '0.85rem',
+            fontSize: '0.825rem',
             fontWeight: 500,
             cursor: 'pointer',
           }}

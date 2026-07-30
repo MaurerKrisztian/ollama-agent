@@ -316,6 +316,32 @@ app.post('/api/mcp/toggle-global', (req, res) => {
   });
 });
 
+// POST /api/mcp/toggle-server - Enable or disable an individual MCP server
+app.post('/api/mcp/toggle-server', async (req, res) => {
+  try {
+    const { name, enabled } = req.body || {};
+    if (typeof name !== 'string' || typeof enabled !== 'boolean') {
+      return res.status(400).json({ success: false, error: 'name (string) and enabled (boolean) are required.' });
+    }
+
+    const mcpManager = agent.getToolExecutor().getMcpManager();
+    const toggleRes = await mcpManager.toggleServer(name, enabled);
+    const updatedRaw = await mcpManager.getRawConfigContent();
+
+    res.json({
+      success: toggleRes.success,
+      configPath: mcpManager.getConfigPath(),
+      rawConfig: updatedRaw,
+      servers: mcpManager.getServersStatus(),
+      mcpTools: mcpManager.getToolDefinitions(),
+      allToolDetails: mcpManager.getAllToolDetails(),
+      error: toggleRes.error,
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // POST /api/mcp/reload - Reload MCP servers from config file
 app.post('/api/mcp/reload', async (req, res) => {
   try {
