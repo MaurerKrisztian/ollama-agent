@@ -43,18 +43,22 @@ No cloud, no API keys, no data leaving your machine.
 | `list_directory` | List files and subdirectories in a path |
 | `read_file` | Read any file in the workspace |
 | `edit_file` | Partial text replacement in existing files |
+| `replace_file` | Replace an existing file for broad rewrites after reading it |
 | `create_file` | Create new files with content |
 | `grep_search` | Search codebase for text/symbols |
 | `execute_command` | Run terminal shell commands (with approval gate) |
+| `web_search` | Search the public web and return concise result metadata |
+| `read_web_page` | Extract a public page's main content as bounded Markdown |
 
 ### 🧪 Benchmark Suite
-- **28 targeted test cases** across 10 categories:
+- **42 targeted test cases** across 11 categories:
   - Directory Reading, File Reading, File Creation, File Editing
   - Code Editing, Code Search, Discrimination (no-tool), Multi-Step Workflow
   - **Terminal Execution (Isolated Docker Sandbox)**
   - **Information Retrieval** from short, medium, and long files with grounded-answer checks
 - Isolated Docker container sandbox for terminal benchmark tests — no host system risk
 - Per-category filter chips in the UI
+- CLI category filtering, for example: `npm run cli -- --benchmark --category web_search`
 
 ---
 
@@ -65,7 +69,7 @@ local-model-chat/
 ├── src/
 │   ├── core/               # Shared engine (agent, tools, context, ollama client)
 │   │   ├── agent.ts        # AgentEngine — agentic loop, streaming, tool dispatch
-│   │   ├── tools.ts        # Tool definitions + ToolExecutor (all 6 tools)
+│   │   ├── tools.ts        # Tool definitions + ToolExecutor
 │   │   ├── context.ts      # ContextManager — system prompt, message history
 │   │   ├── ollama.ts       # OllamaClient — chat stream, model list, VRAM status
 │   │   └── types.ts        # Shared TypeScript interfaces
@@ -86,7 +90,7 @@ local-model-chat/
 │   │       └── types.ts
 │   └── benchmark/          # Benchmark runner + test cases
 │       ├── runner.ts       # AgentBenchmarkRunner + Docker sandbox
-│       └── testCases.ts    # 28 test cases across 10 categories
+│       └── testCases.ts    # 42 test cases across 11 categories
 ├── agent                   # Global CLI wrapper script (bash → local tsx)
 └── package.json
 ```
@@ -209,7 +213,7 @@ curl -X POST http://localhost:3001/api/benchmark/run-single \
   -d '{"testId": "dir_read_1", "model": "qwen2.5-coder:7b"}'
 ```
 
-**Latest `qwen2.5-coder:7b` run:** information retrieval 3/3; full suite 27/28 (96%). Local-model results can vary between runs.
+**Latest `qwen2.5-coder:7b` targeted run:** web search 3/3. Local-model results can vary between runs.
 
 ---
 

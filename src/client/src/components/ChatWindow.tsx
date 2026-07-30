@@ -1,8 +1,137 @@
 import React, { useState, useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Send, Square, Wrench, CheckCircle2, XCircle, ShieldAlert, User, Bot, Loader2, FileText, Folder, Terminal, Edit3, Search, PlusCircle, Sparkles, Code2, Eye } from 'lucide-react';
+import { Send, Square, Wrench, CheckCircle2, XCircle, ShieldAlert, User, Bot, Loader2, FileText, Folder, Terminal, Edit3, Search, PlusCircle, Sparkles, Code2, Eye, ChevronDown } from 'lucide-react';
 import { ChatMessage, FileDiffData, PendingApprovalCall } from '../types';
+
+const compactValue = (value: unknown, maxLength = 64): string => {
+  if (value === undefined || value === null || value === '') return '';
+  const text = typeof value === 'string' ? value : JSON.stringify(value);
+  const singleLine = text.replace(/\s+/g, ' ').trim();
+  return `"${singleLine.length > maxLength ? `${singleLine.slice(0, maxLength - 1)}…` : singleLine}"`;
+};
+
+const getToolResultSummary = (
+  name: string | undefined,
+  args: Record<string, any>,
+  result: any,
+): string => {
+  const target = compactValue(
+    args.relative_path || args.absolute_path || args.query || args.command || args.url ||
+    result?.file_path || result?.relative_path || result?.working_directory,
+  );
+
+  if (result?.error) return `${target} (failed)`.trim();
+
+  switch (name) {
+    case 'list_directory': {
+      const entries = Array.isArray(result?.entries) ? result.entries : [];
+      const directories = entries.filter((entry: any) => entry?.type === 'directory').length;
+      const files = entries.filter((entry: any) => entry?.type === 'file').length;
+      const other = Math.max(0, entries.length - directories - files);
+      const counts = [
+        `${directories} ${directories === 1 ? 'dir' : 'dirs'}`,
+        `${files} ${files === 1 ? 'file' : 'files'}`,
+        ...(other ? [`${other} other`] : []),
+      ].join(', ');
+      return `${target || '"."'} (${counts})`;
+    }
+    case 'read_file': {
+      const lineCount = typeof result?.content === 'string'
+        ? (result.content ? result.content.split('\n').length : 0)
+        : 0;
+      return `${target} (${lineCount} ${lineCount === 1 ? 'line' : 'lines'}, ${result?.size_bytes ?? 0} bytes)`.trim();
+    }
+    case 'edit_file':
+    case 'replace_file':
+      return `${target} (${result?.changed === false ? 'unchanged' : 'updated'}, ${result?.size_bytes ?? 0} bytes)`.trim();
+    case 'create_file':
+      return `${target} (created, ${result?.size_bytes ?? 0} bytes)`.trim();
+    case 'grep_search': {
+      const count = result?.total_matches ?? (Array.isArray(result?.matches) ? result.matches.length : 0);
+      return `${target} (${count} ${count === 1 ? 'match' : 'matches'})`.trim();
+    }
+    case 'execute_command':
+      return `${target} (exit ${result?.exitCode ?? '?'})`.trim();
+    case 'web_search':
+      return `${target} (${result?.result_count ?? 0} results)`.trim();
+    case 'read_web_page':
+      return `${compactValue(result?.title) || target} (${result?.markdown?.length ?? 0} chars)`.trim();
+    case 'get_working_directory':
+      return `${target}`.trim();
+    case 'set_working_directory':
+      return `${target} (${result?.success ? 'changed' : 'failed'})`.trim();
+    default: {
+      if (Array.isArray(result)) return `${target} (${result.length} items)`.trim();
+      const keyCount = result && typeof result === 'object' ? Object.keys(result).length : 0;
+      return `${target}${keyCount ? ` (${keyCount} fields)` : ''}`.trim();
+    }
+  }
+};
+
+const ToolResultCard: React.FC<{
+  message: ChatMessage;
+  args: Record<string, any>;
+}> = ({ message, args }) => {
+  const [expanded, setExpanded] = useState(false);
+  let parsedContent: any = null;
+  try {
+    parsedContent = JSON.parse(message.content);
+  } catch (_) {}
+
+  const fileDiff = parsedContent?.diff as FileDiffData | undefined;
+  const resultWithoutDiff = parsedContent && fileDiff
+    ? Object.fromEntries(Object.entries(parsedContent).filter(([key]) => key !== 'diff'))
+    : parsedContent;
+  const summary = getToolResultSummary(message.name, args, parsedContent);
+
+  return (
+    <div className="animate-fade-in" style={{ marginLeft: '44px', maxWidth: '80%' }}>
+      <div style={{ background: 'rgba(20, 184, 166, 0.08)', border: '1px solid rgba(20, 184, 166, 0.25)', borderRadius: '8px', fontSize: '0.825rem', overflow: 'hidden' }}>
+        <button
+          type="button"
+          onClick={() => setExpanded((current) => !current)}
+          aria-expanded={expanded}
+          title={expanded ? 'Hide raw tool result' : 'Show raw tool result'}
+          style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '7px', padding: '7px 10px', border: 0, background: 'transparent', color: 'var(--accent-teal)', cursor: 'pointer', textAlign: 'left', font: 'inherit' }}
+        >
+          <CheckCircle2 size={14} style={{ flexShrink: 0 }} />
+          <span style={{ fontWeight: 600, whiteSpace: 'nowrap' }}>Tool Result: {message.name}</span>
+          {summary && (
+            <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text-muted)', fontFamily: 'var(--font-code)', fontSize: '0.75rem' }}>
+              {summary}
+            </span>
+          )}
+          <ChevronDown size={15} style={{ marginLeft: 'auto', flexShrink: 0, transform: expanded ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s ease' }} />
+        </button>
+        {expanded && (
+          <div style={{ padding: '0 12px 12px', borderTop: '1px solid rgba(20, 184, 166, 0.18)' }}>
+            <pre style={{ margin: '10px 0 0', maxHeight: '320px', overflow: 'auto', fontSize: '0.775rem' }}>
+              {resultWithoutDiff ? JSON.stringify(resultWithoutDiff, null, 2) : message.content}
+            </pre>
+            {fileDiff && <FileDiff diff={fileDiff} />}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+const MarkdownContent: React.FC<{ content: string; streaming?: boolean }> = ({
+  content,
+  streaming = false,
+}) => (
+  <div className={`markdown-body${streaming ? ' markdown-body-streaming' : ''}`}>
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm]}
+      components={{
+        a: ({ children, ...props }) => <a {...props} target="_blank" rel="noreferrer">{children}</a>,
+      }}
+    >
+      {content}
+    </ReactMarkdown>
+  </div>
+);
 
 const AssistantResponse: React.FC<{ content: string }> = ({ content }) => {
   const [showRaw, setShowRaw] = useState(false);
@@ -35,16 +164,7 @@ const AssistantResponse: React.FC<{ content: string }> = ({ content }) => {
       {showRaw ? (
         <pre className="assistant-response-raw">{content}</pre>
       ) : (
-        <div className="markdown-body">
-          <ReactMarkdown
-            remarkPlugins={[remarkGfm]}
-            components={{
-              a: ({ children, ...props }) => <a {...props} target="_blank" rel="noreferrer">{children}</a>,
-            }}
-          >
-            {content}
-          </ReactMarkdown>
-        </div>
+        <MarkdownContent content={content} />
       )}
     </div>
   );
@@ -88,6 +208,7 @@ interface ChatWindowProps {
   messages: ChatMessage[];
   streamingText: string;
   isGenerating: boolean;
+  isModelLoaded: boolean;
   generationStatus: 'idle' | 'generating' | 'completed' | 'cancelled' | 'error';
   pendingApprovalCall?: PendingApprovalCall | null;
   onSendMessage: (msg: string) => void;
@@ -139,6 +260,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   messages,
   streamingText,
   isGenerating,
+  isModelLoaded,
   generationStatus,
   pendingApprovalCall,
   onSendMessage,
@@ -273,32 +395,10 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
           }
 
           if (msg.role === 'tool') {
-            let parsedContent: any = null;
-            try {
-              parsedContent = JSON.parse(msg.content);
-            } catch (_) {}
-            const fileDiff = parsedContent?.diff as FileDiffData | undefined;
-            const resultWithoutDiff = parsedContent && fileDiff
-              ? Object.fromEntries(Object.entries(parsedContent).filter(([key]) => key !== 'diff'))
-              : parsedContent;
-
-            return (
-              <div key={msg.id} className="animate-fade-in" style={{ marginLeft: '44px', maxWidth: '80%' }}>
-                <div style={{ background: 'rgba(20, 184, 166, 0.08)', border: '1px solid rgba(20, 184, 166, 0.25)', borderRadius: '8px', padding: '10px 14px', fontSize: '0.825rem' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', color: 'var(--accent-teal)', fontWeight: 600, marginBottom: '6px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <CheckCircle2 size={14} />
-                      <span>Tool Result: {msg.name}</span>
-                    </div>
-                    <span style={{ fontSize: '0.75rem', opacity: 0.8 }}>ID: {msg.tool_call_id || 'system'}</span>
-                  </div>
-                  <pre style={{ margin: 0, maxHeight: '200px', fontSize: '0.775rem' }}>
-                    {resultWithoutDiff ? JSON.stringify(resultWithoutDiff, null, 2) : msg.content}
-                  </pre>
-                  {fileDiff && <FileDiff diff={fileDiff} />}
-                </div>
-              </div>
-            );
+            const matchingCall = messages
+              .flatMap((message) => message.tool_calls || [])
+              .find((call) => call.id === msg.tool_call_id);
+            return <ToolResultCard key={msg.id} message={msg} args={matchingCall?.arguments || {}} />;
           }
 
           return null;
@@ -310,19 +410,24 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
             <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: 'var(--accent-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
               <Bot size={18} color="#fff" />
             </div>
-            <div className="glass-panel" style={{ maxWidth: '80%', padding: '14px 18px', borderRadius: '16px 16px 16px 4px', fontSize: '0.925rem', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
-              {streamingText}
-              <span className="pulse-glow" style={{ display: 'inline-block', width: '8px', height: '15px', background: 'var(--accent-primary)', marginLeft: '4px', verticalAlign: 'middle' }} />
+            <div className="glass-panel" style={{ maxWidth: '80%', padding: '14px 18px', borderRadius: '16px 16px 16px 4px', fontSize: '0.925rem', lineHeight: 1.6 }}>
+              <MarkdownContent content={streamingText} streaming />
             </div>
           </div>
         )}
 
         {isGenerating && !streamingText && !pendingApprovalCall && (
-          <div className="glass-panel animate-fade-in" style={{ display: 'flex', gap: '12px', alignItems: 'center', marginLeft: '44px', padding: '12px 18px', borderRadius: '12px', border: '1px solid rgba(245, 158, 11, 0.3)', color: 'var(--accent-amber)', fontSize: '0.875rem' }}>
-            <Loader2 size={18} style={{ animation: 'spin 1s linear infinite' }} />
+          <div className="glass-panel animate-fade-in" style={{ display: 'flex', gap: '12px', alignItems: 'center', marginLeft: '44px', padding: '12px 18px', borderRadius: '12px', border: `1px solid ${isModelLoaded ? 'rgba(99, 102, 241, 0.3)' : 'rgba(245, 158, 11, 0.3)'}`, color: isModelLoaded ? 'var(--accent-primary)' : 'var(--accent-amber)', fontSize: '0.875rem' }}>
+            <Loader2 size={18} className="spin" />
             <div>
-              <span style={{ fontWeight: 600, display: 'block' }}>⚡ Loading Model Weights into GPU VRAM...</span>
-              <span style={{ fontSize: '0.775rem', color: 'var(--text-muted)' }}>Ollama is initializing neural network weights. Token streaming will start shortly.</span>
+              <span style={{ fontWeight: 600, display: 'block' }}>
+                {isModelLoaded ? 'Agent is thinking…' : '⚡ Loading Model Weights into GPU VRAM…'}
+              </span>
+              <span style={{ fontSize: '0.775rem', color: 'var(--text-muted)' }}>
+                {isModelLoaded
+                  ? 'Preparing the response. Token streaming will start shortly.'
+                  : 'Ollama is initializing model weights. Token streaming will start shortly.'}
+              </span>
             </div>
           </div>
         )}
@@ -454,7 +559,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                     : 'var(--text-muted)',
             }}
           >
-            {generationStatus === 'generating' && <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} />}
+            {generationStatus === 'generating' && <Loader2 size={14} className="spin" />}
             {generationStatus === 'completed' && <CheckCircle2 size={14} />}
             {generationStatus === 'cancelled' && <Square size={12} />}
             {generationStatus === 'error' && <XCircle size={14} />}

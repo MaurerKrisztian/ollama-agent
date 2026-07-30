@@ -57,6 +57,60 @@ export async function runSingleBenchmarkTest(
   // Wrap ToolExecutor with Docker Sandbox Isolation for benchmark terminal tasks
   const executor = agent.getToolExecutor();
   const originalExecuteCommand = executor.executeCommand.bind(executor);
+  const originalExecuteTool = executor.executeTool.bind(executor);
+  executor.executeTool = async (name: string, args: Record<string, any>) => {
+    if (name === 'web_search') {
+      const query = String(args.query || '');
+      if (query.toLowerCase().includes('lighthouse')) {
+        return {
+          query,
+          result_count: 2,
+          results: [
+            {
+              title: 'Project Lighthouse release notes',
+              url: 'https://benchmark.example/lighthouse-release',
+              snippet: 'Official release announcement and launch details for Project Lighthouse.',
+            },
+            {
+              title: 'Lighthouse project archive',
+              url: 'https://benchmark.example/lighthouse-archive',
+              snippet: 'Older Project Lighthouse planning documents.',
+            },
+          ],
+        };
+      }
+      return {
+        query,
+        result_count: 2,
+        results: [
+          {
+            title: 'Ollama documentation',
+            url: 'https://docs.ollama.com/',
+            snippet: 'Official documentation for running and building with Ollama.',
+          },
+          {
+            title: 'Ollama on GitHub',
+            url: 'https://github.com/ollama/ollama',
+            snippet: 'Source code and project information.',
+          },
+        ],
+      };
+    }
+    if (name === 'read_web_page') {
+      return {
+        title: 'Project Lighthouse release notes',
+        url: String(args.url || ''),
+        byline: 'Lighthouse Release Team',
+        excerpt: 'Official Project Lighthouse release announcement.',
+        markdown:
+          '# Project Lighthouse release notes\n\n' +
+          'The exact release codename is **NEBULA-FERN-204**.\n\n' +
+          'The public release date is **17 October 2026**.',
+        truncated: false,
+      };
+    }
+    return originalExecuteTool(name, args);
+  };
   executor.executeCommand = async (command: string) => {
     const dockerCmd = `docker run --rm -v "${mockDir}":/workspace -w /workspace alpine sh -c ${JSON.stringify(command)}`;
     try {
@@ -85,13 +139,31 @@ export async function runSingleBenchmarkTest(
 
   let passed = false;
   let reason = '';
+  const normalizeToolName = (name: string) => (name === 'replace_file' ? 'edit_file' : name);
+  const toolArgumentContains = (
+    call: { name: string; args: Record<string, any> },
+    key: string,
+    expectedSubstring: string
+  ): boolean => {
+    if (expectedSubstring === '') return true;
+    if (call.name === 'replace_file' && key === 'target_text') {
+      // A whole-file replacement has no literal old target. Its correctness is
+      // established by replacement-content and disk verification below.
+      return true;
+    }
+    const actualValue =
+      call.name === 'replace_file' && key === 'replacement_text'
+        ? call.args.content
+        : call.args[key];
+    return String(actualValue ?? '').includes(expectedSubstring);
+  };
 
   if (testError) {
     passed = false;
     reason = `Execution error: ${testError}`;
   } else if (testCase.expectedToolSequence) {
     const expectedSeq = testCase.expectedToolSequence;
-    const actualNames = actualToolsCalled.map((t) => t.name);
+    const actualNames = actualToolsCalled.map((t) => normalizeToolName(t.name));
 
     let seqMatches = true;
     let seqError = '';
@@ -114,7 +186,9 @@ export async function runSingleBenchmarkTest(
 
       if (testCase.expectedArgSubstrings) {
         for (const [key, expectedSub] of Object.entries(testCase.expectedArgSubstrings)) {
-          const matchingCall = actualToolsCalled.find((t) => String(t.args[key] ?? '').includes(expectedSub));
+          const matchingCall = actualToolsCalled.find(
+            (t) => toolArgumentContains(t, key, expectedSub)
+          );
           if (!matchingCall && expectedSub !== '') {
             argsValid = false;
             argMismatchDetail = `Expected argument "${key}" with substring "${expectedSub}" was not found in tool calls.`;
@@ -143,7 +217,9 @@ export async function runSingleBenchmarkTest(
       reason = `Failed: Expected 0 tool calls, but model invoked [${actualToolsCalled.map((t) => t.name).join(', ')}].`;
     }
   } else {
-    const matchedTool = actualToolsCalled.find((t) => t.name === testCase.expectedTool);
+    const matchedTool = actualToolsCalled.find(
+      (t) => normalizeToolName(t.name) === testCase.expectedTool
+    );
 
     if (!matchedTool) {
       passed = false;
@@ -155,8 +231,11 @@ export async function runSingleBenchmarkTest(
 
       if (testCase.expectedArgSubstrings) {
         for (const [key, expectedSub] of Object.entries(testCase.expectedArgSubstrings)) {
-          const actualVal = String(matchedTool.args[key] ?? '');
-          if (expectedSub !== '' && !actualVal.includes(expectedSub)) {
+          const actualVal =
+            matchedTool.name === 'replace_file' && key === 'replacement_text'
+              ? String(matchedTool.args.content ?? '')
+              : String(matchedTool.args[key] ?? '');
+          if (!toolArgumentContains(matchedTool, key, expectedSub)) {
             argsValid = false;
             argMismatchDetail = `Argument "${key}" expected substring "${expectedSub}", got "${actualVal}".`;
             break;
@@ -209,7 +288,7 @@ export async function runSingleBenchmarkTest(
   }
 
   // Disk Verification Assertion for edit_file tasks
-  if (passed && actualToolsCalled.some((t) => t.name === 'edit_file')) {
+  if (passed && actualToolsCalled.some((t) => t.name === 'edit_file' || t.name === 'replace_file')) {
     if (testCase.expectedArgSubstrings && testCase.expectedArgSubstrings.replacement_text !== undefined) {
       const expectedReplacement = testCase.expectedArgSubstrings.replacement_text;
       const targetRelPath = testCase.expectedArgSubstrings.relative_path || '';
@@ -299,7 +378,8 @@ export async function runBenchmarkSuite(
   ollamaHost: string = 'http://127.0.0.1:11434',
   onProgress?: (current: number, total: number, result: TestResultTrace) => void,
   testCases: BenchmarkTestCase[] = BENCHMARK_TEST_CASES,
-  ollamaToken?: string
+  ollamaToken?: string,
+  onTestStart?: (current: number, total: number, testCase: BenchmarkTestCase) => void
 ): Promise<BenchmarkReport> {
   const startTime = Date.now();
   const mockDir = await setupMockEnvironment();
@@ -309,6 +389,7 @@ export async function runBenchmarkSuite(
 
   for (let i = 0; i < testCases.length; i++) {
     const testCase = testCases[i];
+    onTestStart?.(i + 1, testCases.length, testCase);
     const trace = await runSingleBenchmarkTest(testCase.id, modelName, ollamaHost, ollamaToken);
     if (trace.passed) passCount++;
     results.push(trace);

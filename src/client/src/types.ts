@@ -14,9 +14,12 @@ export interface ToolSettings {
     list_directory: boolean;
     read_file: boolean;
     edit_file: boolean;
+    replace_file: boolean;
     create_file: boolean;
     grep_search: boolean;
     execute_command: boolean;
+    web_search: boolean;
+    read_web_page: boolean;
   };
 }
 

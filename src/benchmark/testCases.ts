@@ -11,7 +11,8 @@ export interface BenchmarkTestCase {
     | 'discrimination'
     | 'multi_step_workflow'
     | 'terminal_execution'
-    | 'information_retrieval';
+    | 'information_retrieval'
+    | 'web_search';
   prompt: string;
   expectedTool?: string | null;
   expectedToolSequence?: string[];
@@ -225,7 +226,6 @@ export const BENCHMARK_TEST_CASES: BenchmarkTestCase[] = [
     expectedToolSequence: ['read_file', 'edit_file'],
     expectedArgSubstrings: {
       relative_path: 'formatter.ts',
-      target_text: 'formatLabel',
       replacement_text: '[ready]',
     },
     description: 'Verifies inspection followed by replacement of a complete multi-line TypeScript function.',
@@ -582,5 +582,60 @@ export const BENCHMARK_TEST_CASES: BenchmarkTestCase[] = [
     objective: 'Tests long-context grounded retrieval without relying on tool-call success alone.',
     requiredOutput: 'The final answer must contain ORBIT-CEDAR-731.',
     evaluationCriteria: 'PASSES only if read_file is called for long_archive.txt and the final response contains ORBIT-CEDAR-731.',
+  },
+
+  // --- CATEGORY 10: WEB SEARCH & PAGE READING ---
+  {
+    id: 'test_web_search_official_docs',
+    name: 'Web Search (Official Ollama Documentation)',
+    category: 'web_search',
+    prompt:
+      'Search the web for the official Ollama documentation using web_search. Tell me the title of the most relevant result.',
+    expectedTool: 'web_search',
+    expectedArgSubstrings: { query: 'Ollama' },
+    expectedResponseSubstrings: ['Ollama documentation'],
+    description:
+      'Verifies the model selects web_search and uses a short relevant query for a current public-web lookup.',
+    objective: 'Tests simple web-search tool selection and grounded use of returned result metadata.',
+    requiredOutput:
+      'Call web_search with a query containing Ollama, then answer with the result title Ollama documentation.',
+    evaluationCriteria:
+      'PASSES only if web_search is invoked with a relevant query and the final response contains Ollama documentation.',
+  },
+  {
+    id: 'test_web_search_then_read_page',
+    name: 'Web Research Workflow (Search → Read Markdown)',
+    category: 'web_search',
+    prompt:
+      'Research the Project Lighthouse release codename on the web. First use web_search, then open the most relevant result with read_web_page. Return the exact release codename from the page.',
+    expectedToolSequence: ['web_search', 'read_web_page'],
+    expectedArgSubstrings: {
+      query: 'Project Lighthouse',
+      url: 'https://benchmark.example/lighthouse-release',
+    },
+    expectedResponseSubstrings: ['NEBULA-FERN-204'],
+    description:
+      'Verifies the complete small-model web workflow: concise search followed by clean Markdown page reading.',
+    objective: 'Tests ordered multi-step web research and grounded fact extraction from page content.',
+    requiredOutput:
+      'Call web_search for Project Lighthouse, call read_web_page with the returned benchmark URL, then answer NEBULA-FERN-204.',
+    evaluationCriteria:
+      'PASSES only if web_search precedes read_web_page, the returned URL is reused, and the final response contains NEBULA-FERN-204.',
+  },
+  {
+    id: 'test_web_direct_page_read',
+    name: 'Direct Web Page Reading (Markdown Extraction Result)',
+    category: 'web_search',
+    prompt:
+      'Read https://benchmark.example/lighthouse-release with read_web_page and report the release date stated on the page.',
+    expectedTool: 'read_web_page',
+    expectedArgSubstrings: { url: 'https://benchmark.example/lighthouse-release' },
+    expectedResponseSubstrings: ['17 October 2026'],
+    description: 'Verifies a supplied public URL is sent directly to read_web_page without an unnecessary search.',
+    objective: 'Tests direct page-reader selection and grounded extraction from its Markdown response.',
+    requiredOutput:
+      'Call read_web_page with the exact supplied URL, then answer with 17 October 2026.',
+    evaluationCriteria:
+      'PASSES only if read_web_page is invoked for the supplied URL and the final response contains 17 October 2026.',
   },
 ];

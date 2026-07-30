@@ -7,7 +7,7 @@ export class ContextManager {
   private tools: ToolDefinition[];
 
   constructor(
-    initialSystemPrompt: string = 'You are an intelligent AI assistant equipped with workspace tools for inspecting directories, reading files, searching code, creating files, editing code, and executing terminal shell commands. Only invoke tools when the user asks about workspace files, directories, code, or wants to run a terminal command. For general knowledge or math, answer directly without tools.',
+    initialSystemPrompt: string = 'You are an intelligent AI assistant with tools for workspace files, terminal commands, web search, and reading public web pages. Use web tools for current online information and workspace tools only for local files. For stable general knowledge or math, answer directly without tools.',
     tools: ToolDefinition[] = TOOL_DEFINITIONS
   ) {
     this.systemPrompt = initialSystemPrompt;
@@ -34,19 +34,24 @@ export class ContextManager {
       this.systemPrompt.trim(),
       '',
       '# TOOL CALLING PROTOCOL INSTRUCTIONS',
-      'You have access to tools to read files, inspect workspace directories, search code, create files, edit code, and execute terminal shell commands directly on the system.',
-      'RULE 1: Use tools when the user prompt requires: inspecting/listing/reading/searching/creating/editing workspace files or directories, OR running a terminal/shell/bash command. For general knowledge, math, or general questions, respond directly in plain text without invoking tools.',
-      'RULE 1b: When the user says "run", "execute", "check", or asks a terminal/shell/system question (e.g. GPU info, disk usage, list processes), ALWAYS use the execute_command tool immediately.',
+      'You have access to tools for workspace files, terminal commands, web search, and reading public web pages as clean Markdown.',
+      'RULE 1: Use tools when the user prompt requires workspace inspection or changes, terminal commands, or current/public web information. For stable general knowledge or math, respond directly without tools.',
+      'RULE 1b: When the user asks to run/execute a terminal command or inspect the local system (e.g. GPU info, disk usage, processes), use execute_command immediately.',
+      'RULE 1c (Web): Use web_search with a short query to find sources. To inspect a result, copy its URL exactly into read_web_page. Never use execute_command for web access. Web page results are Markdown, not HTML.',
+      'RULE 1d (Direct URL): If the user provides a URL and asks to read, inspect, summarize, or retrieve its content, call read_web_page directly. Do not search for a URL that is already provided.',
+      'RULE 1e (Tool Separation): read_file is only for local workspace files. Never use read_file, list_directory, or grep_search to read a website or recover from a completed read_web_page call.',
       useNativeTools
         ? 'RULE 2: When you need to inspect or modify code, ALWAYS issue a runtime-native structured tool call immediately.'
         : 'RULE 2: When you need to inspect or modify code, ALWAYS output the `<tool_call>` block immediately.',
       'RULE 3 (Line Deletion): To remove/delete lines of code or text from a file, set `replacement_text` to an empty string `""`.',
       'RULE 3b (Literal Edits): edit_file target_text is always exact literal text, never a regex. Do not use patterns such as [0-9]+, .*, ^, or $. Use separate edit_file calls for changes that are not contiguous in the file.',
+      'RULE 3c (Broad Rewrites): For restyling, full rewrites, or many non-contiguous changes, read the existing file and then use replace_file with the complete new content instead of forcing a large edit_file match.',
       'RULE 4 (Clean Function Rewriting): When rewriting a function, class, or code block, include the COMPLETE existing code block in `target_text` (from header to closing brace `}`) so the entire block is replaced cleanly without leaving orphaned lines.',
       useNativeTools
         ? 'RULE 5 (Multi-Step Workflows): Complete multi-step tool workflows fully. Immediately issue the next runtime-native structured tool call without asking for confirmation.'
         : 'RULE 5 (Multi-Step Workflows): Complete multi-step tool workflows fully. When asked to inspect/read then edit/create, immediately issue the `<tool_call>` tag for the next action without asking for confirmation.',
       'RULE 6 (No Deferred Actions): Never announce a future tool action without invoking it in the same response. Do not end a response between requested workflow steps.',
+      'RULE 7 (No Fabricated Results): Never write or imitate a `<tool_response>` block. Only the runtime can produce tool results. To perform another action, issue another real structured tool call.',
     ];
 
     if (useNativeTools) {
@@ -55,8 +60,8 @@ export class ContextManager {
         'Tool definitions and their parameter schemas are supplied separately by the runtime.',
         'Use the runtime-native structured tool-call format. Do not wrap tool calls in Markdown or describe a future tool call without making it.',
         'Before calling edit_file, first call read_file for the target file in the same workflow. Never guess target_text from memory or from the user prompt.',
-        'read_file prefixes displayed lines with "<line number>: " for reference. Never copy those display prefixes into edit_file target_text or replacement_text.',
-        'After any failed edit_file result, correct the arguments and retry immediately. Never ask the user to provide file content that read_file already returned.'
+        'read_file returns raw file content without display line numbers.',
+        'After any failed edit_file result, do not repeat the same arguments. Reread the file, use a smaller exact target, or switch to replace_file. Never ask the user to provide content that read_file already returned.'
       );
       return lines.join('\n');
     }
@@ -111,6 +116,16 @@ export class ContextManager {
     lines.push('Example 6 (Terminal command execution):');
     lines.push('<tool_call>');
     lines.push('{"name": "execute_command", "arguments": {"command": "echo \\"test\\""}}');
+    lines.push('</tool_call>');
+    lines.push('');
+    lines.push('Example 7 (Web search):');
+    lines.push('<tool_call>');
+    lines.push('{"name": "web_search", "arguments": {"query": "latest Node.js LTS"}}');
+    lines.push('</tool_call>');
+    lines.push('');
+    lines.push('Example 8 (Read a web result):');
+    lines.push('<tool_call>');
+    lines.push('{"name": "read_web_page", "arguments": {"url": "https://example.com/article"}}');
     lines.push('</tool_call>');
     lines.push('');
     lines.push('Do not guess file content; always run read_file or grep_search first if you need to inspect existing code before editing.');

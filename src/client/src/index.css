@@ -96,6 +96,18 @@ code {
   margin-bottom: 0;
 }
 
+.markdown-body-streaming > :last-child::after {
+  content: '';
+  display: inline-block;
+  width: 0.48em;
+  height: 1em;
+  margin-left: 0.28em;
+  vertical-align: -0.12em;
+  border-radius: 2px;
+  background: var(--accent-primary);
+  animation: pulseGlow 1.1s infinite ease-in-out;
+}
+
 .markdown-body p,
 .markdown-body ul,
 .markdown-body ol,
@@ -170,6 +182,14 @@ code {
 }
 
 /* Animations */
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}
+
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(6px); }
   to { opacity: 1; transform: translateY(0); }

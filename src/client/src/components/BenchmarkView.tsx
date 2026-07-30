@@ -77,7 +77,12 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
   const [testCasesInfo, setTestCasesInfo] = useState<BenchmarkTestCaseInfo[]>([]);
   const [isRunning, setIsRunning] = useState(false);
   const [runningSingleId, setRunningSingleId] = useState<string | null>(null);
-  const [progress, setProgress] = useState<{ current: number; total: number } | null>(null);
+  const [progress, setProgress] = useState<{
+    current: number;
+    completed: number;
+    total: number;
+    testName?: string;
+  } | null>(null);
   const [expandedTestId, setExpandedTestId] = useState<string | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
 
@@ -100,7 +105,7 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
     const filteredCount = selectedCategory === 'all'
       ? testCasesInfo.length
       : testCasesInfo.filter((t) => t.category === selectedCategory).length;
-    setProgress({ current: 0, total: filteredCount || 1 });
+    setProgress({ current: 0, completed: 0, total: filteredCount || 1 });
 
     try {
       const response = await fetch('/api/benchmark/run-stream', {
@@ -137,8 +142,20 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
             const eventType = eventLine[1].trim();
             const eventData = JSON.parse(dataLine[1].trim());
 
-            if (eventType === 'test_complete') {
-              setProgress({ current: eventData.current, total: eventData.total });
+            if (eventType === 'test_start') {
+              setProgress({
+                current: eventData.current,
+                completed: eventData.current - 1,
+                total: eventData.total,
+                testName: eventData.test.name,
+              });
+            } else if (eventType === 'test_complete') {
+              setProgress((prev) => ({
+                current: eventData.current,
+                completed: eventData.current,
+                total: eventData.total,
+                testName: prev?.testName,
+              }));
               setLiveResults((prev) => {
                 const filtered = prev.filter((r) => r.testId !== eventData.trace.testId);
                 return [...filtered, eventData.trace];
@@ -253,7 +270,7 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
               transition: 'all 0.2s',
             }}
           >
-            {isRunning ? <Loader2 size={18} className="pulse-glow" style={{ animation: 'spin 1s linear infinite' }} /> : <Play size={18} />}
+            {isRunning ? <Loader2 size={18} className="spin" /> : <Play size={18} />}
             <span>
               {isRunning
                 ? `Testing... (${progress ? `${progress.current}/${progress.total}` : ''})`
@@ -270,15 +287,16 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
         <div className="glass-panel animate-fade-in" style={{ padding: '16px 20px', borderRadius: '12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
             <span style={{ fontWeight: 600, color: 'var(--accent-amber)' }}>
-              ⚡ Executing Task {progress.current} of {progress.total} in real-time...
+              ⚡ Running {progress.current} of {progress.total}
+              {progress.testName ? `: ${progress.testName}` : '...'}
             </span>
-            <span>{Math.round((progress.current / progress.total) * 100)}% Complete</span>
+            <span>{Math.round((progress.completed / progress.total) * 100)}% Complete</span>
           </div>
           <div style={{ height: '8px', width: '100%', background: 'rgba(255, 255, 255, 0.1)', borderRadius: '4px', overflow: 'hidden' }}>
             <div
               style={{
                 height: '100%',
-                width: `${(progress.current / progress.total) * 100}%`,
+                width: `${(progress.completed / progress.total) * 100}%`,
                 background: 'var(--accent-gradient)',
                 borderRadius: '4px',
                 transition: 'width 0.3s ease',
@@ -350,6 +368,7 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
               { id: 'multi_step_workflow', label: '⚡ Multi-Step Workflow' },
               { id: 'terminal_execution', label: '🐚 Terminal (Docker Sandbox)' },
               { id: 'information_retrieval', label: '🔎 Information Retrieval' },
+              { id: 'web_search', label: '🌐 Web Search' },
             ].map((cat) => {
               const catTotal = cat.id === 'all' ? testCasesInfo.length : testCasesInfo.filter((t) => t.category === cat.id).length;
               const catPassed = cat.id === 'all'
@@ -504,7 +523,7 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
                     }}
                   >
                     {isSingleRunning ? (
-                      <Loader2 size={14} className="pulse-glow" style={{ animation: 'spin 1s linear infinite' }} />
+                      <Loader2 size={14} className="spin" />
                     ) : resultTrace ? (
                       <RotateCw size={14} color="var(--accent-teal)" />
                     ) : (

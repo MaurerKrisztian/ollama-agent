@@ -107,6 +107,7 @@ async function startCli() {
     const validCategories = [
       'directory_reading', 'file_reading', 'file_creation', 'file_editing',
       'code_editing', 'code_search', 'discrimination', 'multi_step_workflow', 'terminal_execution', 'information_retrieval',
+      'web_search',
     ];
 
     if (category && !validCategories.includes(category)) {

@@ -2,6 +2,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { exec } from 'child_process';
 import { ToolDefinition } from './types.js';
+import { WebClient } from './web.js';
 
 type DiffLine = {
   type: 'context' | 'add' | 'remove' | 'meta';
@@ -129,7 +130,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
   },
   {
     name: 'read_file',
-    description: 'Read contents of a text file within the working directory (returns line-numbered text).',
+    description: 'Read the raw contents of a text file within the working directory.',
     parameters: {
       type: 'object',
       properties: {
@@ -161,6 +162,24 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         },
       },
       required: ['relative_path', 'target_text', 'replacement_text'],
+    },
+  },
+  {
+    name: 'replace_file',
+    description: 'Replace the complete contents of an existing text file. Read the file first. Prefer this over edit_file for broad rewrites, restyling, or many non-contiguous changes.',
+    parameters: {
+      type: 'object',
+      properties: {
+        relative_path: {
+          type: 'string',
+          description: 'Relative path to an existing file from the current working directory.',
+        },
+        content: {
+          type: 'string',
+          description: 'The complete new contents of the file.',
+        },
+      },
+      required: ['relative_path', 'content'],
     },
   },
   {
@@ -235,13 +254,43 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
       required: ['command'],
     },
   },
+  {
+    name: 'web_search',
+    description: 'Search the public web. Returns a short list of result titles, URLs, and snippets. Use read_web_page on a result URL to inspect its contents.',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: {
+          type: 'string',
+          description: 'Short web search query.',
+        },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'read_web_page',
+    description: 'Read one public HTTP/HTTPS page and return its main content as clean, bounded Markdown instead of raw HTML.',
+    parameters: {
+      type: 'object',
+      properties: {
+        url: {
+          type: 'string',
+          description: 'Full URL copied from a web_search result.',
+        },
+      },
+      required: ['url'],
+    },
+  },
 ];
 
 export class ToolExecutor {
   private workingDir: string;
+  private webClient: WebClient;
 
-  constructor(initialWorkingDir: string = process.cwd()) {
+  constructor(initialWorkingDir: string = process.cwd(), webClient: WebClient = new WebClient()) {
     this.workingDir = path.resolve(initialWorkingDir);
+    this.webClient = webClient;
   }
 
   public getWorkingDir(): string {
@@ -263,7 +312,17 @@ export class ToolExecutor {
       return buildCreatedFileDiff(args.relative_path, args.content);
     }
 
-    if (name !== 'edit_file' || !args.relative_path || args.target_text === undefined || args.replacement_text === undefined) {
+    if (
+      name !== 'edit_file' &&
+      name !== 'replace_file'
+    ) {
+      return undefined;
+    }
+    if (
+      !args.relative_path ||
+      (name === 'edit_file' && (args.target_text === undefined || args.replacement_text === undefined)) ||
+      (name === 'replace_file' && args.content === undefined)
+    ) {
       return undefined;
     }
 
@@ -281,6 +340,10 @@ export class ToolExecutor {
 
     try {
       const content = await fs.readFile(filePath, 'utf-8');
+      if (name === 'replace_file') {
+        if (content === args.content) return undefined;
+        return buildEditedFileDiff(actualRelativePath, content, content, args.content);
+      }
       const targetText = stripCopiedLineNumbers(args.target_text);
       const replacementText = stripCopiedLineNumbers(args.replacement_text);
       const match = this.findMatchingTargetCode(content, targetText);
@@ -342,7 +405,36 @@ export class ToolExecutor {
       if (line.trim() === trimmedTarget) return line;
     }
 
-    // 3. Substring statement matching fallback (e.g. return statement or function signature)
+    // 3. Match text whose newlines/indentation were collapsed by a small model.
+    // Build a normalized string while retaining offsets into the original file.
+    const normalizedChars: string[] = [];
+    const originalOffsets: number[] = [];
+    let previousWasWhitespace = false;
+    for (let index = 0; index < content.length; index++) {
+      const char = content[index];
+      if (/\s/.test(char)) {
+        if (!previousWasWhitespace) {
+          normalizedChars.push(' ');
+          originalOffsets.push(index);
+          previousWasWhitespace = true;
+        }
+      } else {
+        normalizedChars.push(char);
+        originalOffsets.push(index);
+        previousWasWhitespace = false;
+      }
+    }
+    const normalizedContent = normalizedChars.join('');
+    const normalizedTarget = trimmedTarget.replace(/\s+/g, ' ');
+    const normalizedStart = normalizedContent.indexOf(normalizedTarget);
+    if (normalizedStart !== -1) {
+      const normalizedEnd = normalizedStart + normalizedTarget.length - 1;
+      const originalStart = originalOffsets[normalizedStart];
+      const originalEnd = originalOffsets[normalizedEnd] + 1;
+      return content.slice(originalStart, originalEnd);
+    }
+
+    // 4. Substring statement matching fallback (e.g. return statement or function signature)
     if (trimmedTarget.includes('return ') || trimmedTarget.includes('function ') || trimmedTarget.includes('export ')) {
       for (const line of lines) {
         if (
@@ -453,15 +545,11 @@ export class ToolExecutor {
             return { error: `File "${actualRelativePath}" exceeds 500KB limit.` };
           }
           const rawContent = await fs.readFile(filePath, 'utf-8');
-          // Format with explicit line numbers for small LLM precision
-          const numberedLines = rawContent
-            .split('\n')
-            .map((line, idx) => `${idx + 1}: ${line}`)
-            .join('\n');
 
           return {
             file_path: actualRelativePath,
-            content: numberedLines,
+            content: rawContent,
+            line_count: rawContent.split('\n').length,
             size_bytes: stats.size,
           };
         } catch (err: any) {
@@ -508,6 +596,13 @@ export class ToolExecutor {
 
           const replacementToWrite = preserveFirstLineIndent(matchToReplace, cleanReplacementText);
           const updatedContent = content.replace(matchToReplace, replacementToWrite);
+          if (updatedContent === content) {
+            return {
+              error: `The edit matched "${actualRelativePath}" but produced no change. Use different replacement_text, or use replace_file for a broad rewrite.`,
+              file_path: actualRelativePath,
+              changed: false,
+            };
+          }
           await fs.writeFile(filePath, updatedContent, 'utf-8');
 
           return {
@@ -519,6 +614,50 @@ export class ToolExecutor {
           };
         } catch (err: any) {
           return { error: `Failed to edit file: ${err.message}` };
+        }
+      }
+
+      case 'replace_file': {
+        const { relative_path, content: replacementContent } = args;
+        if (!relative_path || replacementContent === undefined) {
+          return { error: 'Parameters relative_path and content are required.' };
+        }
+        let filePath = path.resolve(this.workingDir, relative_path);
+        let actualRelativePath = relative_path;
+
+        try {
+          await fs.stat(filePath);
+        } catch (_) {
+          const foundPath = await this.findFileRecursive(this.workingDir, path.basename(relative_path));
+          if (foundPath) {
+            filePath = foundPath;
+            actualRelativePath = path.relative(this.workingDir, foundPath);
+          }
+        }
+
+        try {
+          const stats = await fs.stat(filePath);
+          if (stats.isDirectory()) {
+            return { error: `Path "${actualRelativePath}" is a directory, not a file.` };
+          }
+          const originalContent = await fs.readFile(filePath, 'utf-8');
+          if (originalContent === replacementContent) {
+            return {
+              error: `replace_file produced no change in "${actualRelativePath}".`,
+              file_path: actualRelativePath,
+              changed: false,
+            };
+          }
+          await fs.writeFile(filePath, replacementContent, 'utf-8');
+          return {
+            success: true,
+            file_path: actualRelativePath,
+            message: `Successfully replaced ${actualRelativePath}.`,
+            size_bytes: Buffer.byteLength(replacementContent, 'utf-8'),
+            diff: buildEditedFileDiff(actualRelativePath, originalContent, originalContent, replacementContent),
+          };
+        } catch (err: any) {
+          return { error: `Failed to replace file: ${err.message}` };
         }
       }
 
@@ -584,6 +723,25 @@ export class ToolExecutor {
         const cmdStr = args.command;
         if (!cmdStr) return { error: 'Parameter command is required.' };
         return await this.executeCommand(cmdStr);
+      }
+
+      case 'web_search': {
+        if (!args.query) return { error: 'Parameter query is required.' };
+        try {
+          const results = await this.webClient.search(args.query);
+          return { query: args.query, result_count: results.length, results };
+        } catch (err: any) {
+          return { error: `Web search failed: ${err.message}` };
+        }
+      }
+
+      case 'read_web_page': {
+        if (!args.url) return { error: 'Parameter url is required.' };
+        try {
+          return await this.webClient.readPage(args.url);
+        } catch (err: any) {
+          return { error: `Web page read failed: ${err.message}`, url: args.url };
+        }
       }
 
       default:

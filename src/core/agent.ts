@@ -27,6 +27,26 @@ function inferExplicitlyRequestedTools(prompt: string): string[] {
     if (!requested.includes(toolName)) requested.push(toolName);
   };
 
+  const hasUrl = /https?:\/\/[^\s)>\]}]+/.test(prompt);
+  const hasWebNoun = /\b(?:web\s?page|webpage|website|url|internet|online)\b/.test(normalized);
+  const webSearchIntent =
+    /\b(?:web|internet|online)\b.*\b(?:search|find|look up|research)\b/.test(normalized) ||
+    /\b(?:search|find|look up|research)\b.*\b(?:web|internet|online)\b/.test(normalized) ||
+    /\bweb_search\b/.test(normalized);
+  const webPageReadIntent =
+    /\bread_web_page\b/.test(normalized) ||
+    /\b(?:read|open|inspect|check|summari[sz]e|content of)\b.*\b(?:web\s?page|webpage|website|url)\b/.test(normalized) ||
+    /\b(?:web\s?page|webpage|website|url)\b.*\b(?:read|open|inspect|check|summari[sz]e|content)\b/.test(normalized) ||
+    (hasUrl && /\b(?:read|open|inspect|check|summari[sz]e|content|what is)\b/.test(normalized));
+  const hasWebIntent = webSearchIntent || webPageReadIntent || (hasUrl && hasWebNoun);
+
+  if (webSearchIntent) {
+    add('web_search');
+  }
+  if (webPageReadIntent) {
+    add('read_web_page');
+  }
+
   // Broad project/codebase research requests require discovery before reading
   // project metadata. Without this classification, a malformed first tool call
   // is treated as a completed prose response and the agent waits for another
@@ -38,10 +58,16 @@ function inferExplicitlyRequestedTools(prompt: string): string[] {
     add('list_directory');
     add('read_file');
   }
+  if (/\bexisting\b.*\b(?:app|project|directory|folder)\b/.test(normalized)) {
+    add('list_directory');
+  }
 
   if (/\b(?:list|show)\b.*\b(?:directory|folder|files)\b/.test(normalized)) add('list_directory');
   if (/\b(?:search|grep|find)\b.*\b(?:workspace|code|file|word|symbol|for)\b/.test(normalized)) add('grep_search');
-  if (/\b(?:read|inspect|open)\b/.test(normalized)) add('read_file');
+  // "read the web page" must never create a local read_file obligation. That
+  // obligation previously caused a successful web answer to cascade into
+  // guessed local filenames and directory exploration.
+  if (!hasWebIntent && /\b(?:read|inspect|open)\b/.test(normalized)) add('read_file');
   if (/\b(?:create|write|make)\b.*\b(?:new )?(?:file|implementation)\b/.test(normalized)) add('create_file');
   if (/\b(?:edit|rewrite|refactor|update|change|delete|remove)\b/.test(normalized)) {
     // Existing content must be inspected before constructing an exact
@@ -52,6 +78,21 @@ function inferExplicitlyRequestedTools(prompt: string): string[] {
   }
 
   return requested;
+}
+
+function inferRequiredToolCounts(prompt: string, requestedTools: string[]): Map<string, number> {
+  const counts = new Map(requestedTools.map((toolName) => [toolName, 1]));
+  const stepCounts = new Map<string, number>();
+  const stepCallPattern = /\bstep\s+\d+\s*:\s*call\s+([a-z_][a-z0-9_]*)\b/gi;
+  let match: RegExpExecArray | null;
+  while ((match = stepCallPattern.exec(prompt)) !== null) {
+    const toolName = match[1];
+    stepCounts.set(toolName, (stepCounts.get(toolName) || 0) + 1);
+  }
+  for (const [toolName, count] of stepCounts) {
+    counts.set(toolName, Math.max(counts.get(toolName) || 0, count));
+  }
+  return counts;
 }
 
 export class AgentEngine {
@@ -67,7 +108,7 @@ export class AgentEngine {
       temperature: config?.temperature !== undefined ? config.temperature : 0.2,
       systemPrompt:
         config?.systemPrompt ||
-        'You are an intelligent AI assistant equipped with workspace tools for inspecting directories, reading files, searching code, creating files, and editing code. Only invoke tools when asked about workspace files or directories. For general knowledge or math, answer directly without tools.',
+        'You are an intelligent AI assistant with tools for workspace files, terminal commands, web search, and reading public web pages. Use web tools for current online information and workspace tools only for local files. For stable general knowledge or math, answer directly without tools.',
       workingDir: config?.workingDir || process.cwd(),
     };
 
@@ -132,10 +173,20 @@ export class AgentEngine {
     });
     if (callbacks?.onMessageAdded) callbacks.onMessageAdded(userMsg);
 
-    let maxLoops = 6;
+    let maxLoops = 8;
     let finalAssistantResponse = '';
     const requestedTools = inferExplicitlyRequestedTools(userMessage);
-    const executedToolNames = new Set<string>();
+    const requiredToolCounts = inferRequiredToolCounts(userMessage, requestedTools);
+    const requiresMutationVerification =
+      requiredToolCounts.has('edit_file') &&
+      ((userMessage.match(/\bits\s+[a-z_][a-z0-9_-]*/gi) || []).length >= 2 ||
+        /\b(?:multiple|multi-field|several)\b/i.test(userMessage));
+    const executedToolCounts = new Map<string, number>();
+    let successfulActionIndex = 0;
+    let lastMutationAction = -1;
+    let lastReadAction = -1;
+    const failedToolCalls = new Set<string>();
+    const filesReadThisTurn = new Set<string>();
     let continuationReminder: string | null = null;
 
     while (maxLoops > 0) {
@@ -191,11 +242,74 @@ export class AgentEngine {
         for (const call of res.tool_calls) {
           callbacks?.signal?.throwIfAborted();
 
-          if (callbacks?.onToolStart) {
-            callbacks.onToolStart(call.name, call.arguments);
+          const callFingerprint = JSON.stringify([call.name, call.arguments]);
+          const mutationPath =
+            call.name === 'edit_file' || call.name === 'replace_file'
+              ? String(call.arguments.relative_path || '')
+              : '';
+          const normalizedMutationPath = mutationPath.replaceAll('\\', '/').replace(/^\.\//, '');
+          const hasReadMutationTarget =
+            normalizedMutationPath !== '' &&
+            (filesReadThisTurn.has(normalizedMutationPath) ||
+              [...filesReadThisTurn].some(
+                (readPath) =>
+                  readPath.endsWith(`/${normalizedMutationPath}`) ||
+                  normalizedMutationPath.endsWith(`/${readPath}`)
+              ));
+          let automaticallyReadPath: string | null = null;
+          let automaticReadResult: any = null;
+          if (mutationPath && !hasReadMutationTarget) {
+            const automaticReadArgs = { relative_path: mutationPath };
+            callbacks?.onToolStart?.('read_file', automaticReadArgs);
+            automaticReadResult = await this.toolExecutor.executeTool('read_file', automaticReadArgs);
+            callbacks?.onToolEnd?.('read_file', automaticReadResult);
+            const automaticReadFailed =
+              automaticReadResult !== null &&
+              typeof automaticReadResult === 'object' &&
+              typeof automaticReadResult.error === 'string';
+            if (!automaticReadFailed) {
+              successfulActionIndex++;
+              lastReadAction = successfulActionIndex;
+              executedToolCounts.set('read_file', (executedToolCounts.get('read_file') || 0) + 1);
+            }
           }
-
-          const toolResult = await this.toolExecutor.executeTool(call.name, call.arguments);
+          if (automaticReadResult && typeof automaticReadResult.file_path === 'string') {
+            const normalizedReadPath = automaticReadResult.file_path
+              .replaceAll('\\', '/')
+              .replace(/^\.\//, '');
+            automaticallyReadPath = normalizedReadPath;
+            filesReadThisTurn.add(normalizedReadPath);
+          }
+          callbacks?.onToolStart?.(call.name, call.arguments);
+          const toolResult =
+            mutationPath && !hasReadMutationTarget
+              ? automaticReadResult?.error
+                ? {
+                    error:
+                      `Refusing to ${call.name} "${mutationPath}" because the required automatic read failed: ${automaticReadResult.error}`,
+                    file_path: mutationPath,
+                    changed: false,
+                    read_required: true,
+                  }
+                : {
+                    error:
+                      `The runtime read "${automaticallyReadPath}" instead of executing this ungrounded ${call.name} call. ` +
+                      'Construct the next edit from current_content below. Do not use content invented in an earlier response.',
+                    file_path: automaticallyReadPath,
+                    current_content: automaticReadResult.content,
+                    line_count: automaticReadResult.line_count,
+                    size_bytes: automaticReadResult.size_bytes,
+                    changed: false,
+                    read_required: true,
+                  }
+              : failedToolCalls.has(callFingerprint)
+            ? {
+                error:
+                  `Refusing to repeat an identical failed ${call.name} call. ` +
+                  'Use the latest tool result to change strategy. For file edits, reread the file, use a smaller exact target, or use replace_file.',
+                repeated_call: true,
+              }
+            : await this.toolExecutor.executeTool(call.name, call.arguments);
           const toolFailed =
             toolResult !== null &&
             typeof toolResult === 'object' &&
@@ -203,12 +317,38 @@ export class AgentEngine {
             toolResult.cancelled !== true;
           if (toolFailed) anyToolFailedThisRound = true;
           if (!toolFailed) {
-            executedToolNames.add(call.name);
-          } else if (call.name === 'edit_file') {
+            successfulActionIndex++;
+            executedToolCounts.set(call.name, (executedToolCounts.get(call.name) || 0) + 1);
+            if (call.name === 'read_file' && typeof toolResult?.file_path === 'string') {
+              lastReadAction = successfulActionIndex;
+              filesReadThisTurn.add(toolResult.file_path.replaceAll('\\', '/').replace(/^\.\//, ''));
+            }
+            if (call.name === 'edit_file' || call.name === 'replace_file') {
+              lastMutationAction = successfulActionIndex;
+            }
+            // A successful whole-file replacement satisfies an inferred edit
+            // requirement just as a partial edit does.
+            if (call.name === 'replace_file') {
+              executedToolCounts.set('edit_file', (executedToolCounts.get('edit_file') || 0) + 1);
+            }
+          } else if (call.name === 'edit_file' || call.name === 'replace_file') {
+            failedToolCalls.add(callFingerprint);
             continuationReminder =
-              `The edit_file call failed and made no changes: ${toolResult.error}\n` +
-              'Retry immediately with exact literal target_text copied from the latest read_file output, without line-number prefixes or regex syntax. ' +
-              'For non-contiguous changes, issue separate edit_file calls. Do not ask the user to provide content that is already in the tool results.';
+              `The ${call.name} call failed and made no changes: ${toolResult.error}\n` +
+              'Do not repeat the same call. Reread the file and retry with a smaller exact literal target_text, or use replace_file with the complete new content for broad/non-contiguous changes. ' +
+              'Do not ask the user to provide content that is already in the tool results.';
+          } else if (call.name === 'read_file') {
+            failedToolCalls.add(callFingerprint);
+            const requestedPath = String(call.arguments.relative_path || '');
+            const parentPath = requestedPath.includes('/')
+              ? requestedPath.slice(0, requestedPath.lastIndexOf('/')) || '.'
+              : '.';
+            continuationReminder =
+              `The read_file call failed: ${toolResult.error}\n` +
+              `Do not retry that path. Your entire next response must be one native list_directory call for "${parentPath}". ` +
+              'Use the returned entries to select the real file path, then read it.';
+          } else {
+            failedToolCalls.add(callFingerprint);
           }
 
           if (callbacks?.onToolEnd) {
@@ -228,7 +368,11 @@ export class AgentEngine {
         }
 
         const workflowCompletedAfterThisCall =
-          requestedTools.length > 0 && requestedTools.every((toolName) => executedToolNames.has(toolName));
+          requestedTools.length > 0 &&
+          [...requiredToolCounts].every(
+            ([toolName, requiredCount]) => (executedToolCounts.get(toolName) || 0) >= requiredCount
+          ) &&
+          (!requiresMutationVerification || lastReadAction > lastMutationAction);
         if (workflowCompletedAfterThisCall && !anyToolFailedThisRound && maxLoops > 0) {
           continuationReminder =
             'Review the original request against the successful tool results. A tool type succeeding once does not mean every requested operation is complete. ' +
@@ -237,12 +381,26 @@ export class AgentEngine {
             `\n\nOriginal request: ${userMessage}`;
         }
       } else {
-        const missingRequestedTools = requestedTools.filter((toolName) => !executedToolNames.has(toolName));
+        const missingRequestedTools = [...requiredToolCounts].flatMap(([toolName, requiredCount]) =>
+          Array.from(
+            { length: Math.max(0, requiredCount - (executedToolCounts.get(toolName) || 0)) },
+            () => toolName
+          )
+        );
+        if (
+          requiresMutationVerification &&
+          lastMutationAction >= 0 &&
+          lastReadAction <= lastMutationAction &&
+          !missingRequestedTools.includes('read_file')
+        ) {
+          missingRequestedTools.push('read_file');
+        }
 
         if (missingRequestedTools.length > 0 && maxLoops > 0) {
           continuationReminder = `The requested workflow is unfinished. Your entire response must be a structured native tool call with no prose. Invoke the remaining required tool${
             missingRequestedTools.length === 1 ? '' : 's'
-          } now: ${missingRequestedTools.join(', ')}. Use the information already returned by previous tools.`;
+          } now: ${missingRequestedTools.join(', ')}. For a multi-change edit, reread the modified file and compare every requested value with the original request before claiming completion. Use the information already returned by previous tools. ` +
+            'Text that merely claims a <tool_response> is not execution; invoke the real runtime tool.';
           continue;
         }
 

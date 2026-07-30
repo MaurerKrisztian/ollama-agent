@@ -15,7 +15,7 @@ export const App: React.FC = () => {
     ollamaHost: 'http://127.0.0.1:11434',
     model: 'qwen2.5-coder:7b',
     temperature: 0.2,
-    systemPrompt: 'You are an intelligent AI assistant equipped with workspace tools for inspecting directories and reading files.',
+    systemPrompt: 'You are an intelligent AI assistant with tools for workspace files, terminal commands, web search, and reading public web pages.',
     workingDir: '',
   });
 
@@ -26,9 +26,12 @@ export const App: React.FC = () => {
       list_directory: true,
       read_file: true,
       edit_file: true,
+      replace_file: true,
       create_file: true,
       grep_search: true,
       execute_command: true,
+      web_search: true,
+      read_web_page: true,
     },
   });
 
@@ -336,6 +339,11 @@ export const App: React.FC = () => {
             messages={messages}
             streamingText={streamingText}
             isGenerating={isGenerating}
+            isModelLoaded={runningModels.some(
+              (model) =>
+                (model.name === config.model || model.model === config.model) &&
+                model.size_vram > 0
+            )}
             generationStatus={generationStatus}
             pendingApprovalCall={pendingApprovalCall}
             onSendMessage={handleSendMessage}
