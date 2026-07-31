@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { ToolExecutor } from './tools.js';
+import { ToolExecutor, getToolDefinitions } from './tools.js';
 import { categorizeError } from './types.js';
 import { stripAnsiCodes } from './terminalManager.js';
 
@@ -152,4 +152,119 @@ test('stripAnsiCodes strips standard ESC codes and orphaned color brackets', () 
 
   const orphanedInput = ' [36m- And I fill "currencies-rate" with "380"[39m # [90mcucumber/click-button.ts:189[39m';
   assert.equal(stripAnsiCodes(orphanedInput).trim(), '- And I fill "currencies-rate" with "380" # cucumber/click-button.ts:189');
+});
+
+test('grep_search supports regex mode, case sensitivity, and file pattern filtering', async () => {
+  await withWorkspace(async (workspace, executor) => {
+    await fs.writeFile(path.join(workspace, 'service.ts'), 'function ProcessData() { return "SUCCESS"; }\n');
+    await fs.writeFile(path.join(workspace, 'config.json'), '{"processData": true}\n');
+    await fs.writeFile(path.join(workspace, 'readme.md'), 'processdata is enabled.\n');
+
+    // Test 1: Regex search
+    const regexRes = await executor.executeTool('grep_search', {
+      query: 'Process[A-Z]\\w+',
+      is_regex: true,
+      case_sensitive: true,
+    });
+    assert.equal(regexRes.total_matches, 1);
+    assert.equal(regexRes.matches[0].file, 'service.ts');
+
+    // Test 2: Case-sensitive search
+    const caseRes = await executor.executeTool('grep_search', {
+      query: 'ProcessData',
+      case_sensitive: true,
+    });
+    assert.equal(caseRes.total_matches, 1);
+    assert.equal(caseRes.matches[0].file, 'service.ts');
+
+    // Test 3: File pattern filter (*.json)
+    const patRes = await executor.executeTool('grep_search', {
+      query: 'processData',
+      file_pattern: '*.json',
+    });
+    assert.equal(patRes.returned_matches, 1);
+    assert.equal(patRes.matches[0].file, 'config.json');
+
+    // Test 4: Whole word boundary (\b)
+    const wordRes = await executor.executeTool('grep_search', {
+      query: 'processdata',
+      whole_word: true,
+      case_sensitive: true,
+    });
+    assert.equal(wordRes.returned_matches, 1);
+    assert.equal(wordRes.matches[0].file, 'readme.md');
+
+    // Test 5: Context lines & highlighting
+    const gherkinFile = path.join(workspace, 'feature.feature');
+    await fs.writeFile(
+      gherkinFile,
+      'Feature: User Authentication\n  Background:\n    Given server is running\n  Scenario: Login\n    When user submits credentials\n    Then user is logged in\n'
+    );
+
+    const ctxRes = await executor.executeTool('grep_search', {
+      query: 'Login',
+      context_lines: 2,
+      file_pattern: '*.feature',
+    });
+    assert.equal(ctxRes.returned_matches, 1);
+    assert.ok(ctxRes.matches[0].context);
+    assert.ok(ctxRes.matches[0].context.length >= 3);
+    assert.match(ctxRes.matches[0].content, />>>Login<<</);
+  });
+});
+
+test('grep_replace batch search and replace with dry_run', async () => {
+  await withWorkspace(async (workspace, executor) => {
+    await fs.writeFile(path.join(workspace, 'a.ts'), 'const oldName = 1;\nconsole.log(oldName);\n');
+    await fs.writeFile(path.join(workspace, 'b.ts'), 'export function oldName() { return "oldName"; }\n');
+
+    // Test 1: Dry run preview
+    const dryRunRes = await executor.executeTool('grep_replace', {
+      query: 'oldName',
+      replacement: 'newName',
+      dry_run: true,
+    });
+    assert.equal(dryRunRes.dry_run, true);
+    assert.equal(dryRunRes.files_modified, 2);
+    assert.equal(dryRunRes.total_replacements, 4);
+
+    // Verify files were not modified during dry run
+    assert.match(await fs.readFile(path.join(workspace, 'a.ts'), 'utf-8'), /oldName/);
+
+    // Test 2: Live batch replacement
+    const liveRes = await executor.executeTool('grep_replace', {
+      query: 'oldName',
+      replacement: 'newName',
+      dry_run: false,
+    });
+    assert.equal(liveRes.dry_run, false);
+    assert.equal(liveRes.files_modified, 2);
+    assert.equal(liveRes.total_replacements, 4);
+
+    // Verify files modified on disk
+    assert.match(await fs.readFile(path.join(workspace, 'a.ts'), 'utf-8'), /newName/);
+    assert.match(await fs.readFile(path.join(workspace, 'b.ts'), 'utf-8'), /newName/);
+  });
+});
+
+test('getToolDefinitions generates single schema profile based on complexity level', () => {
+  const simpleTools = getToolDefinitions('simple');
+  const simpleGrep = simpleTools.find((t) => t.name === 'grep_search');
+  assert.ok(simpleGrep);
+  assert.ok(simpleGrep.parameters.properties.query);
+  assert.ok(simpleGrep.parameters.properties.relative_path);
+  assert.equal(simpleGrep.parameters.properties.is_regex, undefined);
+  assert.equal(simpleGrep.parameters.properties.whole_word, undefined);
+
+  const mediumTools = getToolDefinitions('medium');
+  const mediumGrep = mediumTools.find((t) => t.name === 'grep_search');
+  assert.ok(mediumGrep);
+  assert.ok(mediumGrep.parameters.properties.is_regex);
+  assert.equal(mediumGrep.parameters.properties.whole_word, undefined);
+
+  const advTools = getToolDefinitions('advanced');
+  const advGrep = advTools.find((t) => t.name === 'grep_search');
+  assert.ok(advGrep);
+  assert.ok(advGrep.parameters.properties.whole_word);
+  assert.ok(advGrep.parameters.properties.context_lines);
 });

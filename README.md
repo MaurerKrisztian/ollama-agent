@@ -20,7 +20,9 @@ No cloud, no API keys, no data leaving your machine.
 - **Optional project context** — send a bounded file list, package metadata, `.agent/AGENTS.md`, and on-demand project skill metadata to the model
 - **Working-directory picker** — browse server-local folders and remember the selected project per browser
 - **Remote Ollama connections** — configure an HTTP/HTTPS server URL with an optional bearer token
-- **⚙️ Tool Settings modal** — configure terminal approval mode, file edit mode, and toggle individual tools on/off
+- **⚙️ Categorized Tool Settings modal** — grouped controls for 🛠️ Developer Tools, 📁 File System, 🌐 Web Research, and 🐚 Terminal Tools with group master toggles and individual switches
+- **🎯 Tool Complexity Profiles (`simple` | `medium` | `advanced`)** — tailor tool schema complexity sent to Ollama models based on model size (3B–8B, 14B–32B, 70B+), preventing small-model parameter hallucinations while unlocking advanced options for large models
+- **🎨 Color-Coded Tool Inspector (`ℹ`)** — inspect exact prompt descriptions and syntax color-coded JSON parameter schemas in real time
 - **⚠️ Tool Approval Cards** — approve or reject terminal commands inline in the chat before they run
 - **Context Inspector sidebar** — view token count, formatted context text, and raw JSON
 - **Workdir context preview** — inspect and copy the exact current project snapshot appended to model requests
@@ -37,33 +39,48 @@ No cloud, no API keys, no data leaving your machine.
 
 ### 🧠 Core Agent Engine
 - Agentic multi-turn loop with automatic tool call parsing and execution
-- Configurable temperature, model, working directory, system prompt, and automatic project context
+- **Language-Aware AST & LSP Developer Tools Engine** powered by the TypeScript Compiler API for in-process structural code navigation and type checking
+- Configurable temperature, model, working directory, system prompt, tool complexity profiles, and automatic project context
 - Context window management with token estimation
 - Full streaming support via SSE
 
 ### 🛠️ Built-in Agent Tools
-| Tool | Description |
-|---|---|
-| `list_directory` | List files and subdirectories in a path |
-| `read_file` | Read any file in the workspace |
-| `edit_file` | Partial text replacement in existing files |
-| `replace_file` | Replace an existing file for broad rewrites after reading it |
-| `create_file` | Create new files with content |
-| `grep_search` | Search codebase for text/symbols |
-| `execute_command` | Run terminal shell commands (with approval gate) |
-| `web_search` | Search the public web and return concise result metadata |
-| `read_web_page` | Extract a public page's main content as bounded Markdown |
 
-### 🧪 Benchmark Suite
-- **46 targeted test cases** across 12 categories:
-  - Directory Reading, File Reading, File Creation, File Editing
-  - Code Editing, Code Search, Discrimination (no-tool), Multi-Step Workflow
-  - **Terminal Execution (Isolated Docker Sandbox)**
-  - **Information Retrieval** from short, medium, and long files with grounded-answer checks
-  - **Project Context** selective `.agent/AGENTS.md` and on-demand skill loading
-- Isolated Docker container sandbox for terminal benchmark tests — no host system risk
-- Per-category filter chips in the UI
-- CLI category filtering, for example: `npm run cli -- --benchmark --category web_search`
+| Category | Tool | Description |
+|---|---|---|
+| 🛠️ **Developer Tools (AST & LSP)** | `get_document_symbols` | Get structural AST outline (classes, functions, interfaces, methods) with line numbers |
+| | `go_to_definition` | Jump from a symbol usage to its exact declaration line & column |
+| | `find_symbol_references` | Locate all occurrences and usage locations of a symbol across workspace files |
+| | `get_code_diagnostics` | Fetch compiler errors, warnings, and type diagnostics for a file or workspace |
+| | `get_type_hover` | Inspect type signatures, return types, and docstrings hover info for a symbol |
+| 📁 **File System Tools** | `list_directory` | List files and subdirectories in a target directory |
+| | `read_file` | Read the raw contents of any file in the workspace |
+| | `edit_file` | Partial text replacement in existing files |
+| | `replace_file` | Replace an existing file for broad rewrites after reading it |
+| | `create_file` | Create new text or code files |
+| | `grep_search` | Advanced codebase search with regex, case-sensitivity, whole word boundaries (`\b`), context lines (`context_lines`), result limits (`max_results`), and match highlighting (`>>>match<<<`) |
+| | `grep_replace` | Multi-file batch search and replace (Grep + Sed combo) with `dry_run: true` preview support |
+| 🌐 **Web Research Tools** | `web_search` | Search the public web and return concise result metadata |
+| | `read_web_page` | Extract a public page's main content as bounded Markdown |
+| 🐚 **Terminal Tools** | `execute_command` | Run terminal shell commands (with approval gate & whitelist) |
+
+---
+
+## 🎯 Tool Complexity Profiles (`simple` | `medium` | `advanced`)
+
+Small local models (3B–8B parameters) perform best with short, 2-parameter tool schemas, while larger models (14B–70B+) thrive with advanced options. 
+
+The **Tool Complexity Profile** selector allows matching schema complexity to your active Ollama model:
+
+```
+[ 🟢 Simple ]    [ 🟡 Medium ]    [ 🟣 Advanced ]
+```
+
+- 🟢 **Simple Profile** *(Default for 3B–8B models)*: Sends minimal 2-parameter schemas (e.g. `query`, `relative_path` for `grep_search`). Prevents parameter hallucinations and guarantees high tool invocation accuracy.
+- 🟡 **Medium Profile** *(For 14B–32B models)*: Unlocks `is_regex`, `case_sensitive`, and `file_pattern` parameters.
+- 🟣 **Advanced Profile** *(For 70B+ / Cloud models)*: Unlocks full schemas including `whole_word` (`\b`), `context_lines` (0–5 lines), `max_results` pagination, `highlight_match`, and `dry_run`.
+
+*Note: Only **one single schema version** of each tool is loaded into the model context at any time.*
 
 ---
 
@@ -72,9 +89,10 @@ No cloud, no API keys, no data leaving your machine.
 ```
 local-model-chat/
 ├── src/
-│   ├── core/               # Shared engine (agent, tools, context, ollama client)
+│   ├── core/               # Shared engine (agent, tools, lsp, context, ollama client)
 │   │   ├── agent.ts        # AgentEngine — agentic loop, streaming, tool dispatch
-│   │   ├── tools.ts        # Tool definitions + ToolExecutor
+│   │   ├── lsp.ts          # LspManager — TypeScript Compiler API AST & LSP engine
+│   │   ├── tools.ts        # Tool definitions, complexity profiles + ToolExecutor
 │   │   ├── context.ts      # ContextManager — system prompt, message history
 │   │   ├── ollama.ts       # OllamaClient — chat stream, model list, VRAM status
 │   │   └── types.ts        # Shared TypeScript interfaces
@@ -88,14 +106,14 @@ local-model-chat/
 │   │       ├── components/
 │   │       │   ├── Header.tsx           # Model selector, VRAM badge, temp slider, tool settings btn
 │   │       │   ├── ChatWindow.tsx       # Messages, approval cards, quick prompt chips
-│   │       │   ├── ToolSettingsModal.tsx # Tool approval & toolset preferences
+│   │       │   ├── ToolSettingsModal.tsx # Grouped tool controls, complexity selector & inspector
 │   │       │   ├── ContextSidebar.tsx   # Token count, context viewer
 │   │       │   ├── BenchmarkView.tsx    # Benchmark dashboard UI
 │   │       │   └── SystemPromptModal.tsx
 │   │       └── types.ts
 │   └── benchmark/          # Benchmark runner + test cases
 │       ├── runner.ts       # AgentBenchmarkRunner + Docker sandbox
-│       └── testCases.ts    # 46 test cases across 12 categories
+│       └── testCases.ts    # 50 test cases across 13 categories
 ├── agent                   # Global CLI wrapper script (bash → local tsx)
 └── package.json
 ```
@@ -195,81 +213,37 @@ Options:
 | `/clear` | Clear conversation history |
 | `/help` | Show all slash commands |
 
-Working-directory context is off by default. Enable it with the Web UI **Context**
-checkbox, the CLI `--workdir-info` flag, `/workdir-info on`, or by posting
-`{"showWorkingDirInfo": true}` to `/api/config`. The snapshot is refreshed for
-each model request, lists at most 200 files to a depth of four, skips common
-generated directories, includes basic `package.json` metadata, and appends
-`.agent/AGENTS.md` when that file exists. Open Context Inspector → **Workdir**
-to preview or copy the exact text that would currently be appended.
-
-### Conventional `.agent` project metadata
-
-Projects can provide persistent instructions and reusable skills with this layout:
-
-```text
-.agent/
-├── AGENTS.md
-└── skills/
-    └── release-helper/
-        └── SKILL.md
-```
-
-`AGENTS.md` is included directly in the workdir context. Each `SKILL.md` should
-use YAML frontmatter containing `name` and `description`:
-
-```md
----
-name: release-helper
-description: Prepare and verify project releases.
----
-
-# Release workflow
-
-Detailed instructions...
-```
-
-Only the skill name, description, and path are appended automatically. When a
-skill matches the task, the model is instructed to read
-`.agent/skills/<skill-name>/SKILL.md` with `read_file` before using it. This
-keeps detailed skill instructions available without adding every skill’s full
-contents to every prompt.
-
 ---
 
 ## 🔒 Terminal Execution Safety
 
-Shell command execution (`execute_command` tool) has a built-in approval gate:
+Shell command execution (`execute_command` tool) has a built-in approval gate and command whitelist:
 
 | Mode | Behaviour |
 |---|---|
 | **Default (Confirm)** | CLI shows `[y/n/a]` prompt; Web UI shows Approve/Reject card |
+| **Command Whitelist** | Whitelisted commands (e.g. `ls`, `pwd`, `git status`) execute without prompting |
 | **Auto-Approve** | CLI `-y` flag; Web UI Tool Settings → Auto-Approve |
 | **Benchmark** | Commands run inside an isolated Docker `alpine` container — zero host risk |
 
 ---
 
-## 🧪 Benchmark
+## 🧪 Benchmark Suite
 
-Run from the Web UI → **Benchmark** tab, or via the server API:
+Run from the Web UI → **Benchmark** tab, or via CLI:
 
 ```bash
 # Run one scenario by its number within a category
 npm run cli -- --benchmark --category web_search --test 4
 
-# Run one scenario by its stable test ID
-npm run cli -- --benchmark --test test_web_real_life_deep_research
+# Run AST/LSP code navigation test
+npm run cli -- --benchmark --test test_ast_document_symbols
 
 # Run full suite via API
 curl -X POST http://localhost:3001/api/benchmark/run
-
-# Run single test
-curl -X POST http://localhost:3001/api/benchmark/run-single \
-  -H "Content-Type: application/json" \
-  -d '{"testId": "dir_read_1", "model": "qwen2.5-coder:7b"}'
 ```
 
-**Latest `qwen2.5-coder:7b` targeted run:** web search 4/4. Local-model results can vary between runs.
+- **50 targeted test cases** across 13 categories including AST/LSP navigation, information retrieval, docker terminal sandbox, project context, and web research.
 
 ---
 
@@ -288,7 +262,7 @@ curl -X POST http://localhost:3001/api/benchmark/run-single \
 | `POST` | `/api/clear` | Clear conversation history |
 | `POST` | `/api/chat` | Send message (SSE stream) |
 | `POST` | `/api/chat/tool-approval` | Approve or reject pending tool execution |
-| `POST` | `/api/chat/tool-settings` | Update terminal approval mode |
+| `POST` | `/api/chat/tool-settings` | Update terminal approval & tool complexity settings |
 | `GET` | `/api/benchmark/testcases` | List all benchmark test cases |
 | `POST` | `/api/benchmark/run` | Run full benchmark suite |
 | `POST` | `/api/benchmark/run-single` | Run single benchmark test |
@@ -301,6 +275,7 @@ curl -X POST http://localhost:3001/api/benchmark/run-single \
 |---|---|
 | **LLM Runtime** | [Ollama](https://ollama.com) (local, any model) |
 | **Agent Core** | TypeScript, custom agentic loop |
+| **Code Intelligence** | TypeScript Compiler API (AST & LSP engine) |
 | **Backend** | Node.js, Express, Server-Sent Events |
 | **Frontend** | React 18, Vite, Lucide icons, Vanilla CSS |
 | **CLI** | Commander.js, Chalk, Readline |

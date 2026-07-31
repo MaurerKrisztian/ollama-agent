@@ -13,7 +13,8 @@ export interface BenchmarkTestCase {
     | 'terminal_execution'
     | 'information_retrieval'
     | 'project_context'
-    | 'web_search';
+    | 'web_search'
+    | 'ast_lsp_navigation';
   prompt: string;
   expectedTool?: string | null;
   expectedToolSequence?: string[];
@@ -723,5 +724,17 @@ export const BENCHMARK_TEST_CASES: BenchmarkTestCase[] = [
       'Search for the Node.js 22 support timeline, read the relevant release-schedule page, and answer that security support ends on 30 April 2027.',
     evaluationCriteria:
       'PASSES only if web_search precedes read_web_page, the result URL is reused, and the final response contains 30 April 2027. A memory-only answer or search-snippet-only answer fails.',
+  },
+  {
+    id: 'test_ast_document_symbols',
+    name: 'AST Document Symbols Outline',
+    category: 'ast_lsp_navigation',
+    prompt: 'Get structural AST outline of symbols in src/core/agent.ts.',
+    expectedTool: 'get_document_symbols',
+    expectedArgSubstrings: { relative_path: 'src/core/agent.ts' },
+    description: 'Verifies model calls `get_document_symbols` to get functions, classes, and types from AST.',
+    objective: 'Tests language-aware AST symbol navigation.',
+    requiredOutput: 'Invoke get_document_symbols for src/core/agent.ts.',
+    evaluationCriteria: 'PASSES if get_document_symbols is invoked targeting src/core/agent.ts.',
   },
 ];

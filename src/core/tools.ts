@@ -1,10 +1,11 @@
 import fs from 'fs/promises';
 import path from 'path';
 import { exec } from 'child_process';
-import { ToolDefinition } from './types.js';
+import { ToolDefinition, ToolComplexityProfile } from './types.js';
 import { WebClient } from './web.js';
 import { McpClientManager } from './mcp.js';
 import { TerminalSessionManager, stripAnsiCodes } from './terminalManager.js';
+import { LspManager } from './lsp.js';
 
 type DiffLine = {
   type: 'context' | 'add' | 'remove' | 'meta';
@@ -124,7 +125,7 @@ function preserveFirstLineIndent(match: string, replacement: string): string {
   return indentation + replacement;
 }
 
-export const TOOL_DEFINITIONS: ToolDefinition[] = [
+export const BUILTIN_TOOLS: ToolDefinition[] = [
   {
     name: 'list_directory',
     description: 'List contents of a directory in the active working directory.',
@@ -212,20 +213,90 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
   },
   {
     name: 'grep_search',
-    description: 'Search for a text or symbol query across files in the working directory.',
+    description: 'Search for a text or regular expression query across files in the working directory with advanced options for regex, case sensitivity, file-type filtering, whole word matching, surrounding context lines, match highlighting, and result pagination.',
     parameters: {
       type: 'object',
       properties: {
         query: {
           type: 'string',
-          description: 'The text or pattern string to search for.',
+          description: 'The literal text string or regular expression pattern to search for.',
         },
         relative_path: {
           type: 'string',
           description: 'Subdirectory path to restrict search (leave empty for entire workspace).',
         },
+        is_regex: {
+          type: 'boolean',
+          description: 'Set to true to evaluate query as a regular expression. Defaults to false.',
+        },
+        case_sensitive: {
+          type: 'boolean',
+          description: 'Set to true for case-sensitive matching. Defaults to false (case-insensitive).',
+        },
+        whole_word: {
+          type: 'boolean',
+          description: 'Set to true to match whole words only (enforces word boundaries \\b). Defaults to false.',
+        },
+        file_pattern: {
+          type: 'string',
+          description: 'Optional file extension or pattern filter (e.g. "*.ts", "ts", "*.feature", "*.json").',
+        },
+        context_lines: {
+          type: 'number',
+          description: 'Number of surrounding lines (0 to 5) to include above and below matching lines. Defaults to 0.',
+        },
+        max_results: {
+          type: 'number',
+          description: 'Maximum number of matches to return (default 50, max 200).',
+        },
+        highlight_match: {
+          type: 'boolean',
+          description: 'Demarcate matched query in line content preview with >>>match<<<. Defaults to true.',
+        },
       },
       required: ['query'],
+    },
+  },
+  {
+    name: 'grep_replace',
+    description: 'Batch search and replace text or regex patterns across multiple workspace files (Grep + Sed combo). Supports dry run previews.',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: {
+          type: 'string',
+          description: 'The text or regular expression pattern to search for.',
+        },
+        replacement: {
+          type: 'string',
+          description: 'The replacement string to substitute in place of query.',
+        },
+        relative_path: {
+          type: 'string',
+          description: 'Subdirectory path filter (leave empty for workspace).',
+        },
+        is_regex: {
+          type: 'boolean',
+          description: 'Set to true to evaluate query as regular expression. Defaults to false.',
+        },
+        case_sensitive: {
+          type: 'boolean',
+          description: 'Set to true for case-sensitive replacement. Defaults to false.',
+        },
+        whole_word: {
+          type: 'boolean',
+          description: 'Set to true to match whole words only. Defaults to false.',
+        },
+        file_pattern: {
+          type: 'string',
+          description: 'Optional file extension filter (e.g. "*.ts", "ts", "*.feature").',
+        },
+        dry_run: {
+          type: 'boolean',
+          description: 'If true, preview changes without saving edits to disk. Defaults to false.',
+        },
+      },
+      required: ['query', 'replacement'],
     },
   },
   {
@@ -368,24 +439,210 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
       required: ['session_id'],
     },
   },
+  {
+    name: 'get_document_symbols',
+    description: 'Developer Tool: Get structural AST outline (classes, functions, interfaces, methods, variables) of a TypeScript/JavaScript source file with line numbers.',
+    parameters: {
+      type: 'object',
+      properties: {
+        relative_path: {
+          type: 'string',
+          description: 'Relative path to the code file.',
+        },
+      },
+      required: ['relative_path'],
+    },
+  },
+  {
+    name: 'go_to_definition',
+    description: 'Developer Tool: Jump to where a symbol (function, class, type, variable) is declared from its usage location (line & character position).',
+    parameters: {
+      type: 'object',
+      properties: {
+        relative_path: {
+          type: 'string',
+          description: 'Relative path to the file containing the symbol usage.',
+        },
+        line: {
+          type: 'number',
+          description: '1-indexed line number of the symbol in the file.',
+        },
+        character: {
+          type: 'number',
+          description: '1-indexed column/character position of the symbol in the line.',
+        },
+      },
+      required: ['relative_path', 'line', 'character'],
+    },
+  },
+  {
+    name: 'find_symbol_references',
+    description: 'Developer Tool: Find all occurrences and usage locations of a symbol across the project workspace.',
+    parameters: {
+      type: 'object',
+      properties: {
+        relative_path: {
+          type: 'string',
+          description: 'Relative path to the file containing the target symbol.',
+        },
+        line: {
+          type: 'number',
+          description: '1-indexed line number of the symbol.',
+        },
+        character: {
+          type: 'number',
+          description: '1-indexed column/character position of the symbol.',
+        },
+      },
+      required: ['relative_path', 'line', 'character'],
+    },
+  },
+  {
+    name: 'get_code_diagnostics',
+    description: 'Developer Tool: Fetch compiler errors, warnings, and type diagnostics for a specific file or the entire workspace.',
+    parameters: {
+      type: 'object',
+      properties: {
+        relative_path: {
+          type: 'string',
+          description: 'Optional relative path to filter diagnostics for a single file. Omit for workspace diagnostics.',
+        },
+      },
+    },
+  },
+  {
+    name: 'get_type_hover',
+    description: 'Developer Tool: Inspect type signature, return type, and documentation hover information for a code symbol.',
+    parameters: {
+      type: 'object',
+      properties: {
+        relative_path: {
+          type: 'string',
+          description: 'Relative path to the file.',
+        },
+        line: {
+          type: 'number',
+          description: '1-indexed line number.',
+        },
+        character: {
+          type: 'number',
+          description: '1-indexed character position.',
+        },
+      },
+      required: ['relative_path', 'line', 'character'],
+    },
+  },
 ];
+
+export function getToolDefinitions(profile: ToolComplexityProfile = 'simple'): ToolDefinition[] {
+  return BUILTIN_TOOLS.map((tool) => {
+    if (tool.name === 'grep_search') {
+      if (profile === 'simple') {
+        return {
+          name: 'grep_search',
+          description: 'Search for a text string query across files in the working directory.',
+          parameters: {
+            type: 'object',
+            properties: {
+              query: {
+                type: 'string',
+                description: 'The text string to search for.',
+              },
+              relative_path: {
+                type: 'string',
+                description: 'Subdirectory path to restrict search (optional).',
+              },
+            },
+            required: ['query'],
+          },
+        };
+      }
+      if (profile === 'medium') {
+        return {
+          name: 'grep_search',
+          description: 'Search for text or regex patterns across workspace files with case-sensitivity and file extension filtering.',
+          parameters: {
+            type: 'object',
+            properties: {
+              query: {
+                type: 'string',
+                description: 'The literal text string or regular expression pattern to search for.',
+              },
+              relative_path: {
+                type: 'string',
+                description: 'Subdirectory path to restrict search (optional).',
+              },
+              is_regex: {
+                type: 'boolean',
+                description: 'Set to true to evaluate query as a regular expression. Defaults to false.',
+              },
+              case_sensitive: {
+                type: 'boolean',
+                description: 'Set to true for case-sensitive matching. Defaults to false.',
+              },
+              file_pattern: {
+                type: 'string',
+                description: 'Optional file extension or pattern filter (e.g. "*.ts", "ts", "*.json").',
+              },
+            },
+            required: ['query'],
+          },
+        };
+      }
+    }
+
+    if (tool.name === 'grep_replace') {
+      if (profile === 'simple') {
+        return {
+          name: 'grep_replace',
+          description: 'Batch search and replace text across files in the working directory.',
+          parameters: {
+            type: 'object',
+            properties: {
+              query: {
+                type: 'string',
+                description: 'Text string to search for.',
+              },
+              replacement: {
+                type: 'string',
+                description: 'Replacement text to substitute.',
+              },
+              relative_path: {
+                type: 'string',
+                description: 'Subdirectory path filter (optional).',
+              },
+            },
+            required: ['query', 'replacement'],
+          },
+        };
+      }
+    }
+
+    return tool;
+  });
+}
+
+export const TOOL_DEFINITIONS = getToolDefinitions('simple');
 
 export class ToolExecutor {
   private workingDir: string;
   private webClient: WebClient;
   private mcpManager: McpClientManager;
   private terminalManager: TerminalSessionManager;
+  private lspManager: LspManager;
 
   constructor(
     initialWorkingDir: string = process.cwd(),
     webClient: WebClient = new WebClient(),
     mcpManager: McpClientManager = new McpClientManager(initialWorkingDir),
-    terminalManager: TerminalSessionManager = new TerminalSessionManager(initialWorkingDir)
+    terminalManager: TerminalSessionManager = new TerminalSessionManager(initialWorkingDir),
+    lspManager: LspManager = new LspManager(initialWorkingDir)
   ) {
     this.workingDir = path.resolve(initialWorkingDir);
     this.webClient = webClient;
     this.mcpManager = mcpManager;
     this.terminalManager = terminalManager;
+    this.lspManager = lspManager;
   }
 
   public getTerminalManager(): TerminalSessionManager {
@@ -394,6 +651,10 @@ export class ToolExecutor {
 
   public getMcpManager(): McpClientManager {
     return this.mcpManager;
+  }
+
+  public getLspManager(): LspManager {
+    return this.lspManager;
   }
 
   public getWorkingDir(): string {
@@ -406,6 +667,7 @@ export class ToolExecutor {
       this.workingDir = resolved;
       this.mcpManager.setWorkingDir(resolved);
       this.terminalManager.setDefaultWorkingDir(resolved);
+      this.lspManager.updateWorkingDir(resolved);
       return { success: true, path: this.workingDir };
     } catch (err: any) {
       return { success: false, path: this.workingDir, error: err.message };
@@ -557,33 +819,204 @@ export class ToolExecutor {
   private async grepDirectory(
     dir: string,
     query: string,
-    results: Array<{ file: string; line: number; content: string }>,
-    depth: number = 0
+    results: Array<{ file: string; line: number; content: string; context?: string[] }>,
+    depth: number = 0,
+    options: {
+      is_regex?: boolean;
+      case_sensitive?: boolean;
+      whole_word?: boolean;
+      file_pattern?: string;
+      context_lines?: number;
+      max_results?: number;
+      highlight_match?: boolean;
+    } = {}
   ): Promise<void> {
-    if (depth > 4) return;
+    const maxResults = Math.min(200, Math.max(1, options.max_results || 50));
+    if (depth > 6 || results.length >= maxResults) return;
+
     try {
       const items = await fs.readdir(dir, { withFileTypes: true });
+
+      const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      let pattern = options.is_regex ? query : escapeRegExp(query);
+      if (options.whole_word) {
+        pattern = `\\b(?:${pattern})\\b`;
+      }
+      const flags = (options.case_sensitive ? '' : 'i') + 'g';
+      const matcher = new RegExp(pattern, flags);
+
+      let patternMatcher: ((fileName: string) => boolean) | null = null;
+      if (options.file_pattern && options.file_pattern.trim()) {
+        const pat = options.file_pattern.trim();
+        if (pat.startsWith('*.')) {
+          const ext = pat.slice(1).toLowerCase();
+          patternMatcher = (fn) => fn.toLowerCase().endsWith(ext);
+        } else if (pat.startsWith('.')) {
+          const ext = pat.toLowerCase();
+          patternMatcher = (fn) => fn.toLowerCase().endsWith(ext);
+        } else if (pat.includes('*')) {
+          const regexStr = '^' + pat.replace(/\./g, '\\.').replace(/\*/g, '.*') + '$';
+          const r = new RegExp(regexStr, 'i');
+          patternMatcher = (fn) => r.test(fn);
+        } else {
+          const ext = '.' + pat.toLowerCase();
+          patternMatcher = (fn) => fn.toLowerCase().endsWith(ext) || fn.toLowerCase().includes(pat.toLowerCase());
+        }
+      }
+
+      const ctxLines = Math.min(5, Math.max(0, options.context_lines || 0));
+      const doHighlight = options.highlight_match !== false;
+
       for (const item of items) {
+        if (results.length >= maxResults) break;
         const fullPath = path.join(dir, item.name);
         if (item.isFile() && !item.name.startsWith('.')) {
+          if (patternMatcher && !patternMatcher(item.name)) {
+            continue;
+          }
+
           try {
             const content = await fs.readFile(fullPath, 'utf-8');
             const lines = content.split('\n');
             lines.forEach((lineText, idx) => {
-              if (lineText.toLowerCase().includes(query.toLowerCase())) {
+              if (results.length >= maxResults) return;
+
+              matcher.lastIndex = 0;
+              if (matcher.test(lineText)) {
+                matcher.lastIndex = 0;
+                const formattedContent = doHighlight
+                  ? lineText.replace(matcher, (m) => `>>>${m}<<<`).trim()
+                  : lineText.trim();
+
+                let contextSnippet: string[] | undefined = undefined;
+                if (ctxLines > 0) {
+                  const startLine = Math.max(0, idx - ctxLines);
+                  const endLine = Math.min(lines.length, idx + ctxLines + 1);
+                  contextSnippet = lines.slice(startLine, endLine).map((l, offset) => {
+                    const lineNum = startLine + offset + 1;
+                    const isMatchLine = lineNum === idx + 1;
+                    const prefix = isMatchLine ? `> ${lineNum}: ` : `  ${lineNum}: `;
+                    matcher.lastIndex = 0;
+                    const lineVal = isMatchLine && doHighlight
+                      ? l.replace(matcher, (m) => `>>>${m}<<<`)
+                      : l;
+                    return `${prefix}${lineVal}`;
+                  });
+                }
+
                 results.push({
                   file: path.relative(this.workingDir, fullPath),
                   line: idx + 1,
-                  content: lineText.trim(),
+                  content: formattedContent,
+                  context: contextSnippet,
                 });
               }
             });
           } catch (_) {}
-        } else if (item.isDirectory() && !item.name.startsWith('.') && item.name !== 'node_modules') {
-          await this.grepDirectory(fullPath, query, results, depth + 1);
+        } else if (item.isDirectory() && !item.name.startsWith('.') && item.name !== 'node_modules' && item.name !== 'dist') {
+          await this.grepDirectory(fullPath, query, results, depth + 1, options);
         }
       }
     } catch (_) {}
+  }
+
+  private async grepReplace(
+    dir: string,
+    query: string,
+    replacement: string,
+    options: {
+      is_regex?: boolean;
+      case_sensitive?: boolean;
+      whole_word?: boolean;
+      file_pattern?: string;
+      dry_run?: boolean;
+    } = {}
+  ): Promise<{
+    dry_run: boolean;
+    files_modified: number;
+    total_replacements: number;
+    details: Array<{ file: string; replacements: number; diff_preview?: string }>;
+  }> {
+    const results: Array<{ file: string; replacements: number; diff_preview?: string }> = [];
+    let totalReplacements = 0;
+
+    const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    let pattern = options.is_regex ? query : escapeRegExp(query);
+    if (options.whole_word) {
+      pattern = `\\b(?:${pattern})\\b`;
+    }
+    const flags = (options.case_sensitive ? '' : 'i') + 'g';
+    const matcher = new RegExp(pattern, flags);
+
+    let patternMatcher: ((fileName: string) => boolean) | null = null;
+    if (options.file_pattern && options.file_pattern.trim()) {
+      const pat = options.file_pattern.trim();
+      if (pat.startsWith('*.')) {
+        const ext = pat.slice(1).toLowerCase();
+        patternMatcher = (fn) => fn.toLowerCase().endsWith(ext);
+      } else if (pat.startsWith('.')) {
+        const ext = pat.toLowerCase();
+        patternMatcher = (fn) => fn.toLowerCase().endsWith(ext);
+      } else if (pat.includes('*')) {
+        const regexStr = '^' + pat.replace(/\./g, '\\.').replace(/\*/g, '.*') + '$';
+        const r = new RegExp(regexStr, 'i');
+        patternMatcher = (fn) => r.test(fn);
+      } else {
+        const ext = '.' + pat.toLowerCase();
+        patternMatcher = (fn) => fn.toLowerCase().endsWith(ext) || fn.toLowerCase().includes(pat.toLowerCase());
+      }
+    }
+
+    const walk = async (currentDir: string, depth = 0) => {
+      if (depth > 6) return;
+      let items: any[] = [];
+      try {
+        items = await fs.readdir(currentDir, { withFileTypes: true });
+      } catch {
+        return;
+      }
+
+      for (const item of items) {
+        const fullPath = path.join(currentDir, item.name);
+        if (item.isFile() && !item.name.startsWith('.')) {
+          if (patternMatcher && !patternMatcher(item.name)) continue;
+
+          try {
+            const content = await fs.readFile(fullPath, 'utf-8');
+            matcher.lastIndex = 0;
+            const matches = content.match(matcher);
+            if (matches && matches.length > 0) {
+              const replacementCount = matches.length;
+              matcher.lastIndex = 0;
+              const newContent = content.replace(matcher, replacement);
+              const relPath = path.relative(this.workingDir, fullPath);
+
+              if (!options.dry_run) {
+                await fs.writeFile(fullPath, newContent, 'utf-8');
+              }
+
+              totalReplacements += replacementCount;
+              results.push({
+                file: relPath,
+                replacements: replacementCount,
+                diff_preview: `${matches[0]} → ${replacement}`,
+              });
+            }
+          } catch (_) {}
+        } else if (item.isDirectory() && !item.name.startsWith('.') && item.name !== 'node_modules' && item.name !== 'dist') {
+          await walk(fullPath, depth + 1);
+        }
+      }
+    };
+
+    await walk(dir);
+
+    return {
+      dry_run: !!options.dry_run,
+      files_modified: results.length,
+      total_replacements: totalReplacements,
+      details: results,
+    };
   }
 
   public async executeTool(name: string, args: Record<string, any>): Promise<any> {
@@ -791,20 +1224,74 @@ export class ToolExecutor {
       }
 
       case 'grep_search': {
-        const { query, relative_path } = args;
+        const { query, relative_path, is_regex, case_sensitive, whole_word, file_pattern, context_lines, max_results, highlight_match } = args;
         if (!query) return { error: 'Parameter query is required.' };
         const searchDir = relative_path ? path.resolve(this.workingDir, relative_path) : this.workingDir;
         
         try {
-          const results: Array<{ file: string; line: number; content: string }> = [];
-          await this.grepDirectory(searchDir, query, results);
+          if (is_regex) {
+            try {
+              new RegExp(query, case_sensitive ? '' : 'i');
+            } catch (err: any) {
+              return { error: `Invalid regular expression pattern "${query}": ${err.message}` };
+            }
+          }
+
+          const maxLimit = Math.min(200, Math.max(1, Number(max_results) || 50));
+          const results: Array<{ file: string; line: number; content: string; context?: string[] }> = [];
+
+          await this.grepDirectory(searchDir, query, results, 0, {
+            is_regex,
+            case_sensitive,
+            whole_word,
+            file_pattern,
+            context_lines: Number(context_lines) || 0,
+            max_results: maxLimit,
+            highlight_match,
+          });
+
           return {
             query,
+            is_regex: !!is_regex,
+            case_sensitive: !!case_sensitive,
+            whole_word: !!whole_word,
+            file_pattern: file_pattern || null,
+            context_lines: Number(context_lines) || 0,
+            max_results: maxLimit,
             total_matches: results.length,
-            matches: results.slice(0, 50),
+            returned_matches: results.length,
+            matches: results,
           };
         } catch (err: any) {
           return { error: `Search failed: ${err.message}` };
+        }
+      }
+
+      case 'grep_replace': {
+        const { query, replacement, relative_path, is_regex, case_sensitive, whole_word, file_pattern, dry_run } = args;
+        if (!query || replacement === undefined) {
+          return { error: 'Parameters query and replacement are required.' };
+        }
+        const searchDir = relative_path ? path.resolve(this.workingDir, relative_path) : this.workingDir;
+
+        try {
+          if (is_regex) {
+            try {
+              new RegExp(query, case_sensitive ? '' : 'i');
+            } catch (err: any) {
+              return { error: `Invalid regular expression pattern "${query}": ${err.message}` };
+            }
+          }
+
+          return await this.grepReplace(searchDir, query, replacement, {
+            is_regex,
+            case_sensitive,
+            whole_word,
+            file_pattern,
+            dry_run,
+          });
+        } catch (err: any) {
+          return { error: `Grep replace failed: ${err.message}` };
         }
       }
 
@@ -883,6 +1370,39 @@ export class ToolExecutor {
         const { session_id } = args;
         if (!session_id) return { error: 'Parameter session_id is required.' };
         return this.terminalManager.terminateSession(session_id);
+      }
+
+      case 'get_document_symbols': {
+        if (!args.relative_path) return { error: 'Parameter relative_path is required.' };
+        return this.lspManager.getDocumentSymbols(args.relative_path);
+      }
+
+      case 'go_to_definition': {
+        const { relative_path, line, character } = args;
+        if (!relative_path || line === undefined || character === undefined) {
+          return { error: 'Parameters relative_path, line, and character are required.' };
+        }
+        return this.lspManager.getDefinition(relative_path, line, character);
+      }
+
+      case 'find_symbol_references': {
+        const { relative_path, line, character } = args;
+        if (!relative_path || line === undefined || character === undefined) {
+          return { error: 'Parameters relative_path, line, and character are required.' };
+        }
+        return this.lspManager.findReferences(relative_path, line, character);
+      }
+
+      case 'get_code_diagnostics': {
+        return this.lspManager.getDiagnostics(args.relative_path);
+      }
+
+      case 'get_type_hover': {
+        const { relative_path, line, character } = args;
+        if (!relative_path || line === undefined || character === undefined) {
+          return { error: 'Parameters relative_path, line, and character are required.' };
+        }
+        return this.lspManager.getHover(relative_path, line, character);
       }
 
       default:

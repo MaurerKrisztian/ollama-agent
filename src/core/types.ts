@@ -52,6 +52,38 @@ export interface ToolResult {
   error?: string;
 }
 
+export interface LspSymbolInformation {
+  name: string;
+  kind: string;
+  containerName?: string;
+  line: number;
+  character: number;
+  endLine?: number;
+  endCharacter?: number;
+}
+
+export interface LspLocation {
+  filePath: string;
+  line: number;
+  character: number;
+  preview?: string;
+}
+
+export interface LspDiagnosticItem {
+  filePath: string;
+  line: number;
+  character: number;
+  severity: 'error' | 'warning' | 'info' | 'hint';
+  message: string;
+  code?: string | number;
+}
+
+export interface LspHoverInformation {
+  contents: string;
+  line: number;
+  character: number;
+}
+
 export interface ContextPruningConfig {
   enabled: boolean;
   pruneSupersededReads: boolean;
@@ -60,6 +92,8 @@ export interface ContextPruningConfig {
   terminalOutputTTLTurns?: number;
   webOutputTTLTurns?: number;
 }
+
+export type ToolComplexityProfile = 'simple' | 'medium' | 'advanced';
 
 export interface AgentConfig {
   ollamaHost: string;
@@ -70,6 +104,7 @@ export interface AgentConfig {
   showWorkingDirInfo: boolean;
   contextWindow?: number;
   maxLoops?: number;
+  complexityProfile?: ToolComplexityProfile;
   pruningConfig?: ContextPruningConfig;
 }
 

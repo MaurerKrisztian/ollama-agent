@@ -1,6 +1,6 @@
 import { ContextManager } from './context.js';
 import { OllamaClient } from './ollama.js';
-import { TOOL_DEFINITIONS, ToolExecutor } from './tools.js';
+import { getToolDefinitions, ToolExecutor } from './tools.js';
 import { AgentConfig, ChatMessage, OllamaModelInfo, OllamaRunningModelInfo } from './types.js';
 import { buildWorkingDirectoryContext } from './workdir-context.js';
 
@@ -180,7 +180,8 @@ export class AgentEngine {
   }
 
   public getActiveTools() {
-    return [...TOOL_DEFINITIONS, ...this.toolExecutor.getMcpManager().getToolDefinitions()];
+    const builtin = getToolDefinitions(this.config.complexityProfile || 'simple');
+    return [...builtin, ...this.toolExecutor.getMcpManager().getToolDefinitions()];
   }
 
   public async loadMcpConfig(customPath?: string) {

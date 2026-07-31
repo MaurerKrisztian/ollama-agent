@@ -20,11 +20,14 @@ export interface AgentConfig {
   pruningConfig?: ContextPruningConfig;
 }
 
+export type ToolComplexityProfile = 'simple' | 'medium' | 'advanced';
+
 export interface ToolSettings {
   terminalMode: 'confirm' | 'auto';
   fileEditMode: 'confirm' | 'auto';
   allowedCommands?: string[];
   maxLoops?: number;
+  complexityProfile?: ToolComplexityProfile;
   enabledTools: {
     list_directory: boolean;
     read_file: boolean;
@@ -32,9 +35,15 @@ export interface ToolSettings {
     replace_file: boolean;
     create_file: boolean;
     grep_search: boolean;
+    grep_replace?: boolean;
     execute_command: boolean;
     web_search: boolean;
     read_web_page: boolean;
+    get_document_symbols?: boolean;
+    go_to_definition?: boolean;
+    find_symbol_references?: boolean;
+    get_code_diagnostics?: boolean;
+    get_type_hover?: boolean;
   };
 }
 
