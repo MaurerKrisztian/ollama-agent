@@ -1,18 +1,41 @@
-import { ChatMessage, ContextInfo, Role, ToolDefinition } from './types.js';
+import { ChatMessage, ContextInfo, ContextPruningConfig, Role, ToolDefinition } from './types.js';
 import { TOOL_DEFINITIONS } from './tools.js';
 import { getSystemEnvironmentSummary } from './workdir-context.js';
+
+export const DEFAULT_PRUNING_CONFIG: ContextPruningConfig = {
+  enabled: true,
+  pruneSupersededReads: true,
+  invalidateOnMutation: true,
+  enableToolTTL: true,
+  terminalOutputTTLTurns: 5,
+  webOutputTTLTurns: 5,
+};
 
 export class ContextManager {
   private systemPrompt: string;
   private messages: ChatMessage[] = [];
   private tools: ToolDefinition[];
+  private pruningConfig: ContextPruningConfig;
 
   constructor(
     initialSystemPrompt: string = 'You are an intelligent AI assistant with tools for workspace files, terminal commands, web search, and reading public web pages. Use web tools for current online information and workspace tools only for local files. For stable general knowledge or math, answer directly without tools.',
-    tools: ToolDefinition[] = TOOL_DEFINITIONS
+    tools: ToolDefinition[] = TOOL_DEFINITIONS,
+    pruningConfig: Partial<ContextPruningConfig> = {}
   ) {
     this.systemPrompt = initialSystemPrompt;
     this.tools = tools;
+    this.pruningConfig = { ...DEFAULT_PRUNING_CONFIG, ...pruningConfig };
+  }
+
+  public setPruningConfig(config: Partial<ContextPruningConfig>): void {
+    this.pruningConfig = { ...this.pruningConfig, ...config };
+    if (this.pruningConfig.enabled) {
+      this.applyPruning();
+    }
+  }
+
+  public getPruningConfig(): ContextPruningConfig {
+    return { ...this.pruningConfig };
   }
 
   public setSystemPrompt(prompt: string): void {
@@ -198,6 +221,9 @@ export class ContextManager {
       attachments: msg.attachments,
     };
     this.messages.push(newMessage);
+    if (this.pruningConfig.enabled) {
+      this.applyPruning();
+    }
     return newMessage;
   }
 
@@ -207,6 +233,105 @@ export class ContextManager {
 
   public setMessages(messages: ChatMessage[]): void {
     this.messages = messages;
+    if (this.pruningConfig.enabled) {
+      this.applyPruning();
+    }
+  }
+
+  /**
+   * Applies enabled context pruning strategies (Superseded File Reads, Post-Mutation Invalidation, and Tool Output TTL)
+   */
+  public applyPruning(): void {
+    if (!this.pruningConfig.enabled) return;
+
+    const toolCallMap = new Map<string, { name: string; arguments: any; index: number }>();
+
+    this.messages.forEach((msg, index) => {
+      if (msg.tool_calls && Array.isArray(msg.tool_calls)) {
+        msg.tool_calls.forEach((tc) => {
+          if (tc.id) {
+            toolCallMap.set(tc.id, {
+              name: tc.name,
+              arguments: tc.arguments || {},
+              index,
+            });
+          }
+        });
+      }
+    });
+
+    const isPruned = (content: string) => content.startsWith('[Context Pruned:');
+
+    const readFileResponsesByPath = new Map<string, { msgIndex: number; toolCallId?: string }[]>();
+    const mutations: { path: string; toolName: string; msgIndex: number }[] = [];
+
+    this.messages.forEach((msg, msgIndex) => {
+      if (msg.role !== 'tool') return;
+
+      const tcInfo = msg.tool_call_id ? toolCallMap.get(msg.tool_call_id) : undefined;
+      const toolName = msg.name || tcInfo?.name || '';
+      const toolArgs = tcInfo?.arguments || {};
+
+      // Strategy 1 & 2: Collect file reads & file mutations
+      if (toolName === 'read_file') {
+        const filePath = toolArgs.relative_path || toolArgs.path || toolArgs.file;
+        if (filePath) {
+          const list = readFileResponsesByPath.get(filePath) || [];
+          list.push({ msgIndex, toolCallId: msg.tool_call_id });
+          readFileResponsesByPath.set(filePath, list);
+        }
+      } else if (['edit_file', 'replace_file', 'create_file'].includes(toolName)) {
+        const filePath = toolArgs.relative_path || toolArgs.path || toolArgs.file;
+        if (filePath) {
+          mutations.push({ path: filePath, toolName, msgIndex });
+        }
+      }
+
+      // Strategy 3: Tool Output TTL
+      if (this.pruningConfig.enableToolTTL && !isPruned(msg.content)) {
+        const userMessagesAfter = this.messages.slice(msgIndex + 1).filter((m) => m.role === 'user').length;
+
+        let ttlTurns: number | undefined;
+        if (toolName === 'execute_command') {
+          ttlTurns = this.pruningConfig.terminalOutputTTLTurns ?? 5;
+        } else if (['web_search', 'read_web_page'].includes(toolName)) {
+          ttlTurns = this.pruningConfig.webOutputTTLTurns ?? 5;
+        }
+
+        if (ttlTurns !== undefined && userMessagesAfter >= ttlTurns) {
+          msg.content = `[Context Pruned: Output of '${toolName}' expired after ${userMessagesAfter} user turns to optimize context space.]`;
+        }
+      }
+    });
+
+    // Strategy 1: Superseded File Read Pruning (Latest-Only)
+    if (this.pruningConfig.pruneSupersededReads) {
+      readFileResponsesByPath.forEach((responses, filePath) => {
+        if (responses.length > 1) {
+          for (let i = 0; i < responses.length - 1; i++) {
+            const msg = this.messages[responses[i].msgIndex];
+            if (!isPruned(msg.content)) {
+              msg.content = `[Context Pruned: Content of '${filePath}' superseded by a newer read_file tool response.]`;
+            }
+          }
+        }
+      });
+    }
+
+    // Strategy 2: Post-Mutation Invalidation (Prune on File Edit)
+    if (this.pruningConfig.invalidateOnMutation) {
+      mutations.forEach((mut) => {
+        const reads = readFileResponsesByPath.get(mut.path) || [];
+        reads.forEach((readItem) => {
+          if (readItem.msgIndex < mut.msgIndex) {
+            const msg = this.messages[readItem.msgIndex];
+            if (!isPruned(msg.content)) {
+              msg.content = `[Context Pruned: Pre-edit content of '${mut.path}' (modified by ${mut.toolName}).]`;
+            }
+          }
+        });
+      });
+    }
   }
 
   public getRawJson(): string {

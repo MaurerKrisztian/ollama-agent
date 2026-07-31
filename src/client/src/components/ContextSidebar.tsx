@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import { X, Copy, Check, FileJson, AlignLeft, Layers, FolderTree, RefreshCw, Cpu, Sparkles } from 'lucide-react';
-import { ContextInfo } from '../types';
+import { X, Copy, Check, FileJson, AlignLeft, Layers, FolderTree, RefreshCw, Cpu, Sparkles, Scissors } from 'lucide-react';
+import { ContextInfo, ContextPruningConfig } from '../types';
 
 interface ContextSidebarProps {
   isOpen: boolean;
@@ -8,6 +8,7 @@ interface ContextSidebarProps {
   contextInfo: ContextInfo | null;
   activeModel?: string;
   onCompactContext?: () => void;
+  onContextInfoChange?: (contextInfo: ContextInfo) => void;
 }
 
 function escapeHtml(str: string): string {
@@ -93,14 +94,57 @@ export const ContextSidebar: React.FC<ContextSidebarProps> = ({
   contextInfo,
   activeModel,
   onCompactContext,
+  onContextInfoChange,
 }) => {
-  const [activeTab, setActiveTab] = useState<'formatted' | 'json' | 'workdir'>('formatted');
+  const [activeTab, setActiveTab] = useState<'formatted' | 'json' | 'workdir' | 'pruning'>('formatted');
   const [copied, setCopied] = useState(false);
   const [workdirContext, setWorkdirContext] = useState('');
   const [workdirEnabled, setWorkdirEnabled] = useState(false);
   const [workdirLoading, setWorkdirLoading] = useState(false);
   const [workdirError, setWorkdirError] = useState('');
   const [maxContextTokens, setMaxContextTokens] = useState<number | null>(null);
+
+  const [pruningConfig, setPruningConfig] = useState<ContextPruningConfig | null>(null);
+  const [pruningLoading, setPruningLoading] = useState(false);
+
+  const fetchPruningConfig = useCallback(async () => {
+    setPruningLoading(true);
+    try {
+      const res = await fetch('/api/context/pruning');
+      const data = await res.json();
+      if (data.success && data.pruningConfig) {
+        setPruningConfig(data.pruningConfig);
+      }
+    } catch (_) {
+    } finally {
+      setPruningLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (isOpen) void fetchPruningConfig();
+  }, [isOpen, fetchPruningConfig]);
+
+  const handleUpdatePruning = async (updates: Partial<ContextPruningConfig>) => {
+    if (!pruningConfig) return;
+    const newConfig = { ...pruningConfig, ...updates };
+    setPruningConfig(newConfig);
+
+    try {
+      const res = await fetch('/api/context/pruning', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updates),
+      });
+      const data = await res.json();
+      if (data.success) {
+        if (data.pruningConfig) setPruningConfig(data.pruningConfig);
+        if (data.context && onContextInfoChange) {
+          onContextInfoChange(data.context);
+        }
+      }
+    } catch (_) {}
+  };
 
   useEffect(() => {
     if (!activeModel) return;
@@ -298,68 +342,87 @@ export const ContextSidebar: React.FC<ContextSidebarProps> = ({
       )}
 
       {/* Tabs & Action Bar */}
-      <div style={{ padding: '10px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid var(--border-color)', background: 'rgba(15, 23, 42, 0.6)' }}>
-        <div style={{ display: 'flex', gap: '6px' }}>
+      <div style={{ padding: '10px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid var(--border-color)', background: 'rgba(15, 23, 42, 0.6)' }}>
+        <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
           <button
             onClick={() => setActiveTab('formatted')}
             style={{
               display: 'flex',
               alignItems: 'center',
-              gap: '6px',
-              padding: '6px 12px',
+              gap: '4px',
+              padding: '5px 8px',
               borderRadius: '6px',
               border: 'none',
-              fontSize: '0.8rem',
+              fontSize: '0.75rem',
               fontWeight: 500,
               cursor: 'pointer',
               background: activeTab === 'formatted' ? 'var(--accent-primary)' : 'transparent',
               color: activeTab === 'formatted' ? '#fff' : 'var(--text-muted)',
             }}
           >
-            <AlignLeft size={14} />
-            <span>Converted Text</span>
+            <AlignLeft size={13} />
+            <span>Text</span>
           </button>
           <button
             onClick={() => setActiveTab('json')}
             style={{
               display: 'flex',
               alignItems: 'center',
-              gap: '6px',
-              padding: '6px 12px',
+              gap: '4px',
+              padding: '5px 8px',
               borderRadius: '6px',
               border: 'none',
-              fontSize: '0.8rem',
+              fontSize: '0.75rem',
               fontWeight: 500,
               cursor: 'pointer',
               background: activeTab === 'json' ? 'var(--accent-primary)' : 'transparent',
               color: activeTab === 'json' ? '#fff' : 'var(--text-muted)',
             }}
           >
-            <FileJson size={14} />
-            <span>Raw JSON</span>
+            <FileJson size={13} />
+            <span>JSON</span>
           </button>
           <button
             onClick={() => setActiveTab('workdir')}
             style={{
               display: 'flex',
               alignItems: 'center',
-              gap: '6px',
-              padding: '6px 12px',
+              gap: '4px',
+              padding: '5px 8px',
               borderRadius: '6px',
               border: 'none',
-              fontSize: '0.8rem',
+              fontSize: '0.75rem',
               fontWeight: 500,
               cursor: 'pointer',
               background: activeTab === 'workdir' ? 'var(--accent-primary)' : 'transparent',
               color: activeTab === 'workdir' ? '#fff' : 'var(--text-muted)',
             }}
           >
-            <FolderTree size={14} />
+            <FolderTree size={13} />
             <span>Workdir</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('pruning')}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+              padding: '5px 8px',
+              borderRadius: '6px',
+              border: 'none',
+              fontSize: '0.75rem',
+              fontWeight: 500,
+              cursor: 'pointer',
+              background: activeTab === 'pruning' ? 'var(--accent-primary)' : 'transparent',
+              color: activeTab === 'pruning' ? '#fff' : 'var(--text-muted)',
+            }}
+          >
+            <Scissors size={13} />
+            <span>Pruning</span>
           </button>
         </div>
 
-        <div style={{ display: 'flex', gap: '6px' }}>
+        <div style={{ display: 'flex', gap: '4px' }}>
           {activeTab === 'workdir' && (
             <button
               onClick={loadWorkdirContext}
@@ -370,32 +433,130 @@ export const ContextSidebar: React.FC<ContextSidebarProps> = ({
               <RefreshCw size={14} className={workdirLoading ? 'spin' : undefined} />
             </button>
           )}
-          <button
-            onClick={handleCopy}
-            title="Copy to clipboard"
-            disabled={activeTab === 'workdir' && !workdirContext}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '4px',
-              background: 'rgba(255, 255, 255, 0.05)',
-              border: '1px solid var(--border-color)',
-              color: 'var(--text-muted)',
-              padding: '4px 8px',
-              borderRadius: '6px',
-              fontSize: '0.75rem',
-              cursor: 'pointer',
-            }}
-          >
-            {copied ? <Check size={14} color="var(--accent-teal)" /> : <Copy size={14} />}
-            <span>{copied ? 'Copied' : 'Copy'}</span>
-          </button>
+          {activeTab !== 'pruning' && (
+            <button
+              onClick={handleCopy}
+              title="Copy to clipboard"
+              disabled={activeTab === 'workdir' && !workdirContext}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px',
+                background: 'rgba(255, 255, 255, 0.05)',
+                border: '1px solid var(--border-color)',
+                color: 'var(--text-muted)',
+                padding: '4px 8px',
+                borderRadius: '6px',
+                fontSize: '0.75rem',
+                cursor: 'pointer',
+              }}
+            >
+              {copied ? <Check size={14} color="var(--accent-teal)" /> : <Copy size={14} />}
+              <span>{copied ? 'Copied' : 'Copy'}</span>
+            </button>
+          )}
         </div>
       </div>
 
-      {/* Code / Text Inspector View */}
+      {/* Code / Text Inspector / Pruning Config View */}
       <div style={{ flex: 1, overflow: 'auto', padding: '16px 20px', background: 'rgba(10, 15, 28, 0.95)' }}>
-        {!contextInfo && activeTab !== 'workdir' ? (
+        {activeTab === 'pruning' ? (
+          pruningLoading ? (
+            <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Loading pruning settings…</div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px', background: 'rgba(99, 102, 241, 0.1)', border: '1px solid rgba(99, 102, 241, 0.25)', borderRadius: '8px' }}>
+                <div>
+                  <div style={{ fontWeight: 600, color: '#fff', fontSize: '0.85rem' }}>Enable Context Pruning</div>
+                  <div style={{ fontSize: '0.725rem', color: 'var(--text-muted)' }}>Master switch for context management & stale output removal</div>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={pruningConfig?.enabled ?? true}
+                  onChange={(e) => handleUpdatePruning({ enabled: e.target.checked })}
+                  style={{ cursor: 'pointer', width: '18px', height: '18px' }}
+                />
+              </div>
+
+              <div style={{ opacity: pruningConfig?.enabled ? 1 : 0.5, pointerEvents: pruningConfig?.enabled ? 'auto' : 'none', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                {/* Strategy 1 */}
+                <div style={{ padding: '12px', background: 'rgba(30, 41, 59, 0.5)', border: '1px solid var(--border-color)', borderRadius: '8px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <span style={{ fontWeight: 600, color: 'var(--text-main)', fontSize: '0.825rem' }}>Superseded File Read Pruning</span>
+                    <input
+                      type="checkbox"
+                      checked={pruningConfig?.pruneSupersededReads ?? true}
+                      onChange={(e) => handleUpdatePruning({ pruneSupersededReads: e.target.checked })}
+                      style={{ cursor: 'pointer', width: '16px', height: '16px' }}
+                    />
+                  </div>
+                  <p style={{ fontSize: '0.725rem', color: 'var(--text-muted)', marginTop: '4px', margin: 0 }}>
+                    Replaces older read_file tool outputs for a path when a newer read for the same file occurs.
+                  </p>
+                </div>
+
+                {/* Strategy 2 */}
+                <div style={{ padding: '12px', background: 'rgba(30, 41, 59, 0.5)', border: '1px solid var(--border-color)', borderRadius: '8px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <span style={{ fontWeight: 600, color: 'var(--text-main)', fontSize: '0.825rem' }}>Post-Mutation Invalidation</span>
+                    <input
+                      type="checkbox"
+                      checked={pruningConfig?.invalidateOnMutation ?? true}
+                      onChange={(e) => handleUpdatePruning({ invalidateOnMutation: e.target.checked })}
+                      style={{ cursor: 'pointer', width: '16px', height: '16px' }}
+                    />
+                  </div>
+                  <p style={{ fontSize: '0.725rem', color: 'var(--text-muted)', marginTop: '4px', margin: 0 }}>
+                    Invalidates prior read_file outputs when a file is edited, replaced, or created.
+                  </p>
+                </div>
+
+                {/* Strategy 3 */}
+                <div style={{ padding: '12px', background: 'rgba(30, 41, 59, 0.5)', border: '1px solid var(--border-color)', borderRadius: '8px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <span style={{ fontWeight: 600, color: 'var(--text-main)', fontSize: '0.825rem' }}>Tool Output TTL Expiration</span>
+                    <input
+                      type="checkbox"
+                      checked={pruningConfig?.enableToolTTL ?? true}
+                      onChange={(e) => handleUpdatePruning({ enableToolTTL: e.target.checked })}
+                      style={{ cursor: 'pointer', width: '16px', height: '16px' }}
+                    />
+                  </div>
+                  <p style={{ fontSize: '0.725rem', color: 'var(--text-muted)', margin: 0 }}>
+                    Expires raw execution logs and search results after a set number of user turns.
+                  </p>
+
+                  {pruningConfig?.enableToolTTL && (
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginTop: '6px' }}>
+                      <div>
+                        <label style={{ fontSize: '0.7rem', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>Terminal Log TTL (turns)</label>
+                        <input
+                          type="number"
+                          min="1"
+                          max="50"
+                          value={pruningConfig.terminalOutputTTLTurns ?? 5}
+                          onChange={(e) => handleUpdatePruning({ terminalOutputTTLTurns: parseInt(e.target.value, 10) || 5 })}
+                          style={{ width: '100%', padding: '4px 8px', borderRadius: '4px', background: 'rgba(15, 23, 42, 0.8)', border: '1px solid var(--border-color)', color: '#fff', fontSize: '0.8rem' }}
+                        />
+                      </div>
+                      <div>
+                        <label style={{ fontSize: '0.7rem', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>Web Search TTL (turns)</label>
+                        <input
+                          type="number"
+                          min="1"
+                          max="50"
+                          value={pruningConfig.webOutputTTLTurns ?? 5}
+                          onChange={(e) => handleUpdatePruning({ webOutputTTLTurns: parseInt(e.target.value, 10) || 5 })}
+                          style={{ width: '100%', padding: '4px 8px', borderRadius: '4px', background: 'rgba(15, 23, 42, 0.8)', border: '1px solid var(--border-color)', color: '#fff', fontSize: '0.8rem' }}
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )
+        ) : !contextInfo && activeTab !== 'workdir' ? (
           <div style={{ color: 'var(--text-dim)', fontSize: '0.85rem' }}>No context loaded.</div>
         ) : activeTab === 'formatted' ? (
           <pre

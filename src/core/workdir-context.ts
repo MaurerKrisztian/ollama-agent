@@ -3,7 +3,7 @@ import path from 'node:path';
 import os from 'node:os';
 
 const MAX_FILES = 200;
-const MAX_DEPTH = 4;
+const MAX_DEPTH = 2;
 const MAX_INSTRUCTIONS_CHARS = 12_000;
 const MAX_SKILLS = 50;
 const MAX_SKILL_HEADER_CHARS = 16_000;
@@ -51,7 +51,14 @@ async function collectFiles(root: string): Promise<{ files: string[]; truncated:
   let truncated = false;
 
   const visit = async (relativeDir: string, depth: number): Promise<void> => {
-    if (files.length >= MAX_FILES || depth > MAX_DEPTH) {
+    const isAgentFolder =
+      relativeDir === '.agent' ||
+      relativeDir.startsWith('.agent/') ||
+      relativeDir === '.agents' ||
+      relativeDir.startsWith('.agents/');
+    const maxAllowedDepth = isAgentFolder ? 5 : MAX_DEPTH;
+
+    if (files.length >= MAX_FILES || depth > maxAllowedDepth) {
       truncated = true;
       return;
     }
@@ -99,35 +106,48 @@ function parseFrontmatterValue(frontmatter: string, key: string): string | null 
 }
 
 async function collectProjectSkills(root: string): Promise<ProjectSkillMetadata[]> {
-  const skillsDir = path.join(root, '.agent', 'skills');
-  let entries;
-  try {
-    entries = await fs.readdir(skillsDir, { withFileTypes: true });
-  } catch {
-    return [];
-  }
+  const possibleSkillDirs = [
+    { base: '.agent/skills', fullPath: path.join(root, '.agent', 'skills') },
+    { base: '.agents/skills', fullPath: path.join(root, '.agents', 'skills') },
+  ];
 
   const skills: ProjectSkillMetadata[] = [];
-  for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
-    if (!entry.isDirectory() || skills.length >= MAX_SKILLS) continue;
-    const relativeSkillPath = `.agent/skills/${entry.name}/SKILL.md`;
+  const seenSkillNames = new Set<string>();
+
+  for (const { base, fullPath } of possibleSkillDirs) {
+    let entries;
     try {
-      const contents = await fs.readFile(path.join(root, relativeSkillPath), 'utf8');
-      const header = contents.slice(0, MAX_SKILL_HEADER_CHARS);
-      const frontmatterMatch = header.match(/^---\s*\n([\s\S]*?)\n---(?:\s*\n|$)/);
-      const frontmatter = frontmatterMatch?.[1] || '';
-      const heading = header.match(/^#\s+(.+)$/m)?.[1]?.trim();
-      skills.push({
-        name: parseFrontmatterValue(frontmatter, 'name') || heading || entry.name,
-        description:
-          parseFrontmatterValue(frontmatter, 'description') ||
-          'No description provided; read the skill instructions if its name matches the task.',
-        path: relativeSkillPath,
-      });
+      entries = await fs.readdir(fullPath, { withFileTypes: true });
     } catch {
-      // A skill directory without a readable SKILL.md is not advertised.
+      continue;
+    }
+
+    for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+      if (!entry.isDirectory() || skills.length >= MAX_SKILLS) continue;
+      const relativeSkillPath = `${base}/${entry.name}/SKILL.md`;
+      try {
+        const contents = await fs.readFile(path.join(root, relativeSkillPath), 'utf8');
+        const header = contents.slice(0, MAX_SKILL_HEADER_CHARS);
+        const frontmatterMatch = header.match(/^---\s*\n([\s\S]*?)\n---(?:\s*\n|$)/);
+        const frontmatter = frontmatterMatch?.[1] || '';
+        const heading = header.match(/^#\s+(.+)$/m)?.[1]?.trim();
+        const name = parseFrontmatterValue(frontmatter, 'name') || heading || entry.name;
+        if (!seenSkillNames.has(name)) {
+          seenSkillNames.add(name);
+          skills.push({
+            name,
+            description:
+              parseFrontmatterValue(frontmatter, 'description') ||
+              'No description provided; read the skill instructions if its name matches the task.',
+            path: relativeSkillPath,
+          });
+        }
+      } catch {
+        // A skill directory without a readable SKILL.md is not advertised.
+      }
     }
   }
+
   return skills;
 }
 
@@ -140,14 +160,19 @@ export async function buildWorkingDirectoryContext(workingDir: string): Promise<
   ]);
 
   let agentInstructions: string | null = null;
-  try {
-    const contents = await fs.readFile(path.join(resolvedDir, '.agent', 'AGENTS.md'), 'utf8');
-    agentInstructions =
-      contents.length > MAX_INSTRUCTIONS_CHARS
-        ? `${contents.slice(0, MAX_INSTRUCTIONS_CHARS)}\n[Instructions truncated]`
-        : contents;
-  } catch {
-    // Project instructions are optional.
+  let agentInstructionsPath = '.agent/AGENTS.md';
+  for (const relPath of ['.agent/AGENTS.md', '.agents/AGENTS.md']) {
+    try {
+      const contents = await fs.readFile(path.join(resolvedDir, relPath), 'utf8');
+      agentInstructions =
+        contents.length > MAX_INSTRUCTIONS_CHARS
+          ? `${contents.slice(0, MAX_INSTRUCTIONS_CHARS)}\n[Instructions truncated]`
+          : contents;
+      agentInstructionsPath = relPath;
+      break;
+    } catch {
+      // Project instructions are optional.
+    }
   }
 
   const lines = [
@@ -164,8 +189,8 @@ export async function buildWorkingDirectoryContext(workingDir: string): Promise<
   if (agentInstructions !== null) {
     lines.push(
       '',
-      '## Project instructions from .agent/AGENTS.md',
-      'The complete project instructions are already included below. Follow them directly; do not call read_file merely to reread .agent/AGENTS.md.',
+      `## Project instructions from ${agentInstructionsPath}`,
+      `The complete project instructions are already included below. Follow them directly; do not call read_file merely to reread ${agentInstructionsPath}.`,
       agentInstructions.trim()
     );
   }
@@ -173,7 +198,7 @@ export async function buildWorkingDirectoryContext(workingDir: string): Promise<
   if (projectSkills.length > 0) {
     lines.push(
       '',
-      '## Available project skills from .agent/skills',
+      '## Available project skills from .agent/skills or .agents/skills',
       'These are metadata summaries only. When a skill matches the current task, use read_file on its SKILL.md path before following it.',
       ...projectSkills.map(
         (skill) => `- ${skill.name}: ${skill.description} (instructions: ${skill.path})`

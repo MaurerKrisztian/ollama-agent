@@ -46,7 +46,11 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
   };
 
   useEffect(() => {
-    if (isOpen) void browse(currentDir);
+    if (isOpen) {
+      setBrowsingPath(currentDir);
+      setPathInput(currentDir);
+      void browse(currentDir);
+    }
   }, [isOpen, currentDir]);
 
   if (!isOpen) return null;

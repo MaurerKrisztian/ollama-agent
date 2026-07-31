@@ -9,6 +9,7 @@ export interface AgentSendMessageOptions {
   onToolStart?: (name: string, args: Record<string, any>) => void;
   onToolEnd?: (name: string, result: any) => void;
   onMessageAdded?: (message: ChatMessage) => void;
+  onMaxLoopsReached?: (limit: number) => void;
   signal?: AbortSignal;
   userDisplayContent?: string;
   userAttachments?: ChatMessage['attachments'];
@@ -129,7 +130,8 @@ export class AgentEngine {
         config?.systemPrompt ||
         'You are an intelligent AI assistant with tools for workspace files, terminal commands, web search, and reading public web pages. Use web tools for current online information and workspace tools only for local files. For stable general knowledge or math, answer directly without tools.',
       workingDir: config?.workingDir || process.cwd(),
-      showWorkingDirInfo: config?.showWorkingDirInfo ?? false,
+      showWorkingDirInfo: config?.showWorkingDirInfo ?? true,
+      contextWindow: config?.contextWindow !== undefined ? config.contextWindow : 16384,
       maxLoops: config?.maxLoops !== undefined ? config.maxLoops : 10,
     };
 
@@ -270,25 +272,44 @@ ${conversationText}`;
     });
     if (callbacks?.onMessageAdded) callbacks.onMessageAdded(userMsg);
 
-    let maxLoops = this.config.maxLoops ?? 10;
+    const maxLoopsConfig = this.config.maxLoops ?? 10;
+    const isUnlimited = maxLoopsConfig === 0;
+    let maxLoops = maxLoopsConfig;
+    let maxLoopsReached = false;
+    let normalTurnEnd = false;
     let finalAssistantResponse = '';
     const requestedTools = inferExplicitlyRequestedTools(userMessage);
     const requiredToolCounts = inferRequiredToolCounts(userMessage, requestedTools);
-    const requiresMutationVerification =
-      requiredToolCounts.has('edit_file') &&
-      ((userMessage.match(/\bits\s+[a-z_][a-z0-9_-]*/gi) || []).length >= 2 ||
-        /\b(?:multiple|multi-field|several)\b/i.test(userMessage));
     const executedToolCounts = new Map<string, number>();
     let successfulActionIndex = 0;
     let lastMutationAction = -1;
     let lastReadAction = -1;
     const failedToolCalls = new Set<string>();
     const filesReadThisTurn = new Set<string>();
+    for (const msg of this.contextManager.getMessages()) {
+      if (msg.role === 'assistant' && msg.tool_calls) {
+        for (const tc of msg.tool_calls) {
+          if ((tc.name === 'read_file' || tc.name === 'create_file') && tc.arguments?.relative_path) {
+            const norm = String(tc.arguments.relative_path).replaceAll('\\', '/').replace(/^\.\//, '');
+            if (norm) filesReadThisTurn.add(norm);
+          }
+        }
+      }
+      if (msg.role === 'tool' && (msg.name === 'read_file' || msg.name === 'create_file')) {
+        try {
+          const parsed = typeof msg.content === 'string' ? JSON.parse(msg.content) : msg.content;
+          if (parsed?.file_path) {
+            const norm = String(parsed.file_path).replaceAll('\\', '/').replace(/^\.\//, '');
+            if (norm) filesReadThisTurn.add(norm);
+          }
+        } catch (_) {}
+      }
+    }
     let continuationReminder: string | null = null;
 
-    while (maxLoops > 0) {
+    while (isUnlimited || maxLoops > 0) {
       callbacks?.signal?.throwIfAborted();
-      maxLoops--;
+      if (!isUnlimited) maxLoops--;
 
       const activeTools = this.getActiveTools();
       this.contextManager.setTools(activeTools);
@@ -323,19 +344,23 @@ ${conversationText}`;
         host: this.config.ollamaHost,
         model: this.config.model,
         temperature: isContinuationAttempt ? 0 : this.config.temperature,
+        contextWindow: this.config.contextWindow,
         messages: messagesForOllama,
         tools: activeTools,
         onChunk: callbacks?.onChunk,
         signal: callbacks?.signal,
       });
 
-      // Add Assistant response message to Context
-      const assistantMsg = this.contextManager.addMessage({
-        role: 'assistant',
-        content: res.content,
-        tool_calls: res.tool_calls,
-      });
-      if (callbacks?.onMessageAdded) callbacks.onMessageAdded(assistantMsg);
+      // Add Assistant response message to Context if it has content or tool calls
+      const hasContentOrTools = !!(res.content?.trim() || (res.tool_calls && res.tool_calls.length > 0));
+      if (hasContentOrTools) {
+        const assistantMsg = this.contextManager.addMessage({
+          role: 'assistant',
+          content: res.content,
+          tool_calls: res.tool_calls,
+        });
+        if (callbacks?.onMessageAdded) callbacks.onMessageAdded(assistantMsg);
+      }
 
       if (res.content) {
         finalAssistantResponse += res.content;
@@ -386,15 +411,20 @@ ${conversationText}`;
             filesReadThisTurn.add(normalizedReadPath);
           }
           callbacks?.onToolStart?.(call.name, call.arguments);
+          const isFileNotFound =
+            automaticReadResult?.error &&
+            /ENOENT|no such file or directory|File not found/i.test(automaticReadResult.error);
+
           const toolResult =
             mutationPath && !hasReadMutationTarget
               ? automaticReadResult?.error
                 ? {
-                    error:
-                      `Refusing to ${call.name} "${mutationPath}" because the required automatic read failed: ${automaticReadResult.error}`,
+                    error: isFileNotFound
+                      ? `Cannot ${call.name} "${mutationPath}": File or directory not found (${automaticReadResult.error})`
+                      : `Refusing to ${call.name} "${mutationPath}" because the required automatic read failed: ${automaticReadResult.error}`,
                     file_path: mutationPath,
                     changed: false,
-                    read_required: true,
+                    read_required: !isFileNotFound,
                   }
                 : {
                     error:
@@ -476,14 +506,16 @@ ${conversationText}`;
           requestedTools.length > 0 &&
           [...requiredToolCounts].every(
             ([toolName, requiredCount]) => (executedToolCounts.get(toolName) || 0) >= requiredCount
-          ) &&
-          (!requiresMutationVerification || lastReadAction > lastMutationAction);
-        if (workflowCompletedAfterThisCall && !anyToolFailedThisRound && maxLoops > 0) {
+          );
+        if (workflowCompletedAfterThisCall && !anyToolFailedThisRound && (isUnlimited || maxLoops > 0)) {
           continuationReminder =
             'Review the original request against the successful tool results. A tool type succeeding once does not mean every requested operation is complete. ' +
             'If any requested change or action is not yet reflected in the tool results, invoke the required tool now using the available schemas. ' +
             'Do not ask the user for instructions already present in the original request. Only provide the final answer once every requested operation has succeeded.' +
             `\n\nOriginal request: ${userMessage}`;
+        }
+        if (!isUnlimited && maxLoops === 0) {
+          maxLoopsReached = true;
         }
       } else {
         const missingRequestedTools = [...requiredToolCounts].flatMap(([toolName, requiredCount]) =>
@@ -492,16 +524,8 @@ ${conversationText}`;
             () => toolName
           )
         );
-        if (
-          requiresMutationVerification &&
-          lastMutationAction >= 0 &&
-          lastReadAction <= lastMutationAction &&
-          !missingRequestedTools.includes('read_file')
-        ) {
-          missingRequestedTools.push('read_file');
-        }
 
-        if (missingRequestedTools.length > 0 && maxLoops > 0) {
+        if (missingRequestedTools.length > 0 && (isUnlimited || maxLoops > 0) && !isContinuationAttempt) {
           const webVerificationInstruction = missingRequestedTools.includes('read_web_page')
             ? ' Copy the full URL of the most relevant source from the latest web_search results into read_web_page. Do not answer from a search snippet or memory.'
             : '';
@@ -513,7 +537,31 @@ ${conversationText}`;
         }
 
         // No tool calls requested, end conversation turn
+        normalTurnEnd = true;
         break;
+      }
+    }
+
+    if (!isUnlimited && !normalTurnEnd && maxLoopsReached) {
+      const warningText = `\n\n⚠️ **Max tool call iterations limit reached (${maxLoopsConfig} iterations).** You can increase \`maxLoops\` or disable the limit in Tool Settings.`;
+      if (!finalAssistantResponse.includes('Max tool call iterations limit reached')) {
+        finalAssistantResponse += warningText;
+      }
+      callbacks?.onChunk?.(warningText);
+      callbacks?.onMaxLoopsReached?.(maxLoopsConfig);
+
+      const messages = this.contextManager.getMessages();
+      const lastMsg = messages[messages.length - 1];
+      if (lastMsg && lastMsg.role === 'assistant') {
+        if (!lastMsg.content.includes('Max tool call iterations limit reached')) {
+          lastMsg.content = (lastMsg.content + warningText).trim();
+        }
+      } else {
+        const warningMsg = this.contextManager.addMessage({
+          role: 'assistant',
+          content: warningText.trim(),
+        });
+        if (callbacks?.onMessageAdded) callbacks.onMessageAdded(warningMsg);
       }
     }
 

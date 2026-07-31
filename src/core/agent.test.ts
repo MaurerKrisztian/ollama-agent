@@ -65,13 +65,44 @@ test('automatic grounding is traced before an ungrounded edit', async () => {
   );
 });
 
+test('ungrounded edit on non-existent file returns file not found error without read_required', async () => {
+  await withAgent(
+    [
+      {
+        content: '',
+        tool_calls: [{
+          id: 'missing-edit',
+          name: 'edit_file',
+          arguments: {
+            relative_path: 'nonexistent.txt',
+            target_text: 'foo',
+            replacement_text: 'bar',
+          },
+        }],
+      },
+      { content: 'Done.', tool_calls: [] },
+    ],
+    async (agent, workspace) => {
+      let toolEndResult: any = null;
+      await agent.sendMessage('Edit nonexistent.txt', {
+        onToolEnd: (name, result) => {
+          if (name === 'edit_file') toolEndResult = result;
+        },
+      });
+      assert.ok(toolEndResult);
+      assert.match(toolEndResult.error, /File or directory not found/i);
+      assert.equal(toolEndResult.read_required, false);
+    }
+  );
+});
+
 test('working directory info is only added to the model system prompt when enabled', async () => {
   const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'local-model-chat-agent-context-'));
   try {
     await fs.mkdir(path.join(workspace, '.agent'));
     await fs.writeFile(path.join(workspace, 'project.txt'), 'project\n');
     await fs.writeFile(path.join(workspace, '.agent', 'AGENTS.md'), 'Always verify tests.\n');
-    const agent = new AgentEngine({ workingDir: workspace });
+    const agent = new AgentEngine({ workingDir: workspace, showWorkingDirInfo: false });
     const prompts: string[] = [];
     (agent as any).ollamaClient.chatStream = async (request: any) => {
       prompts.push(request.messages[0].content);
@@ -125,7 +156,7 @@ test('explicit numbered steps require repeated executions of the same tool', asy
   );
 });
 
-test('multi-field edits require a read after the mutation before completion', async () => {
+test('multi-field edits do not require a post-mutation re-read if already read', async () => {
   await withAgent(
     [
       {
@@ -149,15 +180,6 @@ test('multi-field edits require a read after the mutation before completion', as
         }],
       },
       { content: 'Done.', tool_calls: [] },
-      {
-        content: '',
-        tool_calls: [{
-          id: 'read-after',
-          name: 'read_file',
-          arguments: { relative_path: 'package.json' },
-        }],
-      },
-      { content: 'Verified.', tool_calls: [] },
     ],
     async (agent, workspace) => {
       await fs.writeFile(
@@ -170,7 +192,7 @@ test('multi-field edits require a read after the mutation before completion', as
         { onToolStart: (name) => calls.push(name) }
       );
 
-      assert.deepEqual(calls, ['read_file', 'edit_file', 'read_file']);
+      assert.deepEqual(calls, ['read_file', 'edit_file']);
     }
   );
 });
@@ -363,3 +385,52 @@ test('simple navigational web search does not require opening a result page', as
     }
   );
 });
+
+test('maxLoops: 0 allows unlimited tool call iterations without loop exhaustion', async () => {
+  const responses = Array.from({ length: 12 }, (_, i) => ({
+    content: '',
+    tool_calls: [{
+      id: `call-${i}`,
+      name: 'list_files',
+      arguments: {},
+    }],
+  }));
+  responses.push({ content: 'Finished 12 tool calls.', tool_calls: [] });
+
+  await withAgent(responses, async (agent) => {
+    agent.updateConfig({ maxLoops: 0 });
+    const calls: string[] = [];
+    const response = await agent.sendMessage('Perform list_files repeatedly.', {
+      onToolStart: (name) => calls.push(name),
+    });
+
+    assert.equal(calls.length, 12);
+    assert.equal(response, 'Finished 12 tool calls.');
+  });
+});
+
+test('reaching maxLoops limit triggers warning text and onMaxLoopsReached callback', async () => {
+  const responses = Array.from({ length: 5 }, (_, i) => ({
+    content: '',
+    tool_calls: [{
+      id: `call-${i}`,
+      name: 'list_files',
+      arguments: {},
+    }],
+  }));
+
+  await withAgent(responses, async (agent) => {
+    agent.updateConfig({ maxLoops: 2 });
+    let reportedLimit: number | null = null;
+    const response = await agent.sendMessage('Perform list_files repeatedly.', {
+      onMaxLoopsReached: (limit) => {
+        reportedLimit = limit;
+      },
+    });
+
+    assert.equal(reportedLimit, 2);
+    assert.ok(response.includes('Max tool call iterations limit reached'));
+  });
+});
+
+

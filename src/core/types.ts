@@ -52,6 +52,15 @@ export interface ToolResult {
   error?: string;
 }
 
+export interface ContextPruningConfig {
+  enabled: boolean;
+  pruneSupersededReads: boolean;
+  invalidateOnMutation: boolean;
+  enableToolTTL: boolean;
+  terminalOutputTTLTurns?: number;
+  webOutputTTLTurns?: number;
+}
+
 export interface AgentConfig {
   ollamaHost: string;
   model: string;
@@ -59,7 +68,9 @@ export interface AgentConfig {
   systemPrompt: string;
   workingDir: string;
   showWorkingDirInfo: boolean;
+  contextWindow?: number;
   maxLoops?: number;
+  pruningConfig?: ContextPruningConfig;
 }
 
 export interface ContextInfo {
@@ -116,4 +127,68 @@ export interface TerminalSessionOutput {
   lines: string[];
   lineCount: number;
 }
+export interface CategorizedError {
+  code: string;
+  reason: string;
+}
 
+export const categorizeError = (error: unknown, result?: any): CategorizedError => {
+  const msg = typeof error === 'string'
+    ? error
+    : (error && typeof error === 'object' && 'message' in error && typeof (error as any).message === 'string'
+      ? (error as any).message
+      : '');
+
+  const text = (msg + ' ' + (result?.error || '') + ' ' + (result?.reason || '')).trim();
+
+  if (/ENOENT|no such file or directory|File not found/i.test(text)) {
+    return { code: 'FILE_NOT_FOUND', reason: 'File or directory not found' };
+  }
+  if (/ungrounded|The runtime read|required automatic read failed/i.test(text) || result?.read_required) {
+    return { code: 'READ_REQUIRED', reason: 'Must read file before editing' };
+  }
+  if (/repeating an identical failed|repeated_call/i.test(text) || result?.repeated_call) {
+    return { code: 'REPEATED_CALL', reason: 'Identical failed call blocked' };
+  }
+  if (/was not found in file|not found in/i.test(text)) {
+    return { code: 'TARGET_NOT_FOUND', reason: 'Target text not found in file' };
+  }
+  if (/produced no change|no changes were made/i.test(text)) {
+    return { code: 'NO_CHANGES', reason: 'Edit produced no changes' };
+  }
+  if (/is a directory, not a file|is not a directory/i.test(text)) {
+    return { code: 'PATH_TYPE_MISMATCH', reason: 'Path type mismatch (dir vs file)' };
+  }
+  if (/exceeds .* limit|too large/i.test(text)) {
+    return { code: 'FILE_TOO_LARGE', reason: 'File exceeds size limit' };
+  }
+  if (/is required|Parameters .* required|missing argument/i.test(text)) {
+    return { code: 'MISSING_ARGS', reason: 'Missing required parameters' };
+  }
+  if (/rejected by user|EACCES|permission denied/i.test(text)) {
+    return { code: 'PERMISSION_DENIED', reason: 'Operation rejected or permission denied' };
+  }
+  if (/MCP tool .* is disabled|MCP execution error/i.test(text)) {
+    return { code: 'MCP_ERROR', reason: 'MCP tool execution failed' };
+  }
+  if (/web search failed|web page read failed|private network/i.test(text)) {
+    return { code: 'WEB_ERROR', reason: 'Web request failed' };
+  }
+  if (result?.exitCode !== undefined && result.exitCode !== 0) {
+    return { code: 'COMMAND_FAILED', reason: `Command exited with code ${result.exitCode}` };
+  }
+
+  if (msg) {
+    const clean = msg.replace(/[\r\n]+/g, ' ').trim();
+    const match = clean.match(/^([^.!?]+[.!?]?)/);
+    let shortText = match ? match[1].trim() : clean;
+    if (shortText.length > 60) {
+      const truncated = shortText.slice(0, 57);
+      const lastSpace = truncated.lastIndexOf(' ');
+      shortText = (lastSpace > 30 ? truncated.slice(0, lastSpace) : truncated) + '…';
+    }
+    return { code: 'ERROR', reason: shortText };
+  }
+
+  return { code: 'FAILED', reason: 'Operation failed' };
+};

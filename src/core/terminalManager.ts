@@ -1,6 +1,22 @@
 import { spawn, ChildProcess } from 'child_process';
 import path from 'path';
 
+export function stripAnsiCodes(text: string): string {
+  if (!text) return '';
+  // 1. Strip standard ESC / CSI ANSI control sequences (colors, cursor positioning, erase in line)
+  let cleaned = text.replace(/[\u001b\u009b][\[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '');
+  // 2. Strip orphaned control fragments (e.g. [36m, [39m, [1G, [0K) left when ESC byte is stripped
+  cleaned = cleaned.replace(/\[[0-9]{1,4}[a-zA-Z]/g, '');
+  // 3. Normalize carriage returns
+  cleaned = cleaned.replace(/\r\n/g, '\n').replace(/\r/g, '');
+  return cleaned;
+}
+
+export interface TerminalInputHistoryItem {
+  input: string;
+  timestamp: string;
+}
+
 export interface TerminalSessionInfo {
   sessionId: string;
   command: string;
@@ -10,6 +26,7 @@ export interface TerminalSessionInfo {
   startedAt: string;
   workingDir: string;
   lineCount: number;
+  inputs: TerminalInputHistoryItem[];
 }
 
 export interface TerminalSessionOutput {
@@ -19,6 +36,7 @@ export interface TerminalSessionOutput {
   exitCode: number | null;
   lines: string[];
   lineCount: number;
+  inputs: TerminalInputHistoryItem[];
 }
 
 interface TerminalSessionInternal {
@@ -32,6 +50,7 @@ interface TerminalSessionInternal {
   workingDir: string;
   buffer: string[];
   maxLines: number;
+  inputs: TerminalInputHistoryItem[];
 }
 
 export class TerminalSessionManager {
@@ -97,6 +116,7 @@ export class TerminalSessionManager {
         detached: false,
       });
 
+      const startedAt = new Date().toISOString();
       const session: TerminalSessionInternal = {
         sessionId,
         command,
@@ -104,15 +124,16 @@ export class TerminalSessionManager {
         pid: child.pid,
         status: 'running',
         exitCode: null,
-        startedAt: new Date().toISOString(),
+        startedAt,
         workingDir,
         buffer: [],
         maxLines: 200,
+        inputs: [{ input: command, timestamp: startedAt }],
       };
 
       const appendToBuffer = (data: Buffer | string) => {
         const text = data.toString('utf-8');
-        const cleaned = text.replace(/\r\n/g, '\n');
+        const cleaned = stripAnsiCodes(text);
         const lines = cleaned.split('\n');
         for (let i = 0; i < lines.length; i++) {
           const line = lines[i];
@@ -159,6 +180,7 @@ export class TerminalSessionManager {
           startedAt: session.startedAt,
           workingDir,
           lineCount: 0,
+          inputs: session.inputs,
         },
       };
     } catch (err: any) {
@@ -176,6 +198,8 @@ export class TerminalSessionManager {
     }
 
     try {
+      session.inputs.push({ input, timestamp: new Date().toISOString() });
+
       if (input === 'CTRL+C' || input === '\x03') {
         session.process.kill('SIGINT');
         return { success: true };
@@ -221,6 +245,7 @@ export class TerminalSessionManager {
         exitCode: session.exitCode,
         lines,
         lineCount: session.buffer.length,
+        inputs: session.inputs,
       },
     };
   }
@@ -237,6 +262,7 @@ export class TerminalSessionManager {
         startedAt: session.startedAt,
         workingDir: session.workingDir,
         lineCount: session.buffer.length,
+        inputs: session.inputs,
       });
     }
     return result;

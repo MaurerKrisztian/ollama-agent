@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, Terminal as TerminalIcon, Play, Square, RefreshCw, Send, Copy, Check, Maximize2 } from 'lucide-react';
-import { TerminalSessionInfo, TerminalSessionOutput } from '../types';
+import { X, Terminal as TerminalIcon, Play, Square, RefreshCw, Send, Copy, Check, Maximize2, History } from 'lucide-react';
+import { TerminalSessionInfo, TerminalSessionOutput, TerminalInputHistoryItem } from '../types';
 
 interface RightTerminalSidebarProps {
   isOpen: boolean;
@@ -26,6 +26,7 @@ export const RightTerminalSidebar: React.FC<RightTerminalSidebarProps> = ({
   const [inputText, setInputText] = useState('');
   const [copied, setCopied] = useState(false);
   const [autoScroll, setAutoScroll] = useState(true);
+  const [showInputHistory, setShowInputHistory] = useState(false);
   const [newCommandText, setNewCommandText] = useState('');
   const [startingSession, setStartingSession] = useState(false);
   const [showLaunchInput, setShowLaunchInput] = useState(false);
@@ -380,6 +381,27 @@ export const RightTerminalSidebar: React.FC<RightTerminalSidebarProps> = ({
                 </label>
 
                 <button
+                  onClick={() => setShowInputHistory((prev) => !prev)}
+                  title="Show or hide sent terminal input history"
+                  style={{
+                    background: showInputHistory ? 'rgba(99, 102, 241, 0.25)' : 'none',
+                    border: showInputHistory ? '1px solid var(--accent-primary)' : 'none',
+                    color: showInputHistory ? '#fff' : 'var(--text-muted)',
+                    cursor: 'pointer',
+                    padding: '2px 6px',
+                    borderRadius: '4px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    fontSize: '0.725rem',
+                    fontWeight: 600,
+                  }}
+                >
+                  <History size={12} color={showInputHistory ? 'var(--accent-teal)' : 'var(--text-muted)'} />
+                  <span>Inputs ({outputData.inputs?.length || 0})</span>
+                </button>
+
+                <button
                   onClick={handleCopyLogs}
                   style={{
                     background: 'none',
@@ -396,6 +418,68 @@ export const RightTerminalSidebar: React.FC<RightTerminalSidebarProps> = ({
                 </button>
               </div>
             </div>
+
+            {/* Collapsible Sent Input History Viewer */}
+            {showInputHistory && (
+              <div
+                style={{
+                  maxHeight: '140px',
+                  overflowY: 'auto',
+                  background: 'rgba(15, 23, 42, 0.95)',
+                  borderBottom: '1px solid var(--border-color)',
+                  padding: '8px 12px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '6px',
+                }}
+              >
+                <div style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--accent-teal)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  Terminal Input History
+                </div>
+                {(!outputData.inputs || outputData.inputs.length === 0) ? (
+                  <div style={{ fontSize: '0.725rem', color: 'var(--text-dim)' }}>No inputs recorded yet.</div>
+                ) : (
+                  outputData.inputs.map((item: TerminalInputHistoryItem, i: number) => (
+                    <div
+                      key={i}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        background: '#0f172a',
+                        padding: '4px 6px',
+                        borderRadius: '4px',
+                        border: '1px solid rgba(148, 163, 184, 0.15)',
+                        fontSize: '0.725rem',
+                        fontFamily: 'var(--font-code)',
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', overflow: 'hidden' }}>
+                        <span style={{ color: 'var(--text-dim)', flexShrink: 0 }}>#{i + 1}</span>
+                        <span style={{ color: '#e2e8f0', whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>
+                          {item.input}
+                        </span>
+                      </div>
+                      <button
+                        onClick={() => setInputText(item.input)}
+                        title="Use input text"
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          color: 'var(--accent-primary)',
+                          cursor: 'pointer',
+                          fontSize: '0.68rem',
+                          padding: 0,
+                          flexShrink: 0,
+                        }}
+                      >
+                        Use
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
 
             {/* Logs Pre Block */}
             <div

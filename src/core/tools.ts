@@ -4,7 +4,7 @@ import { exec } from 'child_process';
 import { ToolDefinition } from './types.js';
 import { WebClient } from './web.js';
 import { McpClientManager } from './mcp.js';
-import { TerminalSessionManager } from './terminalManager.js';
+import { TerminalSessionManager, stripAnsiCodes } from './terminalManager.js';
 
 type DiffLine = {
   type: 'context' | 'add' | 'remove' | 'meta';
@@ -107,6 +107,14 @@ function stripCopiedLineNumbers(text: string): string {
       return numberedLine ? numberedLine[1] : line;
     })
     .join('\n');
+}
+
+function normalizeModelText(text: string): string {
+  let cleaned = text;
+  if (typeof cleaned === 'string' && !cleaned.includes('\n') && cleaned.includes('\\n')) {
+    cleaned = cleaned.replace(/\\n/g, '\n');
+  }
+  return stripCopiedLineNumbers(cleaned);
 }
 
 function preserveFirstLineIndent(match: string, replacement: string): string {
@@ -475,60 +483,59 @@ export class ToolExecutor {
   }
 
   /**
-   * Smart code target resolution logic: matches exact string first, then falls back to whitespace/statement matching
+   * Smart code target resolution logic: matches exact string first, then falls back to tab/space/line-ending insensitive matching
    */
   private findMatchingTargetCode(content: string, targetText: string): string | null {
     if (content.includes(targetText)) return targetText;
 
-    const trimmedTarget = targetText.trim();
+    const normContent = content.replace(/\r\n/g, '\n');
+    const normTarget = targetText.replace(/\r\n/g, '\n');
+    if (normContent.includes(normTarget)) return normTarget;
+
+    const trimmedTarget = normTarget.trim();
     if (!trimmedTarget) return null;
 
-    const lines = content.split('\n');
+    const normalizeLine = (line: string) => line.replace(/[\t ]+/g, ' ').trim();
+
+    const lines = normContent.split('\n');
     const targetLines = trimmedTarget.split('\n');
 
-    // 1. Multi-line block match that tolerates copied display line numbers and indentation drift.
+    // 1. Multi-line block match that tolerates tabs vs spaces, line numbers, and indentation differences.
     if (targetLines.length > 1) {
-      const normalizedTargetLines = targetLines.map((line) => line.trim());
+      const normalizedTargetLines = targetLines.map(normalizeLine);
       for (let start = 0; start <= lines.length - targetLines.length; start++) {
         const candidateLines = lines.slice(start, start + targetLines.length);
-        if (candidateLines.every((line, index) => line.trim() === normalizedTargetLines[index])) {
+        if (candidateLines.every((line, index) => normalizeLine(line) === normalizedTargetLines[index])) {
           return candidateLines.join('\n');
         }
       }
     }
 
-    // 2. Single line match with whitespace trimming
+    // 2. Single line match with tab and space normalization
+    const normalizedSingleTarget = normalizeLine(trimmedTarget);
     for (const line of lines) {
-      if (line.trim() === trimmedTarget) return line;
+      if (normalizeLine(line) === normalizedSingleTarget) return line;
     }
 
-    // 3. Match text whose newlines/indentation were collapsed by a small model.
-    // Build a normalized string while retaining offsets into the original file.
-    const normalizedChars: string[] = [];
+    // 3. Match text whose newlines/indentation/tabs/operator-spacing were altered by a model.
+    // Build a normalized string while retaining offsets into the original file content.
+    const nonWsChars: string[] = [];
     const originalOffsets: number[] = [];
-    let previousWasWhitespace = false;
-    for (let index = 0; index < content.length; index++) {
-      const char = content[index];
-      if (/\s/.test(char)) {
-        if (!previousWasWhitespace) {
-          normalizedChars.push(' ');
-          originalOffsets.push(index);
-          previousWasWhitespace = true;
-        }
-      } else {
-        normalizedChars.push(char);
+    for (let index = 0; index < normContent.length; index++) {
+      const char = normContent[index];
+      if (!/\s/.test(char)) {
+        nonWsChars.push(char);
         originalOffsets.push(index);
-        previousWasWhitespace = false;
       }
     }
-    const normalizedContent = normalizedChars.join('');
-    const normalizedTarget = trimmedTarget.replace(/\s+/g, ' ');
-    const normalizedStart = normalizedContent.indexOf(normalizedTarget);
-    if (normalizedStart !== -1) {
-      const normalizedEnd = normalizedStart + normalizedTarget.length - 1;
-      const originalStart = originalOffsets[normalizedStart];
-      const originalEnd = originalOffsets[normalizedEnd] + 1;
-      return content.slice(originalStart, originalEnd);
+    const nonWsContent = nonWsChars.join('');
+    const nonWsTarget = trimmedTarget.replace(/\s+/g, '');
+    const nonWsStart = nonWsContent.indexOf(nonWsTarget);
+    if (nonWsStart !== -1) {
+      const nonWsEnd = nonWsStart + nonWsTarget.length - 1;
+      const originalStart = originalOffsets[nonWsStart];
+      const originalEnd = originalOffsets[nonWsEnd] + 1;
+      return normContent.slice(originalStart, originalEnd);
     }
 
     // 4. Substring statement matching fallback (e.g. return statement or function signature)
@@ -683,8 +690,8 @@ export class ToolExecutor {
             return { error: `Path "${actualRelativePath}" is a directory, not a file.` };
           }
           const content = await fs.readFile(filePath, 'utf-8');
-          const cleanTargetText = stripCopiedLineNumbers(target_text);
-          const cleanReplacementText = stripCopiedLineNumbers(replacement_text);
+          const cleanTargetText = normalizeModelText(target_text);
+          const cleanReplacementText = normalizeModelText(replacement_text);
           const matchToReplace = this.findMatchingTargetCode(content, cleanTargetText);
 
           if (!matchToReplace) {
@@ -886,19 +893,21 @@ export class ToolExecutor {
   public async executeCommand(command: string): Promise<{ command: string; stdout: string; stderr: string; exitCode: number; error?: string }> {
     return new Promise((resolve) => {
       exec(command, { cwd: this.workingDir, timeout: 15000, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
+        const cleanStdout = stripAnsiCodes(stdout || '').trim();
+        const cleanStderr = stripAnsiCodes(stderr || '').trim();
         if (err) {
           resolve({
             command,
-            stdout: stdout ? stdout.trim() : '',
-            stderr: stderr ? stderr.trim() : '',
+            stdout: cleanStdout,
+            stderr: cleanStderr,
             exitCode: err.code ?? 1,
             error: err.message,
           });
         } else {
           resolve({
             command,
-            stdout: stdout.trim(),
-            stderr: stderr.trim(),
+            stdout: cleanStdout,
+            stderr: cleanStderr,
             exitCode: 0,
           });
         }

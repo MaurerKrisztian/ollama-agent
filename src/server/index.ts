@@ -9,34 +9,105 @@ import { AgentEngine } from '../core/agent.js';
 import { TOOL_DEFINITIONS } from '../core/tools.js';
 import { runBenchmarkSuite, runSingleBenchmarkTest } from '../benchmark/runner.js';
 import { BENCHMARK_TEST_CASES, BenchmarkTestCase } from '../benchmark/testCases.js';
+import { isCommandWhitelisted, DEFAULT_COMMAND_WHITELIST } from '../core/commandWhitelist.js';
+
+import fsSync from 'node:fs';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+const CONFIG_FILE_PATH = path.join(os.homedir(), '.local-model-chat-config.json');
+
+function getInitialPersistedConfig(): {
+  workingDir: string;
+  ollamaHost: string;
+  ollamaToken?: string;
+  model: string;
+  allowedCommands: string[];
+  terminalMode: 'confirm' | 'auto';
+  fileEditMode: 'confirm' | 'auto';
+} {
+  let workingDir = process.cwd();
+  let ollamaHost = process.env.OLLAMA_HOST || 'http://127.0.0.1:11434';
+  let ollamaToken = process.env.OLLAMA_TOKEN;
+  let model = 'qwen3.5:9b';
+  let allowedCommands = [...DEFAULT_COMMAND_WHITELIST];
+  let terminalMode: 'confirm' | 'auto' = 'confirm';
+  let fileEditMode: 'confirm' | 'auto' = 'confirm';
+
+  try {
+    if (fsSync.existsSync(CONFIG_FILE_PATH)) {
+      const data = fsSync.readFileSync(CONFIG_FILE_PATH, 'utf8');
+      const parsed = JSON.parse(data);
+      if (parsed.workingDir && typeof parsed.workingDir === 'string' && fsSync.existsSync(parsed.workingDir)) {
+        workingDir = parsed.workingDir;
+      }
+      if (parsed.ollamaHost && typeof parsed.ollamaHost === 'string') {
+        ollamaHost = parsed.ollamaHost;
+      }
+      if (parsed.ollamaToken !== undefined && typeof parsed.ollamaToken === 'string') {
+        ollamaToken = parsed.ollamaToken;
+      }
+      if (parsed.model && typeof parsed.model === 'string') {
+        model = parsed.model;
+      }
+      if (Array.isArray(parsed.allowedCommands)) {
+        allowedCommands = parsed.allowedCommands;
+      }
+      if (parsed.terminalMode === 'confirm' || parsed.terminalMode === 'auto') {
+        terminalMode = parsed.terminalMode;
+      }
+      if (parsed.fileEditMode === 'confirm' || parsed.fileEditMode === 'auto') {
+        fileEditMode = parsed.fileEditMode;
+      }
+    }
+  } catch (_) {}
+
+  return { workingDir, ollamaHost, ollamaToken, model, allowedCommands, terminalMode, fileEditMode };
+}
+
+function savePersistedConfig(updatedConfig: Record<string, any>) {
+  try {
+    let existing: Record<string, any> = {};
+    if (fsSync.existsSync(CONFIG_FILE_PATH)) {
+      existing = JSON.parse(fsSync.readFileSync(CONFIG_FILE_PATH, 'utf8'));
+    }
+    const merged = { ...existing, ...updatedConfig };
+    fsSync.writeFileSync(CONFIG_FILE_PATH, JSON.stringify(merged, null, 2), 'utf8');
+  } catch (_) {}
+}
+
 app.use(cors());
 app.use(express.json({ limit: '2mb' }));
 
+const initialConfig = getInitialPersistedConfig();
+
 // Initialize shared Agent Engine
 const agent = new AgentEngine({
-  model: 'qwen3.5:9b',
-  ollamaHost: process.env.OLLAMA_HOST || 'http://127.0.0.1:11434',
-  ollamaToken: process.env.OLLAMA_TOKEN,
-  workingDir: process.cwd(),
+  model: initialConfig.model,
+  ollamaHost: initialConfig.ollamaHost,
+  ollamaToken: initialConfig.ollamaToken,
+  workingDir: initialConfig.workingDir,
 });
 
 // Auto-load MCP configuration if available
 agent.loadMcpConfig().catch(() => {});
 
+let terminalRequireConfirm = initialConfig.terminalMode === 'confirm';
+let fileEditRequireConfirm = initialConfig.fileEditMode === 'confirm';
+let allowedCommandsState: string[] = initialConfig.allowedCommands;
+
 const getPublicConfig = () => ({
   ...agent.getConfig(),
   ollamaTokenConfigured: agent.hasOllamaToken(),
+  terminalMode: terminalRequireConfirm ? 'confirm' : 'auto',
+  fileEditMode: fileEditRequireConfirm ? 'confirm' : 'auto',
+  allowedCommands: allowedCommandsState,
 });
 
 // Per-session tool approval state
-type ApprovalDecision = 'approve' | 'reject';
-let pendingApprovalResolve: ((decision: ApprovalDecision) => void) | null = null;
-let terminalRequireConfirm = true; // matches default toolSettings.terminalMode
-let fileEditRequireConfirm = true; // matches default toolSettings.fileEditMode
+type ApprovalDecisionPayload = { decision: 'approve' | 'reject'; reason?: string };
+let pendingApprovalResolve: ((payload: ApprovalDecisionPayload) => void) | null = null;
 let activeGenerationController: AbortController | null = null;
 
 // GET /api/models - Fetch models from current or specified Ollama host
@@ -227,7 +298,7 @@ app.get('/api/directories', async (req, res) => {
 
 // POST /api/config - Update configuration
 app.post('/api/config', (req, res) => {
-  const { model, systemPrompt, workingDir, showWorkingDirInfo, ollamaHost, ollamaToken, temperature, maxLoops } = req.body;
+  const { model, systemPrompt, workingDir, showWorkingDirInfo, ollamaHost, ollamaToken, temperature, contextWindow, maxLoops } = req.body;
 
   if (ollamaHost !== undefined) {
     try {
@@ -245,7 +316,15 @@ app.post('/api/config', (req, res) => {
     }
   }
 
-  agent.updateConfig({ model, systemPrompt, workingDir, showWorkingDirInfo, ollamaHost, ollamaToken, temperature, maxLoops });
+  agent.updateConfig({ model, systemPrompt, workingDir, showWorkingDirInfo, ollamaHost, ollamaToken, temperature, contextWindow, maxLoops });
+
+  const currentConfig = agent.getConfig();
+  savePersistedConfig({
+    workingDir: currentConfig.workingDir,
+    ollamaHost: currentConfig.ollamaHost,
+    ollamaToken: agent.getOllamaToken(),
+    model: currentConfig.model,
+  });
 
   res.json({
     success: true,
@@ -504,11 +583,30 @@ app.post('/api/chat/compact', async (_req, res) => {
   }
 });
 
+// GET /api/context/pruning - Get active context pruning configuration
+app.get('/api/context/pruning', (_req, res) => {
+  res.json({
+    success: true,
+    pruningConfig: agent.getContextManager().getPruningConfig(),
+  });
+});
+
+// POST /api/context/pruning - Update context pruning configuration
+app.post('/api/context/pruning', (req, res) => {
+  const updates = req.body || {};
+  agent.getContextManager().setPruningConfig(updates);
+  res.json({
+    success: true,
+    pruningConfig: agent.getContextManager().getPruningConfig(),
+    context: agent.getContextManager().getContextInfo(),
+  });
+});
+
 // POST /api/chat/tool-approval - Approve or reject a pending tool execution
 app.post('/api/chat/tool-approval', (req, res) => {
-  const { decision } = req.body as { decision: ApprovalDecision };
+  const { decision, reason } = req.body as { decision: 'approve' | 'reject'; reason?: string };
   if (pendingApprovalResolve) {
-    pendingApprovalResolve(decision);
+    pendingApprovalResolve({ decision, reason });
     pendingApprovalResolve = null;
     res.json({ success: true });
   } else {
@@ -518,20 +616,31 @@ app.post('/api/chat/tool-approval', (req, res) => {
 
 // POST /api/chat/tool-settings - Update tool approval preferences & max loops
 app.post('/api/chat/tool-settings', (req, res) => {
-  const { terminalMode, fileEditMode, maxLoops } = req.body;
+  const { terminalMode, fileEditMode, allowedCommands, maxLoops } = req.body;
   if (terminalMode === 'confirm' || terminalMode === 'auto') {
     terminalRequireConfirm = terminalMode === 'confirm';
   }
   if (fileEditMode === 'confirm' || fileEditMode === 'auto') {
     fileEditRequireConfirm = fileEditMode === 'confirm';
   }
-  if (typeof maxLoops === 'number' && maxLoops >= 1 && maxLoops <= 50) {
+  if (Array.isArray(allowedCommands)) {
+    allowedCommandsState = allowedCommands.map((c) => String(c).trim()).filter(Boolean);
+  }
+  if (typeof maxLoops === 'number' && maxLoops >= 0 && maxLoops <= 50) {
     agent.updateConfig({ maxLoops });
   }
+
+  savePersistedConfig({
+    allowedCommands: allowedCommandsState,
+    terminalMode: terminalRequireConfirm ? 'confirm' : 'auto',
+    fileEditMode: fileEditRequireConfirm ? 'confirm' : 'auto',
+  });
+
   res.json({
     success: true,
     terminalRequireConfirm,
     fileEditRequireConfirm,
+    allowedCommands: allowedCommandsState,
     config: getPublicConfig(),
   });
 });
@@ -544,7 +653,7 @@ app.post('/api/chat/cancel', (_req, res) => {
 
   activeGenerationController.abort();
   if (pendingApprovalResolve) {
-    pendingApprovalResolve('reject');
+    pendingApprovalResolve({ decision: 'reject', reason: 'Generation cancelled by user' });
     pendingApprovalResolve = null;
   }
   res.json({ success: true });
@@ -619,14 +728,19 @@ app.post('/api/chat', async (req, res) => {
   const originalExecuteTool = executor.executeTool.bind(executor);
 
   executor.executeTool = async (name: string, args: Record<string, any>) => {
-    if (name === 'start_terminal_session' && terminalRequireConfirm) {
+    if (
+      name === 'start_terminal_session' &&
+      terminalRequireConfirm &&
+      !isCommandWhitelisted(args.command || '', allowedCommandsState)
+    ) {
       sendEvent('tool_approval_required', { name, args });
-      const decision = await new Promise<ApprovalDecision>((resolve) => {
+      const { decision, reason } = await new Promise<ApprovalDecisionPayload>((resolve) => {
         pendingApprovalResolve = resolve;
       });
       if (decision === 'reject') {
+        const msg = reason ? `Terminal session rejected by user: "${reason}"` : 'Terminal session execution rejected by user in Web UI.';
         return {
-          error: 'Terminal session execution rejected by user in Web UI.',
+          error: msg,
           command: args.command,
           cancelled: true,
         };
@@ -641,12 +755,13 @@ app.post('/api/chat', async (req, res) => {
         return originalExecuteTool(name, args);
       }
       sendEvent('tool_approval_required', { name, args, diff });
-      const decision = await new Promise<ApprovalDecision>((resolve) => {
+      const { decision, reason } = await new Promise<ApprovalDecisionPayload>((resolve) => {
         pendingApprovalResolve = resolve;
       });
       if (decision === 'reject') {
+        const msg = reason ? `File edit rejected by user: "${reason}"` : 'File edit rejected by user in Web UI.';
         return {
-          error: 'File edit rejected by user in Web UI.',
+          error: msg,
           file_path: args.relative_path,
           cancelled: true,
         };
@@ -656,20 +771,21 @@ app.post('/api/chat', async (req, res) => {
   };
 
   executor.executeCommand = async (command: string) => {
-    if (terminalRequireConfirm) {
+    if (terminalRequireConfirm && !isCommandWhitelisted(command, allowedCommandsState)) {
       // Notify client to show approval card
       sendEvent('tool_approval_required', { name: 'execute_command', args: { command } });
       // Wait for UI approval
-      const decision = await new Promise<ApprovalDecision>((resolve) => {
+      const { decision, reason } = await new Promise<ApprovalDecisionPayload>((resolve) => {
         pendingApprovalResolve = resolve;
       });
       if (decision === 'reject') {
+        const msg = reason ? `Execution rejected by user: "${reason}"` : 'Execution cancelled by user in Web UI.';
         return {
           command,
           stdout: '',
-          stderr: 'Execution cancelled by user in Web UI.',
+          stderr: msg,
           exitCode: 1,
-          error: 'Rejected by user.',
+          error: msg,
           cancelled: true,
         };
       }
@@ -692,6 +808,9 @@ app.post('/api/chat', async (req, res) => {
       },
       onToolEnd: (name, result) => {
         sendEvent('tool_end', { name, result });
+      },
+      onMaxLoopsReached: (limit) => {
+        sendEvent('max_loops_reached', { maxLoops: limit });
       },
       signal: generationController.signal,
     });

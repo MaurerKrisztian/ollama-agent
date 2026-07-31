@@ -16,6 +16,8 @@ export const ToolSettingsModal: React.FC<ToolSettingsModalProps> = ({
   settings,
   onUpdateSettings,
 }) => {
+  const [newCmdInput, setNewCmdInput] = React.useState('');
+
   if (!isOpen) return null;
 
   const handleToggleTool = (toolName: keyof ToolSettings['enabledTools']) => {
@@ -34,6 +36,28 @@ export const ToolSettingsModal: React.FC<ToolSettingsModalProps> = ({
 
   const handleFileEditModeChange = (mode: 'confirm' | 'auto') => {
     onUpdateSettings({ ...settings, fileEditMode: mode });
+  };
+
+  const handleAddAllowedCommand = (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = newCmdInput.trim();
+    if (!trimmed) return;
+    const current = settings.allowedCommands || ['ls', 'pwd'];
+    if (!current.includes(trimmed)) {
+      onUpdateSettings({
+        ...settings,
+        allowedCommands: [...current, trimmed],
+      });
+    }
+    setNewCmdInput('');
+  };
+
+  const handleRemoveAllowedCommand = (cmdToRemove: string) => {
+    const current = settings.allowedCommands || ['ls', 'pwd'];
+    onUpdateSettings({
+      ...settings,
+      allowedCommands: current.filter((c) => c !== cmdToRemove),
+    });
   };
 
   return (
@@ -146,6 +170,89 @@ export const ToolSettingsModal: React.FC<ToolSettingsModalProps> = ({
                 <span>⚡ Auto-Approve</span>
               </button>
             </div>
+
+            {/* Whitelisted Commands Sub-Section */}
+            <div style={{ marginTop: '16px', paddingTop: '14px', borderTop: '1px solid rgba(255, 255, 255, 0.1)' }}>
+              <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-main)', marginBottom: '4px' }}>
+                Command Execution Whitelist (Auto-Bypass in Confirmation Mode)
+              </div>
+              <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', lineHeight: 1.4, marginBottom: '10px' }}>
+                Whitelisted commands (and multi-part executions where all sub-commands are whitelisted) will run automatically without asking for confirmation.
+              </p>
+
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '10px' }}>
+                {(settings.allowedCommands || ['ls', 'pwd']).map((cmd) => (
+                  <span
+                    key={cmd}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      padding: '4px 10px',
+                      borderRadius: '6px',
+                      background: 'rgba(245, 158, 11, 0.2)',
+                      border: '1px solid rgba(245, 158, 11, 0.4)',
+                      color: '#fbbf24',
+                      fontSize: '0.8rem',
+                      fontFamily: 'monospace',
+                      fontWeight: 600,
+                    }}
+                  >
+                    {cmd}
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveAllowedCommand(cmd)}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        color: 'rgba(255, 255, 255, 0.6)',
+                        cursor: 'pointer',
+                        padding: 0,
+                        display: 'flex',
+                        alignItems: 'center',
+                      }}
+                      title="Remove command"
+                    >
+                      <X size={13} />
+                    </button>
+                  </span>
+                ))}
+              </div>
+
+              <form onSubmit={handleAddAllowedCommand} style={{ display: 'flex', gap: '8px' }}>
+                <input
+                  type="text"
+                  value={newCmdInput}
+                  onChange={(e) => setNewCmdInput(e.target.value)}
+                  placeholder="e.g. tail"
+                  style={{
+                    flex: 1,
+                    padding: '6px 12px',
+                    borderRadius: '6px',
+                    border: '1px solid var(--border-color)',
+                    background: 'rgba(15, 23, 42, 0.8)',
+                    color: 'var(--text-main)',
+                    fontSize: '0.8rem',
+                    fontFamily: 'monospace',
+                  }}
+                />
+                <button
+                  type="submit"
+                  style={{
+                    padding: '6px 12px',
+                    borderRadius: '6px',
+                    border: 'none',
+                    background: 'var(--accent-amber)',
+                    color: '#000',
+                    fontWeight: 600,
+                    fontSize: '0.8rem',
+                    cursor: 'pointer',
+                  }}
+                >
+                  Add Command
+                </button>
+              </form>
+            </div>
           </div>
 
           {/* Section 2: File Modification Preferences */}
@@ -220,22 +327,22 @@ export const ToolSettingsModal: React.FC<ToolSettingsModalProps> = ({
                   fontSize: '0.8rem',
                   fontWeight: 700,
                   fontFamily: 'var(--font-code)',
-                  color: 'var(--accent-primary)',
-                  background: 'rgba(99, 102, 241, 0.15)',
+                  color: settings.maxLoops === 0 ? '#86efac' : 'var(--accent-primary)',
+                  background: settings.maxLoops === 0 ? 'rgba(34, 197, 94, 0.15)' : 'rgba(99, 102, 241, 0.15)',
                   padding: '2px 8px',
                   borderRadius: '6px',
-                  border: '1px solid rgba(99, 102, 241, 0.3)',
+                  border: `1px solid ${settings.maxLoops === 0 ? 'rgba(34, 197, 94, 0.3)' : 'rgba(99, 102, 241, 0.3)'}`,
                 }}
               >
-                {settings.maxLoops ?? 10} iterations
+                {settings.maxLoops === 0 ? 'Disabled (Unlimited)' : `${settings.maxLoops ?? 10} iterations`}
               </span>
             </div>
             <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', lineHeight: 1.5, marginBottom: '12px' }}>
-              Limits the maximum number of sequential tool calls the agent can perform in a single user turn. Increase for complex multi-file refactoring or deep research tasks.
+              Limits the maximum number of sequential tool calls the agent can perform in a single user turn. Disable the limit to allow as many tool calls as the model wants.
             </p>
             <input
               type="range"
-              min="1"
+              min="0"
               max="30"
               step="1"
               value={settings.maxLoops ?? 10}
@@ -246,6 +353,19 @@ export const ToolSettingsModal: React.FC<ToolSettingsModalProps> = ({
                 cursor: 'pointer',
               }}
             />
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '10px' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '0.825rem', color: 'var(--text-main)', fontWeight: 500 }}>
+                <input
+                  type="checkbox"
+                  checked={settings.maxLoops === 0}
+                  onChange={(e) => {
+                    onUpdateSettings({ ...settings, maxLoops: e.target.checked ? 0 : 10 });
+                  }}
+                  style={{ accentColor: 'var(--accent-primary)', cursor: 'pointer' }}
+                />
+                <span>Disable limit (Unlimited tool calls)</span>
+              </label>
+            </div>
           </div>
 
           {/* Section 4: Enabled Toolset Toggles */}

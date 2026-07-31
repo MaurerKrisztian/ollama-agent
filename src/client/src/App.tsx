@@ -22,12 +22,13 @@ export const App: React.FC = () => {
     temperature: 0.2,
     systemPrompt: 'You are an intelligent AI assistant with tools for workspace files, terminal commands, web search, and reading public web pages.',
     workingDir: '',
-    showWorkingDirInfo: false,
+    showWorkingDirInfo: true,
   });
 
   const [toolSettings, setToolSettings] = useState<ToolSettings>({
     terminalMode: 'confirm',
     fileEditMode: 'confirm',
+    allowedCommands: ['ls', 'pwd'],
     enabledTools: {
       list_directory: true,
       read_file: true,
@@ -113,12 +114,34 @@ export const App: React.FC = () => {
     } catch (_) {}
   };
 
+  const fetchConfig = async () => {
+    try {
+      const configRes = await fetch('/api/config');
+      if (configRes.ok) {
+        const data = await configRes.json();
+        if (data.config) {
+          setConfig((prev) => ({
+            ...prev,
+            ...data.config,
+          }));
+          if (data.config.workingDir) {
+            localStorage.setItem('local-model-chat.workingDir', data.config.workingDir);
+          }
+        }
+        if (data.context) {
+          setContextInfo(data.context);
+        }
+      }
+    } catch (_) {}
+  };
+
   useEffect(() => {
     fetchSystemMetrics();
     fetchTerminalSessions();
     const interval = setInterval(() => {
       fetchSystemMetrics();
       fetchTerminalSessions();
+      fetchConfig();
     }, 3000);
     return () => clearInterval(interval);
   }, []);
@@ -128,25 +151,41 @@ export const App: React.FC = () => {
       const configRes = await fetch('/api/config');
       if (configRes.ok) {
         const data = await configRes.json();
+        let activeConfig = data.config;
+        let activeContext = data.context;
+
         const savedWorkingDir = localStorage.getItem('local-model-chat.workingDir');
-        if (savedWorkingDir && savedWorkingDir !== data.config.workingDir) {
+        if (savedWorkingDir && savedWorkingDir !== data.config?.workingDir) {
           const savedDirRes = await fetch('/api/config', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ workingDir: savedWorkingDir }),
           });
-          const savedDirData = await savedDirRes.json();
-          if (savedDirRes.ok && savedDirData.success) {
-            setConfig(savedDirData.config);
-            setContextInfo(savedDirData.context);
-          } else {
-            localStorage.removeItem('local-model-chat.workingDir');
-            setConfig(data.config);
-            setContextInfo(data.context);
+          if (savedDirRes.ok) {
+            const savedDirData = await savedDirRes.json();
+            if (savedDirData.success) {
+              activeConfig = savedDirData.config;
+              activeContext = savedDirData.context;
+            }
           }
-        } else {
-          setConfig(data.config);
-          setContextInfo(data.context);
+        }
+
+        if (activeConfig) {
+          setConfig(activeConfig);
+          if (activeConfig.workingDir) {
+            localStorage.setItem('local-model-chat.workingDir', activeConfig.workingDir);
+          }
+          setToolSettings((prev) => ({
+            ...prev,
+            terminalMode: activeConfig.terminalMode || prev.terminalMode,
+            fileEditMode: activeConfig.fileEditMode || prev.fileEditMode,
+            allowedCommands: Array.isArray(activeConfig.allowedCommands)
+              ? activeConfig.allowedCommands
+              : prev.allowedCommands,
+          }));
+        }
+        if (activeContext) {
+          setContextInfo(activeContext);
         }
       }
 
@@ -221,6 +260,15 @@ export const App: React.FC = () => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ temperature: newTemp }),
+    });
+  };
+
+  const handleChangeContextWindow = async (newCtx: number) => {
+    setConfig((prev) => ({ ...prev, contextWindow: newCtx }));
+    await fetch('/api/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contextWindow: newCtx }),
     });
   };
 
@@ -360,6 +408,7 @@ export const App: React.FC = () => {
       body: JSON.stringify({
         terminalMode: newSettings.terminalMode,
         fileEditMode: newSettings.fileEditMode,
+        allowedCommands: newSettings.allowedCommands,
         maxLoops: newSettings.maxLoops,
       }),
     });
@@ -374,12 +423,12 @@ export const App: React.FC = () => {
     });
   };
 
-  const handleRejectToolCall = async () => {
+  const handleRejectToolCall = async (reason?: string) => {
     setPendingApprovalCall(null);
     await fetch('/api/chat/tool-approval', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ decision: 'reject' }),
+      body: JSON.stringify({ decision: 'reject', reason }),
     });
   };
 
@@ -487,6 +536,7 @@ export const App: React.FC = () => {
         onToggleSidebar={() => setSidebarOpen((prev) => !prev)}
         onSelectModel={handleSelectModel}
         onChangeTemperature={handleChangeTemperature}
+        onChangeContextWindow={handleChangeContextWindow}
         onNewChat={handleNewChat}
         onOpenSystemPrompt={() => setSystemPromptModalOpen(true)}
         onOpenToolSettings={() => setToolSettingsModalOpen(true)}
@@ -554,6 +604,7 @@ export const App: React.FC = () => {
           contextInfo={contextInfo}
           activeModel={config.model}
           onCompactContext={handleCompactContext}
+          onContextInfoChange={setContextInfo}
         />
 
         <RightTerminalSidebar

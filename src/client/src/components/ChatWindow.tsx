@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Send, Square, Wrench, CheckCircle2, XCircle, ShieldAlert, User, Bot, Loader2, FileText, Folder, Terminal, Edit3, Search, PlusCircle, Sparkles, Code2, Eye, ChevronDown, X, Globe, ExternalLink, Layers, RotateCcw } from 'lucide-react';
+import { Send, Square, Wrench, CheckCircle2, XCircle, ShieldAlert, User, Bot, Loader2, FileText, Folder, Terminal, Edit3, Search, PlusCircle, Sparkles, Code2, Eye, ChevronDown, X, Globe, ExternalLink, Layers, RotateCcw, Copy, Check, Scissors } from 'lucide-react';
 import { ChatMessage, FileDiffData, PendingApprovalCall, TextAttachment } from '../types';
 
 const compactValue = (value: unknown, maxLength = 64): string => {
@@ -58,6 +58,72 @@ const HighlightedAttachment: React.FC<{ file: TextAttachment }> = ({ file }) => 
   return <>{nodes}</>;
 };
 
+export interface CategorizedError {
+  code: string;
+  reason: string;
+}
+
+export const categorizeError = (error: unknown, result?: any): CategorizedError => {
+  const msg = typeof error === 'string' 
+    ? error 
+    : (error && typeof error === 'object' && 'message' in error && typeof (error as any).message === 'string'
+      ? (error as any).message 
+      : '');
+
+  const text = (msg + ' ' + (result?.error || '') + ' ' + (result?.reason || '')).trim();
+
+  if (/ENOENT|no such file or directory|File not found/i.test(text)) {
+    return { code: 'FILE_NOT_FOUND', reason: 'File or directory not found' };
+  }
+  if (/ungrounded|The runtime read|required automatic read failed/i.test(text) || result?.read_required) {
+    return { code: 'READ_REQUIRED', reason: 'Must read file before editing' };
+  }
+  if (/repeating an identical failed|repeated_call/i.test(text) || result?.repeated_call) {
+    return { code: 'REPEATED_CALL', reason: 'Identical failed call blocked' };
+  }
+  if (/was not found in file|not found in/i.test(text)) {
+    return { code: 'TARGET_NOT_FOUND', reason: 'Target text not found in file' };
+  }
+  if (/produced no change|no changes were made/i.test(text)) {
+    return { code: 'NO_CHANGES', reason: 'Edit produced no changes' };
+  }
+  if (/is a directory, not a file|is not a directory/i.test(text)) {
+    return { code: 'PATH_TYPE_MISMATCH', reason: 'Path type mismatch (dir vs file)' };
+  }
+  if (/exceeds .* limit|too large/i.test(text)) {
+    return { code: 'FILE_TOO_LARGE', reason: 'File exceeds size limit' };
+  }
+  if (/is required|Parameters .* required|missing argument/i.test(text)) {
+    return { code: 'MISSING_ARGS', reason: 'Missing required parameters' };
+  }
+  if (/rejected by user|EACCES|permission denied/i.test(text)) {
+    return { code: 'PERMISSION_DENIED', reason: 'Operation rejected or permission denied' };
+  }
+  if (/MCP tool .* is disabled|MCP execution error/i.test(text)) {
+    return { code: 'MCP_ERROR', reason: 'MCP tool execution failed' };
+  }
+  if (/web search failed|web page read failed|private network/i.test(text)) {
+    return { code: 'WEB_ERROR', reason: 'Web request failed' };
+  }
+  if (result?.exitCode !== undefined && result.exitCode !== 0) {
+    return { code: 'COMMAND_FAILED', reason: `Command exited with code ${result.exitCode}` };
+  }
+
+  if (msg) {
+    const clean = msg.replace(/[\r\n]+/g, ' ').trim();
+    const match = clean.match(/^([^.!?]+[.!?]?)/);
+    let shortText = match ? match[1].trim() : clean;
+    if (shortText.length > 60) {
+      const truncated = shortText.slice(0, 57);
+      const lastSpace = truncated.lastIndexOf(' ');
+      shortText = (lastSpace > 30 ? truncated.slice(0, lastSpace) : truncated) + '…';
+    }
+    return { code: 'ERROR', reason: shortText };
+  }
+
+  return { code: 'FAILED', reason: 'Operation failed' };
+};
+
 const getToolResultSummary = (
   name: string | undefined,
   args: Record<string, any>,
@@ -68,7 +134,17 @@ const getToolResultSummary = (
     result?.file_path || result?.relative_path || result?.working_directory,
   );
 
-  if (result?.error) return `${target} (failed)`.trim();
+  const isFailed = !!(
+    result?.error ||
+    result?.failed ||
+    result?.success === false ||
+    (result?.exitCode !== undefined && result.exitCode !== 0)
+  );
+
+  if (isFailed) {
+    const { code, reason } = categorizeError(result?.error || result?.reason, result);
+    return `${target} ([${code}] ${reason})`.trim();
+  }
 
   switch (name) {
     case 'list_directory': {
@@ -311,6 +387,255 @@ const CompactedContextCard: React.FC<{ message: ChatMessage }> = ({ message }) =
   );
 };
 
+const PrettierInvocationView: React.FC<{ name: string; args: Record<string, any> }> = ({ name, args }) => {
+  const keys = Object.keys(args);
+  if (keys.length === 0) {
+    return <div style={{ color: 'var(--text-dim)', fontSize: '0.8rem' }}>No arguments passed.</div>;
+  }
+
+  // Specialized Prettier Views for common tools
+  if ((name === 'execute_command' || name === 'start_terminal_session') && args.command) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        {args.session_id && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.775rem' }}>
+            <span style={{ color: 'var(--text-muted)' }}>Session ID:</span>
+            <span style={{ fontFamily: 'var(--font-code)', color: 'var(--accent-teal)', fontWeight: 600 }}>{args.session_id}</span>
+          </div>
+        )}
+        <div style={{ background: '#090d16', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '10px 14px', fontFamily: 'var(--font-code)', fontSize: '0.825rem', color: '#4ade80', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+          <span style={{ color: 'var(--text-muted)', marginRight: '8px' }}>$</span>
+          {args.command}
+        </div>
+      </div>
+    );
+  }
+
+  if (name === 'edit_file') {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+        {args.relative_path && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-main)', fontFamily: 'var(--font-code)' }}>
+            <FileText size={14} color="var(--accent-teal)" />
+            <span>{args.relative_path}</span>
+          </div>
+        )}
+        {args.target_text !== undefined && (
+          <div>
+            <div style={{ fontSize: '0.725rem', fontWeight: 600, color: '#f87171', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Target Text (To Replace):</div>
+            <pre style={{ margin: 0, padding: '8px 12px', background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: '6px', fontFamily: 'var(--font-code)', fontSize: '0.775rem', color: '#fca5a5', whiteSpace: 'pre-wrap', maxHeight: '180px', overflowY: 'auto' }}>
+              {args.target_text}
+            </pre>
+          </div>
+        )}
+        {args.replacement_text !== undefined && (
+          <div>
+            <div style={{ fontSize: '0.725rem', fontWeight: 600, color: '#4ade80', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Replacement Text:</div>
+            <pre style={{ margin: 0, padding: '8px 12px', background: 'rgba(16, 185, 129, 0.1)', border: '1px solid rgba(16, 185, 129, 0.3)', borderRadius: '6px', fontFamily: 'var(--font-code)', fontSize: '0.775rem', color: '#86efac', whiteSpace: 'pre-wrap', maxHeight: '180px', overflowY: 'auto' }}>
+              {args.replacement_text || '(Empty string — delete target text)'}
+            </pre>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  if (name === 'create_file' || name === 'replace_file') {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        {args.relative_path && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-main)', fontFamily: 'var(--font-code)' }}>
+            <FileText size={14} color="var(--accent-teal)" />
+            <span>{args.relative_path}</span>
+          </div>
+        )}
+        {args.content !== undefined && (
+          <div>
+            <div style={{ fontSize: '0.725rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>File Content ({args.content.length} characters):</div>
+            <pre style={{ margin: 0, padding: '10px 12px', background: '#090d16', border: '1px solid var(--border-color)', borderRadius: '6px', fontFamily: 'var(--font-code)', fontSize: '0.775rem', color: '#e2e8f0', whiteSpace: 'pre-wrap', maxHeight: '220px', overflowY: 'auto' }}>
+              {args.content}
+            </pre>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  if (name === 'grep_search') {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.8rem' }}>
+          <Search size={14} color="var(--accent-amber)" />
+          <span style={{ color: 'var(--text-muted)' }}>Query:</span>
+          <span style={{ fontFamily: 'var(--font-code)', color: '#fcd34d', fontWeight: 600, background: 'rgba(245, 158, 11, 0.15)', padding: '2px 8px', borderRadius: '4px' }}>
+            "{args.query}"
+          </span>
+        </div>
+        {args.relative_path && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.775rem', color: 'var(--text-muted)', fontFamily: 'var(--font-code)' }}>
+            <span>Subdirectory: {args.relative_path}</span>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // Generic key-value prettier grid for all other tools
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+      {Object.entries(args).map(([key, val]) => {
+        const isMultiLine = typeof val === 'string' && val.includes('\n');
+        return (
+          <div key={key} style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.775rem' }}>
+              <span style={{ fontWeight: 600, color: 'var(--accent-amber)', fontFamily: 'var(--font-code)' }}>{key}:</span>
+              {!isMultiLine && typeof val !== 'object' && (
+                <span style={{ fontFamily: 'var(--font-code)', color: '#fcd34d', background: 'rgba(30, 41, 59, 0.6)', padding: '2px 6px', borderRadius: '4px', fontSize: '0.775rem', wordBreak: 'break-all' }}>
+                  {String(val)}
+                </span>
+              )}
+            </div>
+            {(isMultiLine || typeof val === 'object') && (
+              <pre style={{ margin: 0, padding: '8px 12px', background: '#090d16', border: '1px solid var(--border-color)', borderRadius: '6px', fontFamily: 'var(--font-code)', fontSize: '0.775rem', color: '#e2e8f0', whiteSpace: 'pre-wrap', maxHeight: '180px', overflowY: 'auto' }}>
+                {typeof val === 'object' ? JSON.stringify(val, null, 2) : val}
+              </pre>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+};
+
+const ToolInvocationCard: React.FC<{
+  name: string;
+  args: Record<string, any>;
+  defaultExpanded?: boolean;
+}> = ({ name, args, defaultExpanded = true }) => {
+  const [expanded, setExpanded] = useState(defaultExpanded);
+  const [viewMode, setViewMode] = useState<'prettier' | 'raw'>('prettier');
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    navigator.clipboard.writeText(JSON.stringify(args, null, 2));
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const getToolSummary = () => {
+    if (args.command) return `$ ${args.command}`;
+    if (args.relative_path) return args.relative_path;
+    if (args.query) return `"${args.query}"`;
+    if (args.url) return args.url;
+    if (args.session_id) return `session: ${args.session_id}`;
+    return null;
+  };
+
+  const summary = getToolSummary();
+
+  return (
+    <div style={{ background: 'rgba(245, 158, 11, 0.08)', border: '1px solid rgba(245, 158, 11, 0.3)', borderRadius: '10px', fontSize: '0.85rem', overflow: 'hidden' }}>
+      {/* Header Bar */}
+      <div
+        onClick={() => setExpanded((curr) => !curr)}
+        style={{ padding: '8px 12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', background: 'rgba(245, 158, 11, 0.05)', userSelect: 'none' }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--accent-amber)', fontWeight: 600, minWidth: 0, flex: 1 }}>
+          <Wrench size={15} style={{ flexShrink: 0 }} />
+          <span style={{ whiteSpace: 'nowrap' }}>Tool Invocation:</span>
+          <span style={{ fontFamily: 'var(--font-code)', background: 'rgba(245, 158, 11, 0.18)', padding: '2px 8px', borderRadius: '6px', color: '#fcd34d', fontSize: '0.8rem', flexShrink: 0 }}>
+            {name}
+          </span>
+          {summary && (
+            <span style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-code)', fontSize: '0.75rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 0 }}>
+              {summary}
+            </span>
+          )}
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0, marginLeft: '8px' }}>
+          {/* Prettier / Raw JSON View Mode Tabs */}
+          <div style={{ display: 'flex', gap: '2px', background: 'rgba(15, 23, 42, 0.7)', padding: '2px', borderRadius: '6px', border: '1px solid var(--border-color)' }}>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setViewMode('prettier');
+              }}
+              title="Formatted Prettier View"
+              style={{
+                padding: '3px 8px',
+                borderRadius: '4px',
+                border: 'none',
+                background: viewMode === 'prettier' ? 'rgba(245, 158, 11, 0.25)' : 'transparent',
+                color: viewMode === 'prettier' ? '#fcd34d' : 'var(--text-muted)',
+                fontSize: '0.72rem',
+                fontWeight: 600,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px',
+              }}
+            >
+              <Eye size={12} />
+              <span>Prettier</span>
+            </button>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setViewMode('raw');
+              }}
+              title="Raw JSON View"
+              style={{
+                padding: '3px 8px',
+                borderRadius: '4px',
+                border: 'none',
+                background: viewMode === 'raw' ? 'rgba(245, 158, 11, 0.25)' : 'transparent',
+                color: viewMode === 'raw' ? '#fcd34d' : 'var(--text-muted)',
+                fontSize: '0.72rem',
+                fontWeight: 600,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px',
+              }}
+            >
+              <Code2 size={12} />
+              <span>Raw JSON</span>
+            </button>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleCopy}
+            title="Copy Raw JSON"
+            style={{ background: 'none', border: 'none', color: copied ? '#10b981' : 'var(--text-muted)', cursor: 'pointer', padding: '2px 4px', display: 'flex', alignItems: 'center', gap: '3px', fontSize: '0.72rem' }}
+          >
+            {copied ? <Check size={13} /> : <Copy size={13} />}
+          </button>
+
+          <ChevronDown size={16} color="var(--accent-amber)" style={{ transform: expanded ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s ease' }} />
+        </div>
+      </div>
+
+      {/* Expanded Content */}
+      {expanded && (
+        <div style={{ padding: '12px', borderTop: '1px solid rgba(245, 158, 11, 0.2)', background: 'rgba(10, 15, 28, 0.6)' }}>
+          {viewMode === 'prettier' ? (
+            <PrettierInvocationView name={name} args={args} />
+          ) : (
+            <pre style={{ margin: 0, padding: '10px 12px', background: '#090d16', borderRadius: '8px', border: '1px solid var(--border-color)', fontFamily: 'var(--font-code)', fontSize: '0.8rem', color: '#fcd34d', whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: '350px', overflowY: 'auto' }}>
+              {JSON.stringify(args, null, 2)}
+            </pre>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
 const ToolResultCard: React.FC<{
   message: ChatMessage;
   args: Record<string, any>;
@@ -318,35 +643,65 @@ const ToolResultCard: React.FC<{
   const [expanded, setExpanded] = useState(false);
   const [viewMode, setViewMode] = useState<'formatted' | 'raw'>('formatted');
 
+  const isPruned = typeof message.content === 'string' && message.content.startsWith('[Context Pruned:');
+
   let parsedContent: any = null;
-  try {
-    parsedContent = JSON.parse(message.content);
-  } catch (_) {}
+  if (!isPruned) {
+    try {
+      parsedContent = JSON.parse(message.content);
+    } catch (_) {}
+  }
+
+  const isFailed = !isPruned && !!(
+    parsedContent?.error ||
+    parsedContent?.failed ||
+    parsedContent?.success === false ||
+    (parsedContent?.exitCode !== undefined && parsedContent.exitCode !== 0)
+  );
 
   const fileDiff = parsedContent?.diff as FileDiffData | undefined;
   const resultWithoutDiff = parsedContent && fileDiff
     ? Object.fromEntries(Object.entries(parsedContent).filter(([key]) => key !== 'diff'))
     : parsedContent;
-  const summary = getToolResultSummary(message.name, args, parsedContent);
+  const summary = isPruned
+    ? message.content.replace(/^\[Context Pruned:\s*/, '').replace(/\]$/, '')
+    : getToolResultSummary(message.name, args, parsedContent);
 
   const isWebSearch = message.name === 'web_search' && parsedContent?.results;
   const isWebPageRead = message.name === 'read_web_page' && parsedContent?.markdown;
   const hasFormattedView = isWebSearch || isWebPageRead || fileDiff;
 
+  const mainColor = isPruned ? '#c084fc' : isFailed ? '#f43f5e' : 'var(--accent-teal)';
+  const bgColor = isPruned ? 'rgba(168, 85, 247, 0.08)' : isFailed ? 'rgba(244, 63, 94, 0.08)' : 'rgba(20, 184, 166, 0.08)';
+  const borderColor = isPruned ? 'rgba(168, 85, 247, 0.3)' : isFailed ? 'rgba(244, 63, 94, 0.25)' : 'rgba(20, 184, 166, 0.25)';
+  const borderTopColor = isPruned ? 'rgba(168, 85, 247, 0.2)' : isFailed ? 'rgba(244, 63, 94, 0.18)' : 'rgba(20, 184, 166, 0.18)';
+  const activeBtnBg = isPruned ? 'rgba(168, 85, 247, 0.2)' : isFailed ? 'rgba(244, 63, 94, 0.2)' : 'rgba(20, 184, 166, 0.2)';
+
   return (
     <div className="animate-fade-in" style={{ marginLeft: '44px', maxWidth: '80%' }}>
-      <div style={{ background: 'rgba(20, 184, 166, 0.08)', border: '1px solid rgba(20, 184, 166, 0.25)', borderRadius: '8px', fontSize: '0.825rem', overflow: 'hidden' }}>
+      <div style={{ background: bgColor, border: `1px solid ${borderColor}`, borderRadius: '8px', fontSize: '0.825rem', overflow: 'hidden' }}>
         <button
           type="button"
           onClick={() => setExpanded((current) => !current)}
           aria-expanded={expanded}
           title={expanded ? 'Hide tool result' : 'Show tool result'}
-          style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '7px', padding: '7px 10px', border: 0, background: 'transparent', color: 'var(--accent-teal)', cursor: 'pointer', textAlign: 'left', font: 'inherit' }}
+          style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '7px', padding: '7px 10px', border: 0, background: 'transparent', color: mainColor, cursor: 'pointer', textAlign: 'left', font: 'inherit' }}
         >
-          <CheckCircle2 size={14} style={{ flexShrink: 0 }} />
+          {isPruned ? (
+            <Scissors size={14} style={{ flexShrink: 0, color: '#c084fc' }} />
+          ) : isFailed ? (
+            <XCircle size={14} style={{ flexShrink: 0, color: '#f43f5e' }} />
+          ) : (
+            <CheckCircle2 size={14} style={{ flexShrink: 0 }} />
+          )}
           <span style={{ fontWeight: 600, whiteSpace: 'nowrap' }}>Tool Result: {message.name}</span>
+          {isPruned && (
+            <span style={{ background: 'rgba(168, 85, 247, 0.2)', border: '1px solid rgba(168, 85, 247, 0.4)', color: '#e9d5ff', padding: '1px 6px', borderRadius: '4px', fontSize: '0.675rem', fontWeight: 700, textTransform: 'uppercase', flexShrink: 0 }}>
+              Pruned
+            </span>
+          )}
           {summary && (
-            <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text-muted)', fontFamily: 'var(--font-code)', fontSize: '0.75rem' }}>
+            <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: isPruned ? '#d8b4fe' : isFailed ? '#f87171' : 'var(--text-muted)', fontFamily: 'var(--font-code)', fontSize: '0.75rem' }}>
               {summary}
             </span>
           )}
@@ -354,85 +709,94 @@ const ToolResultCard: React.FC<{
         </button>
 
         {expanded && (
-          <div style={{ padding: '0 12px 12px', borderTop: '1px solid rgba(20, 184, 166, 0.18)' }}>
-            {/* View Mode Toggle Header Bar */}
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: '8px' }}>
-              <div style={{ display: 'flex', gap: '6px' }}>
-                <button
-                  type="button"
-                  onClick={() => setViewMode('formatted')}
-                  style={{
-                    padding: '3px 9px',
-                    borderRadius: '4px',
-                    border: '1px solid',
-                    borderColor: viewMode === 'formatted' ? 'var(--accent-teal)' : 'transparent',
-                    background: viewMode === 'formatted' ? 'rgba(20, 184, 166, 0.2)' : 'transparent',
-                    color: viewMode === 'formatted' ? 'var(--accent-teal)' : 'var(--text-muted)',
-                    fontSize: '0.725rem',
-                    fontWeight: 600,
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '4px',
-                  }}
-                >
-                  <Eye size={12} />
-                  <span>Formatted</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setViewMode('raw')}
-                  style={{
-                    padding: '3px 9px',
-                    borderRadius: '4px',
-                    border: '1px solid',
-                    borderColor: viewMode === 'raw' ? 'var(--accent-teal)' : 'transparent',
-                    background: viewMode === 'raw' ? 'rgba(20, 184, 166, 0.2)' : 'transparent',
-                    color: viewMode === 'raw' ? 'var(--accent-teal)' : 'var(--text-muted)',
-                    fontSize: '0.725rem',
-                    fontWeight: 600,
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '4px',
-                  }}
-                >
-                  <Code2 size={12} />
-                  <span>Raw JSON</span>
-                </button>
+          <div style={{ padding: '0 12px 12px', borderTop: `1px solid ${borderTopColor}` }}>
+            {isPruned ? (
+              <div style={{ margin: '10px 0 0', padding: '10px 14px', background: 'rgba(168, 85, 247, 0.12)', border: '1px solid rgba(168, 85, 247, 0.3)', borderRadius: '6px', color: '#e9d5ff', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Scissors size={16} color="#c084fc" style={{ flexShrink: 0 }} />
+                <span>{message.content}</span>
               </div>
-            </div>
-
-            {/* Formatted View Content */}
-            {viewMode === 'formatted' ? (
+            ) : (
               <>
-                {isWebSearch && (
-                  <WebSearchResultsView
-                    query={parsedContent?.query || args?.query || ''}
-                    results={parsedContent?.results || []}
-                  />
-                )}
-                {isWebPageRead && (
-                  <WebPageReaderView
-                    title={parsedContent?.title}
-                    url={parsedContent?.url || args?.url}
-                    markdown={parsedContent?.markdown}
-                  />
-                )}
-                {!isWebSearch && !isWebPageRead && fileDiff && (
-                  <FileDiff diff={fileDiff} />
-                )}
-                {!isWebSearch && !isWebPageRead && !fileDiff && (
+                {/* View Mode Toggle Header Bar */}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: '8px' }}>
+                  <div style={{ display: 'flex', gap: '6px' }}>
+                    <button
+                      type="button"
+                      onClick={() => setViewMode('formatted')}
+                      style={{
+                        padding: '3px 9px',
+                        borderRadius: '4px',
+                        border: '1px solid',
+                        borderColor: viewMode === 'formatted' ? mainColor : 'transparent',
+                        background: viewMode === 'formatted' ? activeBtnBg : 'transparent',
+                        color: viewMode === 'formatted' ? mainColor : 'var(--text-muted)',
+                        fontSize: '0.725rem',
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                      }}
+                    >
+                      <Eye size={12} />
+                      <span>Formatted</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setViewMode('raw')}
+                      style={{
+                        padding: '3px 9px',
+                        borderRadius: '4px',
+                        border: '1px solid',
+                        borderColor: viewMode === 'raw' ? mainColor : 'transparent',
+                        background: viewMode === 'raw' ? activeBtnBg : 'transparent',
+                        color: viewMode === 'raw' ? mainColor : 'var(--text-muted)',
+                        fontSize: '0.725rem',
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                      }}
+                    >
+                      <Code2 size={12} />
+                      <span>Raw JSON</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Formatted View Content */}
+                {viewMode === 'formatted' ? (
+                  <>
+                    {isWebSearch && (
+                      <WebSearchResultsView
+                        query={parsedContent?.query || args?.query || ''}
+                        results={parsedContent?.results || []}
+                      />
+                    )}
+                    {isWebPageRead && (
+                      <WebPageReaderView
+                        title={parsedContent?.title}
+                        url={parsedContent?.url || args?.url}
+                        markdown={parsedContent?.markdown}
+                      />
+                    )}
+                    {!isWebSearch && !isWebPageRead && fileDiff && (
+                      <FileDiff diff={fileDiff} />
+                    )}
+                    {!isWebSearch && !isWebPageRead && !fileDiff && (
+                      <pre style={{ margin: '10px 0 0', maxHeight: '320px', overflow: 'auto', fontSize: '0.775rem' }}>
+                        {resultWithoutDiff ? JSON.stringify(resultWithoutDiff, null, 2) : message.content}
+                      </pre>
+                    )}
+                  </>
+                ) : (
+                  /* Raw View Content */
                   <pre style={{ margin: '10px 0 0', maxHeight: '320px', overflow: 'auto', fontSize: '0.775rem' }}>
-                    {resultWithoutDiff ? JSON.stringify(resultWithoutDiff, null, 2) : message.content}
+                    {JSON.stringify(parsedContent || message.content, null, 2)}
                   </pre>
                 )}
               </>
-            ) : (
-              /* Raw View Content */
-              <pre style={{ margin: '10px 0 0', maxHeight: '320px', overflow: 'auto', fontSize: '0.775rem' }}>
-                {resultWithoutDiff ? JSON.stringify(resultWithoutDiff, null, 2) : message.content}
-              </pre>
             )}
           </div>
         )}
@@ -459,9 +823,16 @@ const MarkdownContent: React.FC<{ content: string; streaming?: boolean }> = ({
 
 const AssistantResponse: React.FC<{ content: string }> = ({ content }) => {
   const [showRaw, setShowRaw] = useState(false);
+  const isMaxLoops = content.includes('Max tool call iterations limit reached');
 
   return (
     <div className="glass-panel assistant-response" style={{ padding: '12px 18px 16px', borderRadius: '16px 16px 16px 4px', fontSize: '0.925rem', lineHeight: 1.6 }}>
+      {isMaxLoops && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 12px', background: 'rgba(245, 158, 11, 0.15)', border: '1px solid rgba(245, 158, 11, 0.3)', borderRadius: '8px', color: 'var(--accent-amber)', fontSize: '0.825rem', fontWeight: 600, marginBottom: '10px' }}>
+          <ShieldAlert size={16} style={{ flexShrink: 0 }} />
+          <span>Max Tool Call Iterations Limit Reached</span>
+        </div>
+      )}
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '6px' }}>
         <button
           type="button"
@@ -539,7 +910,7 @@ interface ChatWindowProps {
   onSendMessage: (msg: string, attachments?: TextAttachment[]) => void;
   onCancelGeneration: () => void;
   onApproveToolCall?: () => void;
-  onRejectToolCall?: () => void;
+  onRejectToolCall?: (reason?: string) => void;
   onRewindToMessage?: (messageId: string, promptContent: string) => void;
   onClearChat?: () => void;
   onOpenToolSettings?: () => void;
@@ -642,6 +1013,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   const [attachments, setAttachments] = useState<TextAttachment[]>([]);
   const [attachmentError, setAttachmentError] = useState('');
   const [viewedAttachment, setViewedAttachment] = useState<TextAttachment | null>(null);
+  const [rejectionReason, setRejectionReason] = useState('');
   const [slashMenuOpen, setSlashMenuOpen] = useState(false);
   const [selectedSlashIndex, setSelectedSlashIndex] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
@@ -903,15 +1275,9 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                 </div>
                 <div style={{ maxWidth: '80%', display: 'flex', flexDirection: 'column', gap: '8px' }}>
                   {msg.tool_calls && msg.tool_calls.length > 0 && (
-                    <div style={{ background: 'rgba(245, 158, 11, 0.1)', border: '1px solid rgba(245, 158, 11, 0.3)', borderRadius: '8px', padding: '10px 14px', fontSize: '0.85rem' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--accent-amber)', fontWeight: 600, marginBottom: '4px' }}>
-                        <Wrench size={14} />
-                        <span>Tool Invocation Request</span>
-                      </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                       {msg.tool_calls.map((tc, idx) => (
-                        <div key={idx} style={{ fontFamily: 'var(--font-code)', color: '#fcd34d', fontSize: '0.8rem' }}>
-                          {tc.name}({JSON.stringify(tc.arguments)})
-                        </div>
+                        <ToolInvocationCard key={tc.id || idx} name={tc.name} args={tc.arguments || {}} />
                       ))}
                     </div>
                   )}
@@ -981,9 +1347,9 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
             </div>
 
             <div style={{ fontSize: '0.85rem', color: 'var(--text-main)', lineHeight: 1.5 }}>
-              The agent is requesting to execute tool call:
-              <div style={{ fontFamily: 'var(--font-code)', background: 'rgba(15, 23, 42, 0.8)', padding: '10px 14px', borderRadius: '8px', marginTop: '6px', color: '#fcd34d', fontSize: '0.825rem' }}>
-                {pendingApprovalCall.name}({JSON.stringify(pendingApprovalCall.args, null, 2)})
+              The agent is requesting to execute:
+              <div style={{ marginTop: '8px' }}>
+                <ToolInvocationCard name={pendingApprovalCall.name} args={pendingApprovalCall.args || {}} defaultExpanded={true} />
               </div>
               {pendingApprovalCall.diff && (
                 <div style={{ marginTop: '10px' }}>
@@ -991,6 +1357,33 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                   <FileDiff diff={pendingApprovalCall.diff} />
                 </div>
               )}
+
+              <div style={{ marginTop: '10px' }}>
+                <input
+                  type="text"
+                  value={rejectionReason}
+                  onChange={(e) => setRejectionReason(e.target.value)}
+                  placeholder="Optional rejection reason / instructions for model (e.g. 'Use git status instead')..."
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      onRejectToolCall?.(rejectionReason.trim() || undefined);
+                      setRejectionReason('');
+                    }
+                  }}
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    borderRadius: '8px',
+                    border: '1px solid rgba(239, 68, 68, 0.4)',
+                    background: 'rgba(15, 23, 42, 0.8)',
+                    color: 'var(--text-main)',
+                    fontSize: '0.825rem',
+                    outline: 'none',
+                    boxSizing: 'border-box',
+                  }}
+                />
+              </div>
             </div>
 
             <div style={{ display: 'flex', gap: '12px', marginTop: '4px' }}>
@@ -1018,7 +1411,10 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
               </button>
 
               <button
-                onClick={onRejectToolCall}
+                onClick={() => {
+                  onRejectToolCall?.(rejectionReason.trim() || undefined);
+                  setRejectionReason('');
+                }}
                 style={{
                   flex: 1,
                   display: 'flex',

@@ -4,6 +4,8 @@ import { Command } from 'commander';
 import { AgentEngine } from '../core/agent.js';
 import { runSingleBenchmarkTest } from '../benchmark/runner.js';
 import { BENCHMARK_TEST_CASES, BenchmarkTestCase } from '../benchmark/testCases.js';
+import { categorizeError } from '../core/types.js';
+import { isCommandWhitelisted, DEFAULT_COMMAND_WHITELIST } from '../core/commandWhitelist.js';
 
 const program = new Command();
 
@@ -18,6 +20,7 @@ program
   .option('-d, --dir <path>', 'Working directory path', process.cwd())
   .option('--workdir-info', 'Include project info, .agent instructions, and skill metadata in model context', false)
   .option('-y, --auto-approve', 'Auto-approve terminal command execution without asking', false)
+  .option('-w, --whitelist <cmds...>', 'Whitelisted commands to auto-approve without asking', DEFAULT_COMMAND_WHITELIST.join(','))
   .option('-s, --system <prompt>', 'Custom system prompt')
   .option('-b, --benchmark', 'Run the benchmark suite instead of chat mode')
   .option('-c, --category <name>', 'Filter benchmark to a specific category (use with --benchmark)')
@@ -39,7 +42,7 @@ async function startCli() {
 
   let autoApprove = options.autoApprove === true;
 
-  const promptConfirmation = (cmd: string): Promise<'accept' | 'reject' | 'all'> => {
+  const promptConfirmation = (cmd: string): Promise<{ action: 'accept' | 'reject' | 'all'; reason?: string }> => {
     return new Promise((resolve) => {
       const rlConfirm = readline.createInterface({
         input: process.stdin,
@@ -47,37 +50,51 @@ async function startCli() {
       });
       console.log(chalk.bold.yellow(`\n⚠️  Terminal Execution Confirmation Required:`));
       console.log(chalk.cyan(`Command: `) + chalk.bold.white(cmd));
-      rlConfirm.question(chalk.bold.yellow('Confirm execution? ([y] Accept / [n] Reject / [a] Accept All for session) > '), (ans) => {
-        rlConfirm.close();
+      rlConfirm.question(chalk.bold.yellow('Confirm execution? ([y] Accept / [n] Reject / [r] Reject with message / [a] Accept All for session) > '), (ans) => {
         const lower = ans.trim().toLowerCase();
         if (lower === 'a' || lower === 'all') {
-          resolve('all');
+          rlConfirm.close();
+          resolve({ action: 'all' });
         } else if (lower === 'y' || lower === 'yes' || lower === '') {
-          resolve('accept');
+          rlConfirm.close();
+          resolve({ action: 'accept' });
+        } else if (lower === 'r' || lower === 'reason') {
+          rlConfirm.question(chalk.bold.yellow('Rejection message / feedback for model > '), (reasonMsg) => {
+            rlConfirm.close();
+            resolve({ action: 'reject', reason: reasonMsg.trim() });
+          });
         } else {
-          resolve('reject');
+          rlConfirm.close();
+          resolve({ action: 'reject' });
         }
       });
     });
   };
 
+  const allowedCommands: string[] = Array.isArray(options.whitelist)
+    ? options.whitelist.flatMap((w: string) => w.split(','))
+    : typeof options.whitelist === 'string'
+    ? options.whitelist.split(',')
+    : DEFAULT_COMMAND_WHITELIST;
+
   // Wrap executeCommand on ToolExecutor for CLI safety confirmation
   const executor = agent.getToolExecutor();
   const originalExecuteCommand = executor.executeCommand.bind(executor);
   executor.executeCommand = async (command: string) => {
-    if (!autoApprove) {
-      const choice = await promptConfirmation(command);
-      if (choice === 'reject') {
-        console.log(chalk.red(`❌ Terminal command execution rejected by user.`));
+    if (!autoApprove && !isCommandWhitelisted(command, allowedCommands)) {
+      const result = await promptConfirmation(command);
+      if (result.action === 'reject') {
+        const errText = result.reason ? `Execution rejected by user: "${result.reason}"` : 'Execution cancelled by user.';
+        console.log(chalk.red(`❌ ${errText}`));
         return {
           command,
           stdout: '',
-          stderr: 'Execution cancelled by user.',
+          stderr: errText,
           exitCode: 1,
-          error: 'Terminal command execution rejected by user.',
+          error: errText,
         };
       }
-      if (choice === 'all') {
+      if (result.action === 'all') {
         autoApprove = true;
         console.log(chalk.green(`✓ Auto-approval enabled for session.`));
       }
@@ -388,8 +405,19 @@ async function startCli() {
           console.log(chalk.yellow(`\n🔧 [Tool Call] ${name}(${JSON.stringify(toolArgs)})`));
         },
         onToolEnd: (name, result) => {
-          console.log(chalk.dim(`✓ [Tool Result] ${name}: ${JSON.stringify(result).substring(0, 120)}...`));
+          const isErr = !!(result?.error || result?.failed || result?.success === false || (result?.exitCode !== undefined && result.exitCode !== 0));
+          const icon = isErr ? '✗' : '✓';
+          const colorFn = isErr ? chalk.red : chalk.dim;
+          let summary = '';
+          if (isErr) {
+            const { code, reason } = categorizeError(result?.error || result?.reason, result);
+            summary = ` [${code}: ${reason}]`;
+          }
+          console.log(colorFn(`${icon} [Tool Result] ${name}${summary}: ${JSON.stringify(result).substring(0, 100)}...`));
           process.stdout.write(chalk.bold.magenta('Agent > '));
+        },
+        onMaxLoopsReached: (limit) => {
+          console.log(chalk.bold.yellow(`\n⚠️  [Max Loops Reached] Reached maximum limit of ${limit} tool call iterations. You can increase maxLoops in config or set it to 0 for unlimited.`));
         },
       });
       console.log('\n');

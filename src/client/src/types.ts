@@ -1,3 +1,12 @@
+export interface ContextPruningConfig {
+  enabled: boolean;
+  pruneSupersededReads: boolean;
+  invalidateOnMutation: boolean;
+  enableToolTTL: boolean;
+  terminalOutputTTLTurns?: number;
+  webOutputTTLTurns?: number;
+}
+
 export interface AgentConfig {
   ollamaHost: string;
   model: string;
@@ -5,13 +14,16 @@ export interface AgentConfig {
   systemPrompt: string;
   workingDir: string;
   showWorkingDirInfo: boolean;
+  contextWindow?: number;
   maxLoops?: number;
   ollamaTokenConfigured?: boolean;
+  pruningConfig?: ContextPruningConfig;
 }
 
 export interface ToolSettings {
   terminalMode: 'confirm' | 'auto';
   fileEditMode: 'confirm' | 'auto';
+  allowedCommands?: string[];
   maxLoops?: number;
   enabledTools: {
     list_directory: boolean;
@@ -121,6 +133,11 @@ export interface PendingApprovalCall {
   diff?: FileDiffData;
 }
 
+export interface TerminalInputHistoryItem {
+  input: string;
+  timestamp: string;
+}
+
 export interface TerminalSessionInfo {
   sessionId: string;
   command: string;
@@ -130,6 +147,7 @@ export interface TerminalSessionInfo {
   startedAt: string;
   workingDir: string;
   lineCount: number;
+  inputs?: TerminalInputHistoryItem[];
 }
 
 export interface TerminalSessionOutput {
@@ -139,4 +157,5 @@ export interface TerminalSessionOutput {
   exitCode: number | null;
   lines: string[];
   lineCount: number;
+  inputs?: TerminalInputHistoryItem[];
 }
