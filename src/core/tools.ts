@@ -532,6 +532,20 @@ export const BUILTIN_TOOLS: ToolDefinition[] = [
       required: ['relative_path', 'line', 'character'],
     },
   },
+  {
+    name: 'map_module_dependencies',
+    description: 'Developer Tool: Map import/export module dependencies and caller files for a TypeScript/JavaScript source file without reading raw code text.',
+    parameters: {
+      type: 'object',
+      properties: {
+        relative_path: {
+          type: 'string',
+          description: 'Relative path to the code file.',
+        },
+      },
+      required: ['relative_path'],
+    },
+  },
 ];
 
 export function getToolDefinitions(profile: ToolComplexityProfile = 'simple'): ToolDefinition[] {
@@ -1403,6 +1417,11 @@ export class ToolExecutor {
           return { error: 'Parameters relative_path, line, and character are required.' };
         }
         return this.lspManager.getHover(relative_path, line, character);
+      }
+
+      case 'map_module_dependencies': {
+        if (!args.relative_path) return { error: 'Parameter relative_path is required.' };
+        return this.lspManager.getModuleDependencies(args.relative_path);
       }
 
       default:

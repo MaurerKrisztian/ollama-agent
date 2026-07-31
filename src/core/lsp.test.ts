@@ -64,6 +64,19 @@ getUserName(currentUser);
     assert.ok(res.hover.contents.includes('getUserName'));
   });
 
+  await t.test('getModuleDependencies', async () => {
+    const depFile = path.join(tmpDir, 'consumer.ts');
+    await fs.writeFile(depFile, `import { User, getUserName } from './sample';\ngetUserName({ id: '2', name: 'Bob' });\n`, 'utf-8');
+
+    const res = lsp.getModuleDependencies('sample.ts');
+    assert.equal(res.success, true);
+    assert.ok(res.dependencies);
+    assert.equal(res.dependencies.file, 'sample.ts');
+    assert.ok(res.dependencies.exports.includes('User'));
+    assert.ok(res.dependencies.exports.includes('getUserName'));
+    assert.ok(res.dependencies.imported_by.includes('consumer.ts'));
+  });
+
   // Cleanup
   await fs.rm(tmpDir, { recursive: true, force: true });
 });

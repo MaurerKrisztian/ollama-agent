@@ -84,6 +84,18 @@ export interface LspHoverInformation {
   character: number;
 }
 
+export interface LspModuleDependencies {
+  file: string;
+  imports: Array<{
+    source: string;
+    resolved_path?: string;
+    specifiers: string[];
+    is_external: boolean;
+  }>;
+  exports: string[];
+  imported_by: string[];
+}
+
 export interface ContextPruningConfig {
   enabled: boolean;
   pruneSupersededReads: boolean;

@@ -44,6 +44,7 @@ export interface ToolSettings {
     find_symbol_references?: boolean;
     get_code_diagnostics?: boolean;
     get_type_hover?: boolean;
+    map_module_dependencies?: boolean;
   };
 }
 

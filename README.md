@@ -53,6 +53,7 @@ No cloud, no API keys, no data leaving your machine.
 | | `find_symbol_references` | Locate all occurrences and usage locations of a symbol across workspace files |
 | | `get_code_diagnostics` | Fetch compiler errors, warnings, and type diagnostics for a file or workspace |
 | | `get_type_hover` | Inspect type signatures, return types, and docstrings hover info for a symbol |
+| | `map_module_dependencies` | Map import/export module dependencies and caller files without reading raw code text |
 | 📁 **File System Tools** | `list_directory` | List files and subdirectories in a target directory |
 | | `read_file` | Read the raw contents of any file in the workspace |
 | | `edit_file` | Partial text replacement in existing files |

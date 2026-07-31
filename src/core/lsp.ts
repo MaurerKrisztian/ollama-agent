@@ -6,6 +6,7 @@ import {
   LspLocation,
   LspDiagnosticItem,
   LspHoverInformation,
+  LspModuleDependencies,
 } from './types.js';
 
 export class LspManager {
@@ -384,6 +385,124 @@ export class LspManager {
           contents,
           line,
           character,
+        },
+      };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public getModuleDependencies(filePath: string): { success: boolean; dependencies?: LspModuleDependencies; error?: string } {
+    const absPath = this.resolvePath(filePath);
+    if (!fs.existsSync(absPath)) return { success: false, error: `File not found: ${filePath}` };
+
+    try {
+      const code = fs.readFileSync(absPath, 'utf-8');
+      const sourceFile = ts.createSourceFile(absPath, code, ts.ScriptTarget.Latest, true);
+
+      const imports: Array<{ source: string; resolved_path?: string; specifiers: string[]; is_external: boolean }> = [];
+      const exports: string[] = [];
+
+      sourceFile.statements.forEach((stmt) => {
+        if (ts.isImportDeclaration(stmt)) {
+          const moduleSpecifier = (stmt.moduleSpecifier as ts.StringLiteral).text;
+          const isExternal = !moduleSpecifier.startsWith('.') && !moduleSpecifier.startsWith('/');
+          const specifiers: string[] = [];
+
+          if (stmt.importClause) {
+            if (stmt.importClause.name) {
+              specifiers.push(stmt.importClause.name.text);
+            }
+            if (stmt.importClause.namedBindings) {
+              if (ts.isNamespaceImport(stmt.importClause.namedBindings)) {
+                specifiers.push(`* as ${stmt.importClause.namedBindings.name.text}`);
+              } else if (ts.isNamedImports(stmt.importClause.namedBindings)) {
+                stmt.importClause.namedBindings.elements.forEach((elem) => {
+                  specifiers.push(elem.name.text);
+                });
+              }
+            }
+          }
+
+          let resolvedPath: string | undefined = undefined;
+          if (!isExternal) {
+            const dir = path.dirname(absPath);
+            const candidate = path.resolve(dir, moduleSpecifier);
+            if (fs.existsSync(candidate)) {
+              resolvedPath = path.relative(this.workingDir, candidate);
+            } else if (fs.existsSync(`${candidate}.ts`)) {
+              resolvedPath = path.relative(this.workingDir, `${candidate}.ts`);
+            } else if (fs.existsSync(`${candidate}.tsx`)) {
+              resolvedPath = path.relative(this.workingDir, `${candidate}.tsx`);
+            } else if (fs.existsSync(`${candidate}.js`)) {
+              resolvedPath = path.relative(this.workingDir, `${candidate}.js`);
+            }
+          }
+
+          imports.push({
+            source: moduleSpecifier,
+            resolved_path: resolvedPath ? resolvedPath.replaceAll('\\', '/') : undefined,
+            specifiers,
+            is_external: isExternal,
+          });
+        } else if (ts.isExportDeclaration(stmt)) {
+          if (stmt.exportClause && ts.isNamedExports(stmt.exportClause)) {
+            stmt.exportClause.elements.forEach((elem) => {
+              exports.push(elem.name.text);
+            });
+          }
+        } else if (
+          (ts.isFunctionDeclaration(stmt) ||
+            ts.isClassDeclaration(stmt) ||
+            ts.isInterfaceDeclaration(stmt) ||
+            ts.isTypeAliasDeclaration(stmt) ||
+            ts.isEnumDeclaration(stmt)) &&
+          stmt.modifiers?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword)
+        ) {
+          if (stmt.name) exports.push(stmt.name.text);
+        } else if (
+          ts.isVariableStatement(stmt) &&
+          stmt.modifiers?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword)
+        ) {
+          stmt.declarationList.declarations.forEach((decl) => {
+            if (ts.isIdentifier(decl.name)) exports.push(decl.name.text);
+          });
+        }
+      });
+
+      const importedBy: string[] = [];
+      const relativeTarget = path.relative(this.workingDir, absPath).replaceAll('\\', '/');
+      const targetBase = path.basename(relativeTarget, path.extname(relativeTarget));
+
+      const scanDir = (dir: string, depth = 0) => {
+        if (depth > 5) return;
+        try {
+          const items = fs.readdirSync(dir, { withFileTypes: true });
+          for (const item of items) {
+            if (item.name.startsWith('.') || item.name === 'node_modules' || item.name === 'dist') continue;
+            const full = path.join(dir, item.name);
+            if (item.isFile() && /\.(ts|tsx|js|jsx)$/.test(item.name) && full !== absPath) {
+              try {
+                const c = fs.readFileSync(full, 'utf-8');
+                if (c.includes(targetBase) || c.includes(relativeTarget)) {
+                  importedBy.push(path.relative(this.workingDir, full).replaceAll('\\', '/'));
+                }
+              } catch (_) {}
+            } else if (item.isDirectory()) {
+              scanDir(full, depth + 1);
+            }
+          }
+        } catch (_) {}
+      };
+      scanDir(this.workingDir);
+
+      return {
+        success: true,
+        dependencies: {
+          file: relativeTarget,
+          imports,
+          exports,
+          imported_by: importedBy,
         },
       };
     } catch (err: any) {

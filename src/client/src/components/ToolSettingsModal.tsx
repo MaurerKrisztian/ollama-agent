@@ -83,6 +83,10 @@ export const TOOL_DESCRIPTIONS: Record<string, { description: string; parameters
     description: 'Developer Tool: Get type hover information, function signature, and docstrings at a specific file & position.',
     parameters: { relative_path: 'string', line: 'number', character: 'number' },
   },
+  map_module_dependencies: {
+    description: 'Developer Tool: Map import/export module dependencies and caller files for a source file without reading raw code text.',
+    parameters: { relative_path: 'string' },
+  },
 };
 
 export function getDynamicToolInfo(toolName: string, profile: ToolComplexityProfile = 'simple') {
@@ -721,6 +725,7 @@ export const ToolSettingsModal: React.FC<ToolSettingsModalProps> = ({
                   'find_symbol_references',
                   'get_code_diagnostics',
                   'get_type_hover',
+                  'map_module_dependencies',
                 ] as Array<keyof ToolSettings['enabledTools']>,
               },
               {
