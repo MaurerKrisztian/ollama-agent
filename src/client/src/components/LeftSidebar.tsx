@@ -13,6 +13,7 @@ import {
   Cpu,
   Layers,
   Terminal,
+  Brain,
 } from 'lucide-react';
 import { AgentConfig, SystemMetrics } from '../types';
 
@@ -29,6 +30,7 @@ interface LeftSidebarProps {
   onOpenWorkingDirPicker: () => void;
   onToggleWorkingDirInfo: (enabled: boolean) => void;
   onChangeTemperature: (temp: number) => void;
+  onToggleThinking?: (enabled: boolean) => void;
   onOpenModelDetails: () => void;
   systemMetrics?: SystemMetrics | null;
   activeTerminalCount?: number;
@@ -48,6 +50,7 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
   onOpenWorkingDirPicker,
   onToggleWorkingDirInfo,
   onChangeTemperature,
+  onToggleThinking,
   onOpenModelDetails,
   systemMetrics,
   activeTerminalCount = 0,

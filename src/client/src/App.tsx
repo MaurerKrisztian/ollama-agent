@@ -55,11 +55,14 @@ export const App: React.FC = () => {
   const [modelDetailsModalOpen, setModelDetailsModalOpen] = useState(false);
 
   const [streamingText, setStreamingText] = useState('');
+  const [streamingThinking, setStreamingThinking] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [modelLoadElapsed, setModelLoadElapsed] = useState(0);
   const [generationStatus, setGenerationStatus] =
     useState<'idle' | 'generating' | 'completed' | 'cancelled' | 'error'>('idle');
   const [pendingApprovalCall, setPendingApprovalCall] = useState<PendingApprovalCall | null>(null);
+  const [isSubmittingToolApproval, setIsSubmittingToolApproval] = useState(false);
+  const [activeToolCall, setActiveToolCall] = useState<{ name: string; args?: any } | null>(null);
   const [systemMetrics, setSystemMetrics] = useState<SystemMetrics | null>(null);
   const [terminalSessions, setTerminalSessions] = useState<TerminalSessionInfo[]>([]);
   const [terminalSessionsModalOpen, setTerminalSessionsModalOpen] = useState(false);
@@ -401,7 +404,10 @@ export const App: React.FC = () => {
 
   const handleUpdateToolSettings = async (newSettings: ToolSettings) => {
     setToolSettings(newSettings);
-    // Sync approval modes & maxLoops to server
+    if (newSettings.enableThinking !== undefined) {
+      setConfig((prev) => ({ ...prev, enableThinking: newSettings.enableThinking }));
+    }
+    // Sync approval modes & maxLoops & thinking to server
     await fetch('/api/chat/tool-settings', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -410,38 +416,78 @@ export const App: React.FC = () => {
         fileEditMode: newSettings.fileEditMode,
         allowedCommands: newSettings.allowedCommands,
         maxLoops: newSettings.maxLoops,
+        enableThinking: newSettings.enableThinking,
       }),
     });
   };
 
-  const handleApproveToolCall = async () => {
-    setPendingApprovalCall(null);
-    await fetch('/api/chat/tool-approval', {
+  const handleToggleThinking = async (enabled: boolean) => {
+    setConfig((prev) => ({ ...prev, enableThinking: enabled }));
+    setToolSettings((prev) => ({ ...prev, enableThinking: enabled }));
+    await fetch('/api/chat/tool-settings', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ decision: 'approve' }),
+      body: JSON.stringify({ enableThinking: enabled }),
     });
+  };
+
+  const handleApproveToolCall = async () => {
+    if (isSubmittingToolApproval) return;
+    setIsSubmittingToolApproval(true);
+    try {
+      const response = await fetch('/api/chat/tool-approval', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ decision: 'approve' }),
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => null);
+        throw new Error(data?.error || `Server response error ${response.status}`);
+      }
+      setPendingApprovalCall(null);
+    } catch (err: any) {
+      alert(`Failed to approve tool call: ${err.message}`);
+    } finally {
+      setIsSubmittingToolApproval(false);
+    }
   };
 
   const handleRejectToolCall = async (reason?: string) => {
-    setPendingApprovalCall(null);
-    await fetch('/api/chat/tool-approval', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ decision: 'reject', reason }),
-    });
+    if (isSubmittingToolApproval) return;
+    setIsSubmittingToolApproval(true);
+    try {
+      const response = await fetch('/api/chat/tool-approval', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ decision: 'reject', reason }),
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => null);
+        throw new Error(data?.error || `Server response error ${response.status}`);
+      }
+      setPendingApprovalCall(null);
+    } catch (err: any) {
+      alert(`Failed to reject tool call: ${err.message}`);
+    } finally {
+      setIsSubmittingToolApproval(false);
+    }
   };
 
-  const handleSendMessage = async (userPrompt: string, attachments: TextAttachment[] = []) => {
+  const handleSendMessage = async (
+    userPrompt: string,
+    attachments: TextAttachment[] = [],
+    imageAttachments: import('./types').ImageAttachment[] = []
+  ) => {
     setIsGenerating(true);
     setGenerationStatus('generating');
     setStreamingText('');
+    setStreamingThinking('');
 
     try {
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: userPrompt, attachments }),
+        body: JSON.stringify({ message: userPrompt, attachments, imageAttachments }),
       });
 
       if (!response.ok || !response.body) {
@@ -476,19 +522,35 @@ export const App: React.FC = () => {
               });
             } else if (eventType === 'chunk') {
               setStreamingText((prev) => prev + eventData.chunk);
+            } else if (eventType === 'thinking_chunk') {
+              setStreamingThinking((prev) => prev + eventData.chunk);
             } else if (eventType === 'context_update') {
               setContextInfo(eventData);
             } else if (eventType === 'tool_approval_required') {
               setPendingApprovalCall({ name: eventData.name, args: eventData.args, diff: eventData.diff });
             } else if (eventType === 'tool_start') {
               setPendingApprovalCall(null);
+              setActiveToolCall({ name: eventData.name, args: eventData.args });
+            } else if (eventType === 'tool_end') {
+              setActiveToolCall(null);
+              setPendingApprovalCall(null);
             } else if (eventType === 'done') {
+              setActiveToolCall(null);
+              setPendingApprovalCall(null);
               setStreamingText('');
+              setStreamingThinking('');
               setGenerationStatus('completed');
             } else if (eventType === 'cancelled') {
+              setActiveToolCall(null);
+              setPendingApprovalCall(null);
               setStreamingText('');
+              setStreamingThinking('');
               setGenerationStatus('cancelled');
             } else if (eventType === 'error') {
+              setActiveToolCall(null);
+              setPendingApprovalCall(null);
+              setStreamingText('');
+              setStreamingThinking('');
               setGenerationStatus('error');
               alert(`Error: ${eventData.error}`);
             }
@@ -496,11 +558,14 @@ export const App: React.FC = () => {
         }
       }
     } catch (err: any) {
+      setActiveToolCall(null);
       setGenerationStatus('error');
       alert(`Failed to send message: ${err.message}`);
     } finally {
       setIsGenerating(false);
       setStreamingText('');
+      setStreamingThinking('');
+      setActiveToolCall(null);
       const ctxRes = await fetch('/api/context');
       if (ctxRes.ok) {
         const data = await ctxRes.json();
@@ -521,6 +586,19 @@ export const App: React.FC = () => {
     }
   };
 
+  const activeModelObj = models.find((m) => m.name === config.model);
+  const supportsVision = Boolean(
+    config.model.toLowerCase().includes('vision') ||
+    config.model.toLowerCase().includes('llava') ||
+    config.model.toLowerCase().includes('bakllava') ||
+    config.model.toLowerCase().includes('minicpm-v') ||
+    config.model.toLowerCase().includes('gemma') ||
+    activeModelObj?.details?.family?.toLowerCase().includes('clip') ||
+    activeModelObj?.details?.family?.toLowerCase().includes('vision') ||
+    activeModelObj?.details?.family?.toLowerCase().includes('gemma') ||
+    activeModelObj?.details?.family?.toLowerCase().includes('llava')
+  );
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', width: '100vw', overflow: 'hidden' }}>
       <Header
@@ -537,6 +615,7 @@ export const App: React.FC = () => {
         onSelectModel={handleSelectModel}
         onChangeTemperature={handleChangeTemperature}
         onChangeContextWindow={handleChangeContextWindow}
+        onToggleThinking={handleToggleThinking}
         onNewChat={handleNewChat}
         onOpenSystemPrompt={() => setSystemPromptModalOpen(true)}
         onOpenToolSettings={() => setToolSettingsModalOpen(true)}
@@ -566,6 +645,7 @@ export const App: React.FC = () => {
           onOpenWorkingDirPicker={() => setDirectoryPickerOpen(true)}
           onToggleWorkingDirInfo={handleToggleWorkingDirInfo}
           onChangeTemperature={handleChangeTemperature}
+          onToggleThinking={handleToggleThinking}
           onOpenModelDetails={() => setModelDetailsModalOpen(true)}
           systemMetrics={systemMetrics}
           activeTerminalCount={terminalSessions.filter((s) => s.status === 'running').length}
@@ -575,11 +655,15 @@ export const App: React.FC = () => {
           <ChatWindow
             messages={messages}
             streamingText={streamingText}
+            streamingThinking={streamingThinking}
             isGenerating={isGenerating}
             isModelLoaded={isActiveModelLoaded}
             modelLoadElapsed={modelLoadElapsed}
             generationStatus={generationStatus}
             pendingApprovalCall={pendingApprovalCall}
+            isSubmittingToolApproval={isSubmittingToolApproval}
+            activeToolCall={activeToolCall}
+            supportsVision={supportsVision}
             onSendMessage={handleSendMessage}
             onCancelGeneration={handleCancelGeneration}
             onApproveToolCall={handleApproveToolCall}

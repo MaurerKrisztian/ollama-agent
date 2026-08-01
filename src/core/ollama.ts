@@ -5,6 +5,7 @@ export interface OllamaChatOptions {
   model: string;
   temperature?: number;
   contextWindow?: number;
+  enableThinking?: boolean;
   messages: Array<{
     role: string;
     content: string;
@@ -15,6 +16,7 @@ export interface OllamaChatOptions {
   }>;
   tools?: ToolDefinition[];
   onChunk?: (chunk: string) => void;
+  onThinkingChunk?: (thinkingChunk: string) => void;
   signal?: AbortSignal;
 }
 
@@ -246,6 +248,8 @@ export class OllamaClient {
 
   public async chatStream(options: OllamaChatOptions): Promise<{
     content: string;
+    thinking?: string;
+    thinkingTokens?: number;
     tool_calls?: Array<{ id: string; name: string; arguments: Record<string, any> }>;
   }> {
     const endpoint = `${options.host || this.host}/api/chat`;
@@ -260,6 +264,9 @@ export class OllamaClient {
         // leaving subsequent tool results disconnected from their requests.
         content: m.role === 'assistant' && hasToolCalls ? '' : m.content,
       };
+      if (m.images && Array.isArray(m.images) && m.images.length > 0) {
+        msgObj.images = m.images;
+      }
       if (m.role === 'tool' && m.name) {
         msgObj.tool_name = m.name;
       }
@@ -280,10 +287,17 @@ export class OllamaClient {
       stream: true,
     };
 
+    if (options.enableThinking !== undefined) {
+      requestBody.think = options.enableThinking;
+    }
+
     requestBody.options = {
       ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
       num_ctx: options.contextWindow ?? 16384,
     };
+    if (options.enableThinking !== undefined) {
+      requestBody.options.think = options.enableThinking;
+    }
 
     if (options.tools && options.tools.length > 0) {
       requestBody.tools = options.tools.map((t) => ({
@@ -315,6 +329,7 @@ export class OllamaClient {
     const reader = response.body.getReader();
     const decoder = new TextDecoder('utf-8');
     let fullContent = '';
+    let fullThinking = '';
     let toolCallsResult: Array<{ id: string; name: string; arguments: Record<string, any> }> | undefined;
     let buffer = '';
 
@@ -332,6 +347,14 @@ export class OllamaClient {
         try {
           const parsed = JSON.parse(trimmed);
           if (parsed.message) {
+            const thinkingChunk = parsed.message.thinking || parsed.message.reasoning_content || parsed.message.reasoning;
+            if (thinkingChunk) {
+              fullThinking += thinkingChunk;
+              if (options.onThinkingChunk) {
+                options.onThinkingChunk(thinkingChunk);
+              }
+            }
+
             if (parsed.message.content) {
               fullContent += parsed.message.content;
               if (options.onChunk) {
@@ -356,11 +379,25 @@ export class OllamaClient {
     if (buffer.trim()) {
       try {
         const parsed = JSON.parse(buffer.trim());
+        const thinkingChunk = parsed.message?.thinking || parsed.message?.reasoning_content || parsed.message?.reasoning;
+        if (thinkingChunk) {
+          fullThinking += thinkingChunk;
+          if (options.onThinkingChunk) options.onThinkingChunk(thinkingChunk);
+        }
         if (parsed.message?.content) {
           fullContent += parsed.message.content;
           if (options.onChunk) options.onChunk(parsed.message.content);
         }
       } catch (_) {}
+    }
+
+    // Extract inline <think>...</think> if present in fullContent
+    if (!fullThinking && fullContent.includes('<think>')) {
+      const thinkMatch = fullContent.match(/<think>([\s\S]*?)<\/think>/i);
+      if (thinkMatch) {
+        fullThinking = thinkMatch[1].trim();
+        fullContent = fullContent.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+      }
     }
 
     // Fallback: If no native tool_calls array was returned by Ollama, extract tool calls from text
@@ -372,8 +409,12 @@ export class OllamaClient {
       }
     }
 
+    const thinkingTokens = fullThinking ? Math.ceil(fullThinking.length / 4) : 0;
+
     return {
       content: fullContent,
+      thinking: fullThinking || undefined,
+      thinkingTokens: thinkingTokens || undefined,
       tool_calls: toolCallsResult,
     };
   }

@@ -1,5 +1,5 @@
 import React from 'react';
-import { X, ShieldAlert, Terminal, Edit3, Wrench, Check, RefreshCw, Cpu, RotateCcw, Info } from 'lucide-react';
+import { X, ShieldAlert, Terminal, Edit3, Wrench, Check, RefreshCw, Cpu, RotateCcw, Info, Brain } from 'lucide-react';
 import { ToolSettings, ToolComplexityProfile } from '../types';
 import { JsonEditor } from './JsonEditor';
 
@@ -700,6 +700,46 @@ export const ToolSettingsModal: React.FC<ToolSettingsModalProps> = ({
                 <span>Disable limit (Unlimited tool calls)</span>
               </label>
             </div>
+          </div>
+
+          {/* Section 3.5: Model Reasoning / Thinking */}
+          <div style={{ background: 'rgba(15, 23, 42, 0.6)', padding: '16px', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Brain size={18} color="#c084fc" />
+                <span style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--text-main)' }}>
+                  Model Reasoning & Thinking (`think`)
+                </span>
+              </div>
+              <span
+                style={{
+                  fontSize: '0.8rem',
+                  fontWeight: 700,
+                  fontFamily: 'var(--font-code)',
+                  color: settings.enableThinking !== false ? '#c084fc' : 'var(--text-muted)',
+                  background: settings.enableThinking !== false ? 'rgba(168, 85, 247, 0.15)' : 'rgba(15, 23, 42, 0.4)',
+                  padding: '2px 8px',
+                  borderRadius: '6px',
+                  border: `1px solid ${settings.enableThinking !== false ? 'rgba(168, 85, 247, 0.3)' : 'var(--border-color)'}`,
+                }}
+              >
+                {settings.enableThinking !== false ? 'Enabled' : 'Disabled'}
+              </span>
+            </div>
+            <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', lineHeight: 1.5, marginBottom: '12px' }}>
+              Enables reasoning/thinking mode for supported Ollama models (e.g. DeepSeek R1, Qwen 2.5/3.5). Thinking steps will be streamed and displayed in chat as collapsible thinking cards.
+            </p>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '0.825rem', color: 'var(--text-main)', fontWeight: 500 }}>
+              <input
+                type="checkbox"
+                checked={settings.enableThinking !== false}
+                onChange={(e) => {
+                  onUpdateSettings({ ...settings, enableThinking: e.target.checked });
+                }}
+                style={{ accentColor: '#c084fc', cursor: 'pointer' }}
+              />
+              <span>Enable Model Thinking / Reasoning</span>
+            </label>
           </div>
 
           {/* Section 4: Categorized Toolset Controls */}

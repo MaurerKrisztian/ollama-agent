@@ -12,6 +12,7 @@ import {
   MessageSquare,
   Zap,
   FolderOpen,
+  Brain,
 } from 'lucide-react';
 import { AgentConfig, ContextInfo, OllamaModelInfo, OllamaRunningModelInfo, SystemMetrics } from '../types';
 
@@ -29,6 +30,7 @@ interface HeaderProps {
   onSelectModel: (model: string) => void;
   onChangeTemperature: (temp: number) => void;
   onChangeContextWindow?: (ctx: number) => void;
+  onToggleThinking?: (enabled: boolean) => void;
   onNewChat: () => void;
   onOpenSystemPrompt: () => void;
   onOpenToolSettings: () => void;
@@ -58,6 +60,7 @@ export const Header: React.FC<HeaderProps> = ({
   onSelectModel,
   onChangeTemperature,
   onChangeContextWindow,
+  onToggleThinking,
   onNewChat,
   onOpenSystemPrompt,
   onOpenToolSettings,
@@ -249,6 +252,32 @@ export const Header: React.FC<HeaderProps> = ({
             <span className="header-btn-text">Inspect Specs</span>
           </button>
         </div>
+
+        {/* Thinking Toggle */}
+        {onToggleThinking && (
+          <button
+            type="button"
+            onClick={() => onToggleThinking(config.enableThinking === false)}
+            title={config.enableThinking !== false ? "Disable Model Reasoning / Thinking" : "Enable Model Reasoning / Thinking"}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '6px 12px',
+              borderRadius: '8px',
+              border: config.enableThinking !== false ? '1px solid rgba(168, 85, 247, 0.5)' : '1px solid var(--border-color)',
+              background: config.enableThinking !== false ? 'rgba(168, 85, 247, 0.15)' : 'rgba(15, 23, 42, 0.6)',
+              color: config.enableThinking !== false ? '#c084fc' : 'var(--text-muted)',
+              fontSize: '0.8rem',
+              fontWeight: 600,
+              cursor: 'pointer',
+              transition: 'all 0.15s ease',
+            }}
+          >
+            <Brain size={15} color={config.enableThinking !== false ? '#c084fc' : 'var(--text-muted)'} />
+            <span>Thinking: {config.enableThinking !== false ? 'ON' : 'OFF'}</span>
+          </button>
+        )}
 
         {/* Context Window Selector */}
         {onChangeContextWindow && (

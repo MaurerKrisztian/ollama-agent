@@ -20,23 +20,31 @@ function escapeHtml(str: string): string {
 
 function colorizeJson(jsonStr: string): string {
   if (!jsonStr) return '';
-  const escaped = escapeHtml(jsonStr);
+  // Completely strip base64 image content before HTML escaping or tokenizing to guarantee zero V8 regex stack overflow
+  let cleaned = jsonStr;
+  if (cleaned.length > 50000) {
+    cleaned = cleaned.replace(/"data:image\/[a-zA-Z0-9\/+;=]+;base64,[^"]+"/gi, '"[base64 image data truncated for preview]"');
+    cleaned = cleaned.replace(/"[A-Za-z0-9+/=]{1000,}"/g, '"[raw base64 image data truncated for preview]"');
+  }
+
+  const escaped = escapeHtml(cleaned);
+  // Safe simple regex without nested wildcard quantifiers
   return escaped.replace(
-    /("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g,
-    (match) => {
-      let cls = 'json-number';
-      if (/^"/.test(match)) {
-        if (/:$/.test(match)) {
-          cls = 'json-key';
-        } else {
-          cls = 'json-string';
-        }
-      } else if (/true|false/.test(match)) {
-        cls = 'json-boolean';
-      } else if (/null/.test(match)) {
-        cls = 'json-null';
+    /"([^"\\]|\\.)*"(?=\s*:)|"([^"\\]|\\.)*"|\b(true|false|null)\b|-?\d+(?:\.\d+)?/g,
+    (match, p1) => {
+      if (p1 !== undefined) {
+        return `<span class="json-key">${match}</span>`;
       }
-      return `<span class="${cls}">${match}</span>`;
+      if (/^"/.test(match)) {
+        return `<span class="json-string">${match}</span>`;
+      }
+      if (/true|false/.test(match)) {
+        return `<span class="json-boolean">${match}</span>`;
+      }
+      if (/null/.test(match)) {
+        return `<span class="json-null">${match}</span>`;
+      }
+      return `<span class="json-number">${match}</span>`;
     }
   );
 }

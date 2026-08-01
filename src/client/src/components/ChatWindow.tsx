@@ -1,8 +1,8 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Send, Square, Wrench, CheckCircle2, XCircle, ShieldAlert, User, Bot, Loader2, FileText, Folder, Terminal, Edit3, Search, PlusCircle, Sparkles, Code2, Eye, ChevronDown, X, Globe, ExternalLink, Layers, RotateCcw, Copy, Check, Scissors } from 'lucide-react';
-import { ChatMessage, FileDiffData, PendingApprovalCall, TextAttachment } from '../types';
+import { Send, Square, Wrench, CheckCircle2, XCircle, ShieldAlert, User, Bot, Loader2, FileText, Folder, Terminal, Edit3, Search, PlusCircle, Sparkles, Code2, Eye, ChevronDown, ChevronRight, Brain, X, Globe, ExternalLink, Layers, RotateCcw, Copy, Check, Scissors, Image as ImageIcon } from 'lucide-react';
+import { ChatMessage, FileDiffData, ImageAttachment, PendingApprovalCall, TextAttachment } from '../types';
 
 const compactValue = (value: unknown, maxLength = 64): string => {
   if (value === undefined || value === null || value === '') return '';
@@ -821,45 +821,137 @@ const MarkdownContent: React.FC<{ content: string; streaming?: boolean }> = ({
   </div>
 );
 
-const AssistantResponse: React.FC<{ content: string }> = ({ content }) => {
+const ThinkingBlock: React.FC<{ thinking: string; thinkingTokens?: number; isStreaming?: boolean }> = ({
+  thinking,
+  thinkingTokens,
+  isStreaming = false,
+}) => {
+  const [isExpanded, setIsExpanded] = useState(isStreaming);
+  const estimatedTokens = thinkingTokens || Math.ceil(thinking.length / 4);
+
+  return (
+    <div
+      style={{
+        marginBottom: '10px',
+        borderRadius: '10px',
+        border: '1px solid rgba(168, 85, 247, 0.25)',
+        background: 'rgba(147, 51, 234, 0.06)',
+        overflow: 'hidden',
+        transition: 'all 0.2s ease',
+      }}
+    >
+      <button
+        type="button"
+        onClick={() => setIsExpanded((prev) => !prev)}
+        style={{
+          width: '100%',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '8px 12px',
+          background: 'rgba(147, 51, 234, 0.1)',
+          border: 'none',
+          color: '#c084fc',
+          fontSize: '0.8rem',
+          fontWeight: 600,
+          cursor: 'pointer',
+          textAlign: 'left',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <Brain size={15} color="#c084fc" />
+          <span>{isStreaming ? 'Thinking...' : 'Thinking'}</span>
+          <span
+            style={{
+              fontSize: '0.725rem',
+              fontWeight: 500,
+              color: 'rgba(216, 180, 254, 0.85)',
+              background: 'rgba(168, 85, 247, 0.2)',
+              padding: '1px 6px',
+              borderRadius: '6px',
+              fontFamily: 'var(--font-code)',
+            }}
+          >
+            {estimatedTokens} thinking tokens
+          </span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: 'var(--text-dim)', fontSize: '0.75rem' }}>
+          <span>{isExpanded ? 'Hide' : 'Show'}</span>
+          {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+        </div>
+      </button>
+
+      {isExpanded && (
+        <div
+          style={{
+            padding: '10px 14px',
+            borderTop: '1px solid rgba(168, 85, 247, 0.15)',
+            fontSize: '0.825rem',
+            lineHeight: 1.55,
+            color: '#cbd5e1',
+            fontFamily: 'var(--font-code)',
+            whiteSpace: 'pre-wrap',
+            maxHeight: '350px',
+            overflowY: 'auto',
+          }}
+        >
+          {thinking}
+        </div>
+      )}
+    </div>
+  );
+};
+
+const AssistantResponse: React.FC<{ content: string; thinking?: string; thinkingTokens?: number }> = ({
+  content,
+  thinking,
+  thinkingTokens,
+}) => {
   const [showRaw, setShowRaw] = useState(false);
-  const isMaxLoops = content.includes('Max tool call iterations limit reached');
+  const isMaxLoops = content?.includes('Max tool call iterations limit reached');
 
   return (
     <div className="glass-panel assistant-response" style={{ padding: '12px 18px 16px', borderRadius: '16px 16px 16px 4px', fontSize: '0.925rem', lineHeight: 1.6 }}>
+      {thinking && (
+        <ThinkingBlock thinking={thinking} thinkingTokens={thinkingTokens} />
+      )}
       {isMaxLoops && (
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 12px', background: 'rgba(245, 158, 11, 0.15)', border: '1px solid rgba(245, 158, 11, 0.3)', borderRadius: '8px', color: 'var(--accent-amber)', fontSize: '0.825rem', fontWeight: 600, marginBottom: '10px' }}>
           <ShieldAlert size={16} style={{ flexShrink: 0 }} />
           <span>Max Tool Call Iterations Limit Reached</span>
         </div>
       )}
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '6px' }}>
-        <button
-          type="button"
-          onClick={() => setShowRaw((current) => !current)}
-          title={showRaw ? 'Show rendered Markdown' : 'Show raw response'}
-          aria-label={showRaw ? 'Show rendered Markdown' : 'Show raw response'}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '5px',
-            padding: '4px 8px',
-            borderRadius: '6px',
-            border: '1px solid var(--border-color)',
-            background: 'rgba(15, 23, 42, 0.45)',
-            color: 'var(--text-muted)',
-            cursor: 'pointer',
-            fontSize: '0.72rem',
-          }}
-        >
-          {showRaw ? <Eye size={13} /> : <Code2 size={13} />}
-          {showRaw ? 'Rendered' : 'Raw'}
-        </button>
-      </div>
-      {showRaw ? (
-        <pre className="assistant-response-raw">{content}</pre>
-      ) : (
-        <MarkdownContent content={content} />
+      {content && (
+        <>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '6px' }}>
+            <button
+              type="button"
+              onClick={() => setShowRaw((current) => !current)}
+              title={showRaw ? 'Show rendered Markdown' : 'Show raw response'}
+              aria-label={showRaw ? 'Show rendered Markdown' : 'Show raw response'}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '5px',
+                padding: '4px 8px',
+                borderRadius: '6px',
+                border: '1px solid var(--border-color)',
+                background: 'rgba(15, 23, 42, 0.45)',
+                color: 'var(--text-muted)',
+                cursor: 'pointer',
+                fontSize: '0.72rem',
+              }}
+            >
+              {showRaw ? <Eye size={13} /> : <Code2 size={13} />}
+              {showRaw ? 'Rendered' : 'Raw'}
+            </button>
+          </div>
+          {showRaw ? (
+            <pre className="assistant-response-raw">{content}</pre>
+          ) : (
+            <MarkdownContent content={content} />
+          )}
+        </>
       )}
     </div>
   );
@@ -902,12 +994,16 @@ const FileDiff: React.FC<{ diff: FileDiffData }> = ({ diff }) => (
 interface ChatWindowProps {
   messages: ChatMessage[];
   streamingText: string;
+  streamingThinking?: string;
   isGenerating: boolean;
   isModelLoaded: boolean;
   modelLoadElapsed: number;
   generationStatus: 'idle' | 'generating' | 'completed' | 'cancelled' | 'error';
   pendingApprovalCall?: PendingApprovalCall | null;
-  onSendMessage: (msg: string, attachments?: TextAttachment[]) => void;
+  isSubmittingToolApproval?: boolean;
+  activeToolCall?: { name: string; args?: any } | null;
+  supportsVision?: boolean;
+  onSendMessage: (msg: string, attachments?: TextAttachment[], imageAttachments?: import('../types').ImageAttachment[]) => void;
   onCancelGeneration: () => void;
   onApproveToolCall?: () => void;
   onRejectToolCall?: (reason?: string) => void;
@@ -994,11 +1090,15 @@ const SLASH_COMMANDS: SlashCommandItem[] = [
 export const ChatWindow: React.FC<ChatWindowProps> = ({
   messages,
   streamingText,
+  streamingThinking = '',
   isGenerating,
   isModelLoaded,
   modelLoadElapsed,
   generationStatus,
   pendingApprovalCall,
+  isSubmittingToolApproval = false,
+  activeToolCall,
+  supportsVision,
   onSendMessage,
   onCancelGeneration,
   onApproveToolCall,
@@ -1011,6 +1111,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
 }) => {
   const [input, setInput] = useState('');
   const [attachments, setAttachments] = useState<TextAttachment[]>([]);
+  const [imageAttachments, setImageAttachments] = useState<ImageAttachment[]>([]);
   const [attachmentError, setAttachmentError] = useState('');
   const [viewedAttachment, setViewedAttachment] = useState<TextAttachment | null>(null);
   const [rejectionReason, setRejectionReason] = useState('');
@@ -1019,6 +1120,32 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   const [isDragging, setIsDragging] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const dragDepth = useRef(0);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const [previewImage, setPreviewImage] = useState<{ src: string; alt?: string } | null>(null);
+
+  useEffect(() => {
+    const handlePaste = (e: ClipboardEvent) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+
+      const files: File[] = [];
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].type.indexOf('image') !== -1) {
+          const file = items[i].getAsFile();
+          if (file) files.push(file);
+        }
+      }
+
+      if (files.length > 0) {
+        e.preventDefault();
+        void addImageFiles(files);
+      }
+    };
+
+    window.addEventListener('paste', handlePaste);
+    return () => window.removeEventListener('paste', handlePaste);
+  }, [supportsVision, imageAttachments.length]);
 
   const filteredCommands = useMemo(() => {
     if (!input.startsWith('/')) return [];
@@ -1065,11 +1192,95 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
     }
   };
 
+  const resizeImageIfNeeded = (file: File, maxDimension = 1560, quality = 0.85): Promise<{ base64: string; size: number }> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          let width = img.width;
+          let height = img.height;
+
+          if (width > maxDimension || height > maxDimension) {
+            if (width > height) {
+              height = Math.round((height * maxDimension) / width);
+              width = maxDimension;
+            } else {
+              width = Math.round((width * maxDimension) / height);
+              height = maxDimension;
+            }
+          }
+
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            resolve({ base64: e.target?.result as string, size: file.size });
+            return;
+          }
+
+          ctx.drawImage(img, 0, 0, width, height);
+
+          // Use JPEG for large photos or PNG if original was transparent
+          const mimeType = file.type === 'image/png' ? 'image/png' : 'image/jpeg';
+          const dataUrl = canvas.toDataURL(mimeType, quality);
+          const base64Clean = dataUrl.split(',')[1] || '';
+          const sizeInBytes = Math.round((base64Clean.length * 3) / 4);
+
+          resolve({ base64: dataUrl, size: sizeInBytes });
+        };
+        img.onerror = () => reject(new Error(`Failed to load image ${file.name}`));
+        img.src = e.target?.result as string;
+      };
+      reader.onerror = () => reject(new Error(`Failed to read file ${file.name}`));
+      reader.readAsDataURL(file);
+    });
+  };
+
+  const addImageFiles = async (files: File[]) => {
+    setAttachmentError('');
+    const imageFiles = files.filter((f) => f.type.startsWith('image/'));
+    if (imageFiles.length === 0) return;
+
+    if (!supportsVision) {
+      setAttachmentError('The currently selected model does not support image input.');
+      return;
+    }
+
+    const remainingSlots = 5 - imageAttachments.length;
+    const selected = imageFiles.slice(0, remainingSlots);
+    if (imageFiles.length > remainingSlots) {
+      setAttachmentError('You can attach at most 5 images.');
+    }
+
+    const accepted: ImageAttachment[] = [];
+    for (const file of selected) {
+      try {
+        const { base64, size } = await resizeImageIfNeeded(file, 1560, 0.85);
+        accepted.push({ name: file.name, type: file.type, base64, size });
+      } catch (_) {
+        setAttachmentError(`Failed to process ${file.name}`);
+      }
+    }
+    setImageAttachments((current) => [...current, ...accepted]);
+  };
+
   const addFiles = async (files: File[]) => {
     setAttachmentError('');
+    const textFiles = files.filter((f) => !f.type.startsWith('image/'));
+    const imageFiles = files.filter((f) => f.type.startsWith('image/'));
+
+    if (imageFiles.length > 0) {
+      await addImageFiles(imageFiles);
+    }
+
+    if (textFiles.length === 0) return;
+
     const remainingSlots = 10 - attachments.length;
-    const selected = files.slice(0, remainingSlots);
-    if (files.length > remainingSlots) setAttachmentError('You can attach at most 10 files.');
+    const selected = textFiles.slice(0, remainingSlots);
+    if (textFiles.length > remainingSlots) setAttachmentError('You can attach at most 10 text files.');
 
     const accepted: TextAttachment[] = [];
     for (const file of selected) {
@@ -1108,9 +1319,10 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!input.trim() || isGenerating) return;
-    onSendMessage(input.trim(), attachments);
+    onSendMessage(input.trim(), attachments, imageAttachments);
     setInput('');
     setAttachments([]);
+    setImageAttachments([]);
     setAttachmentError('');
   };
 
@@ -1221,6 +1433,27 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px', maxWidth: '75%' }}>
                   <div style={{ background: 'var(--accent-gradient)', color: '#fff', padding: '12px 16px', borderRadius: '16px 16px 4px 16px', fontSize: '0.925rem', lineHeight: 1.5, boxShadow: '0 4px 12px rgba(99, 102, 241, 0.25)', width: '100%' }}>
                     <div style={{ whiteSpace: 'pre-wrap' }}>{msg.displayContent ?? msg.content}</div>
+                    {msg.imageAttachments && msg.imageAttachments.length > 0 && (
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '10px' }}>
+                        {msg.imageAttachments.map((img, idx) => (
+                          <div key={idx} onClick={() => setPreviewImage({ src: img.base64, alt: img.name })} style={{ borderRadius: '8px', overflow: 'hidden', border: '1px solid rgba(255, 255, 255, 0.2)', maxHeight: '160px', cursor: 'zoom-in' }} title="Click to enlarge">
+                            <img src={img.base64} alt={img.name} style={{ maxHeight: '160px', maxWidth: '240px', objectFit: 'cover', display: 'block' }} />
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {!msg.imageAttachments && msg.images && msg.images.length > 0 && (
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '10px' }}>
+                        {msg.images.map((imgBase64, idx) => {
+                          const src = imgBase64.startsWith('data:') ? imgBase64 : `data:image/png;base64,${imgBase64}`;
+                          return (
+                            <div key={idx} onClick={() => setPreviewImage({ src, alt: `Attached Image ${idx + 1}` })} style={{ borderRadius: '8px', overflow: 'hidden', border: '1px solid rgba(255, 255, 255, 0.2)', maxHeight: '160px', cursor: 'zoom-in' }} title="Click to enlarge">
+                              <img src={src} alt={`Attached Image ${idx + 1}`} style={{ maxHeight: '160px', maxWidth: '240px', objectFit: 'cover', display: 'block' }} />
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                     {msg.attachments && msg.attachments.length > 0 && (
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '9px' }}>
                         {msg.attachments.map((file, index) => (
@@ -1282,8 +1515,8 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                     </div>
                   )}
 
-                  {msg.content && (
-                    <AssistantResponse content={msg.content} />
+                  {(msg.content || msg.thinking) && (
+                    <AssistantResponse content={msg.content} thinking={msg.thinking} thinkingTokens={msg.thinkingTokens} />
                   )}
                 </div>
               </div>
@@ -1301,18 +1534,80 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
         })}
 
         {/* Streaming Assistant Card */}
-        {streamingText && (
+        {(streamingText || streamingThinking) && (
           <div className="animate-fade-in" style={{ display: 'flex', gap: '12px', justifyContent: 'flex-start' }}>
             <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: 'var(--accent-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
               <Bot size={18} color="#fff" />
             </div>
             <div className="glass-panel" style={{ maxWidth: '80%', padding: '14px 18px', borderRadius: '16px 16px 16px 4px', fontSize: '0.925rem', lineHeight: 1.6 }}>
-              <MarkdownContent content={streamingText} streaming />
+              {streamingThinking && (
+                <ThinkingBlock thinking={streamingThinking} isStreaming={!streamingText} />
+              )}
+              {streamingText && (
+                <MarkdownContent content={streamingText} streaming />
+              )}
             </div>
           </div>
         )}
 
-        {isGenerating && !streamingText && !pendingApprovalCall && (
+        {/* Active Tool Execution Indicator */}
+        {isGenerating && activeToolCall && (
+          <div
+            className="glass-panel animate-fade-in"
+            style={{
+              display: 'flex',
+              gap: '12px',
+              alignItems: 'center',
+              marginLeft: '44px',
+              padding: '12px 18px',
+              borderRadius: '12px',
+              border: '1px solid rgba(99, 102, 241, 0.4)',
+              background: 'rgba(99, 102, 241, 0.1)',
+              color: 'var(--accent-primary)',
+              fontSize: '0.875rem',
+              boxShadow: '0 4px 12px rgba(99, 102, 241, 0.15)',
+            }}
+          >
+            <Loader2 size={18} className="spin" style={{ flexShrink: 0, color: 'var(--accent-primary)' }} />
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                <span style={{ fontWeight: 700, color: 'var(--text-main)' }}>⚙️ Executing Tool:</span>
+                <span
+                  style={{
+                    fontFamily: 'var(--font-code)',
+                    background: 'rgba(99, 102, 241, 0.25)',
+                    padding: '2px 8px',
+                    borderRadius: '6px',
+                    color: '#a5b4fc',
+                    fontSize: '0.825rem',
+                    fontWeight: 600,
+                  }}
+                >
+                  {activeToolCall.name}
+                </span>
+              </div>
+              {activeToolCall.args && Object.keys(activeToolCall.args).length > 0 && (
+                <div
+                  style={{
+                    fontSize: '0.775rem',
+                    color: 'var(--text-muted)',
+                    marginTop: '4px',
+                    fontFamily: 'var(--font-code)',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {activeToolCall.args.command
+                    ? `$ ${activeToolCall.args.command}`
+                    : activeToolCall.args.relative_path || activeToolCall.args.path || activeToolCall.args.query || activeToolCall.args.url || JSON.stringify(activeToolCall.args)}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {isGenerating && !activeToolCall && !streamingText && !pendingApprovalCall && (
           <div className="glass-panel animate-fade-in" style={{ display: 'flex', gap: '12px', alignItems: 'center', marginLeft: '44px', padding: '12px 18px', borderRadius: '12px', border: `1px solid ${isModelLoaded ? 'rgba(99, 102, 241, 0.3)' : 'rgba(245, 158, 11, 0.3)'}`, color: isModelLoaded ? 'var(--accent-primary)' : 'var(--accent-amber)', fontSize: '0.875rem' }}>
             <Loader2 size={18} className="spin" style={{ flexShrink: 0 }} />
             <div style={{ minWidth: 0, flex: 1 }}>
@@ -1389,6 +1684,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
             <div style={{ display: 'flex', gap: '12px', marginTop: '4px' }}>
               <button
                 onClick={onApproveToolCall}
+                disabled={isSubmittingToolApproval}
                 style={{
                   flex: 1,
                   display: 'flex',
@@ -1402,12 +1698,13 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                   borderRadius: '8px',
                   fontSize: '0.875rem',
                   fontWeight: 600,
-                  cursor: 'pointer',
+                  cursor: isSubmittingToolApproval ? 'wait' : 'pointer',
+                  opacity: isSubmittingToolApproval ? 0.65 : 1,
                   boxShadow: '0 4px 12px rgba(16, 185, 129, 0.3)',
                 }}
               >
-                <CheckCircle2 size={16} />
-                <span>Approve & Execute</span>
+                {isSubmittingToolApproval ? <Loader2 size={16} className="spin" /> : <CheckCircle2 size={16} />}
+                <span>{isSubmittingToolApproval ? 'Approving…' : 'Approve & Execute'}</span>
               </button>
 
               <button
@@ -1415,6 +1712,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                   onRejectToolCall?.(rejectionReason.trim() || undefined);
                   setRejectionReason('');
                 }}
+                disabled={isSubmittingToolApproval}
                 style={{
                   flex: 1,
                   display: 'flex',
@@ -1472,6 +1770,72 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
         </aside>
       )}
       </div>
+
+      {previewImage && (
+        <div
+          onClick={() => setPreviewImage(null)}
+          className="animate-fade-in"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 9999,
+            background: 'rgba(0, 0, 0, 0.85)',
+            backdropFilter: 'blur(8px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '24px',
+            cursor: 'zoom-out',
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              position: 'relative',
+              maxWidth: '90vw',
+              maxHeight: '90vh',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              cursor: 'default',
+            }}
+          >
+            <button
+              type="button"
+              onClick={() => setPreviewImage(null)}
+              style={{
+                position: 'absolute',
+                top: '-40px',
+                right: '0',
+                background: 'rgba(30, 41, 59, 0.8)',
+                border: '1px solid var(--border-color)',
+                borderRadius: '50%',
+                color: '#fff',
+                width: '32px',
+                height: '32px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+              }}
+            >
+              <X size={18} />
+            </button>
+            <img
+              src={previewImage.src}
+              alt={previewImage.alt || 'Enlarged Image'}
+              style={{
+                maxWidth: '90vw',
+                maxHeight: '85vh',
+                objectFit: 'contain',
+                borderRadius: '12px',
+                boxShadow: '0 20px 50px rgba(0, 0, 0, 0.8)',
+                border: '1px solid rgba(255, 255, 255, 0.1)',
+              }}
+            />
+          </div>
+        </div>
+      )}
 
       {/* Input Prompt Box */}
       <div style={{ padding: '14px 24px', background: 'rgba(15, 23, 42, 0.8)', borderTop: '1px solid var(--border-color)', zIndex: 5, display: 'flex', flexDirection: 'column', gap: '10px' }}>
@@ -1543,8 +1907,19 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
           </div>
         )}
 
-        {attachments.length > 0 && (
+        {(attachments.length > 0 || imageAttachments.length > 0) && (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '7px' }}>
+            {imageAttachments.map((img, index) => (
+              <span key={`${img.name}-${index}`} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '3px 5px 3px 8px', border: '1px solid var(--accent-primary)', borderRadius: '8px', color: 'var(--text-main)', background: 'rgba(99, 102, 241, 0.15)', fontSize: '0.76rem' }}>
+                <button type="button" onClick={() => setPreviewImage({ src: img.base64, alt: img.name })} title={`View ${img.name} in full size`} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '2px 0', border: 0, background: 'transparent', color: 'inherit', font: 'inherit', cursor: 'pointer' }}>
+                  <ImageIcon size={13} color="var(--accent-primary)" />
+                  <span style={{ maxWidth: '120px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{img.name}</span>
+                </button>
+                <button type="button" aria-label={`Remove ${img.name}`} onClick={() => setImageAttachments((current) => current.filter((_, itemIndex) => itemIndex !== index))} style={{ display: 'flex', padding: 0, border: 0, background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer' }}>
+                  <X size={13} />
+                </button>
+              </span>
+            ))}
             {attachments.map((file, index) => (
               <span key={`${file.name}-${index}`} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '3px 5px 3px 8px', border: '1px solid var(--border-color)', borderRadius: '8px', color: 'var(--text-muted)', background: 'rgba(30, 41, 59, 0.7)', fontSize: '0.76rem' }}>
                 <button type="button" onClick={() => setViewedAttachment(file)} title={`Open ${file.name}`} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '2px 0', border: 0, background: 'transparent', color: 'inherit', font: 'inherit', cursor: 'pointer' }}>
@@ -1617,8 +1992,44 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
           </div>
         )}
 
-        <form onSubmit={handleSubmit} style={{ display: 'flex', gap: '12px', alignItems: 'flex-end', background: 'rgba(30, 41, 59, 0.8)', padding: '8px 14px', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
+        <form onSubmit={handleSubmit} style={{ display: 'flex', gap: '10px', alignItems: 'flex-end', background: 'rgba(30, 41, 59, 0.8)', padding: '8px 14px', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
+          {supportsVision && (
+            <label
+              title="Upload image for vision model"
+              style={{
+                width: '36px',
+                height: '36px',
+                borderRadius: '8px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                background: 'rgba(255, 255, 255, 0.05)',
+                border: '1px solid var(--border-color)',
+                color: 'var(--accent-primary)',
+                cursor: isGenerating ? 'not-allowed' : 'pointer',
+                marginBottom: '2px',
+                transition: 'all 0.15s ease',
+              }}
+            >
+              <ImageIcon size={18} />
+              <input
+                type="file"
+                accept="image/*"
+                multiple
+                disabled={isGenerating}
+                onChange={(e) => {
+                  if (e.target.files) {
+                    void addImageFiles(Array.from(e.target.files));
+                    e.target.value = '';
+                  }
+                }}
+                style={{ display: 'none' }}
+              />
+            </label>
+          )}
+
           <textarea
+            ref={textareaRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => {
@@ -1645,23 +2056,26 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
               }
               handleKeyDown(e);
             }}
-            placeholder="Type a message, '/' for commands (/compact, /clear...), or drag & drop files..."
-            rows={2}
+            placeholder={supportsVision ? "Type a message, attach images, or drag & drop files..." : "Type a message, '/' for commands (/compact, /clear...), or drag & drop files..."}
+            rows={1}
             style={{
               flex: 1,
               background: 'transparent',
               border: 'none',
               color: 'var(--text-main)',
               fontSize: '0.925rem',
+              lineHeight: '1.4',
               resize: 'none',
               outline: 'none',
               fontFamily: 'var(--font-main)',
+              maxHeight: '200px',
+              overflowY: 'auto',
             }}
           />
           <button
             type={isGenerating ? 'button' : 'submit'}
             onClick={isGenerating ? onCancelGeneration : undefined}
-            disabled={!isGenerating && !input.trim()}
+            disabled={!isGenerating && !input.trim() && imageAttachments.length === 0}
             title={isGenerating ? 'Cancel generation' : 'Send message'}
             style={{
               width: '40px',
@@ -1669,7 +2083,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
               borderRadius: '10px',
               background: isGenerating
                 ? 'rgba(239, 68, 68, 0.85)'
-                : input.trim()
+                : (input.trim() || imageAttachments.length > 0)
                   ? 'var(--accent-gradient)'
                   : 'rgba(255, 255, 255, 0.05)',
               border: 'none',
@@ -1677,8 +2091,8 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              cursor: isGenerating || input.trim() ? 'pointer' : 'not-allowed',
-              opacity: isGenerating || input.trim() ? 1 : 0.4,
+              cursor: isGenerating || input.trim() || imageAttachments.length > 0 ? 'pointer' : 'not-allowed',
+              opacity: isGenerating || input.trim() || imageAttachments.length > 0 ? 1 : 0.4,
               transition: 'all 0.2s',
             }}
           >

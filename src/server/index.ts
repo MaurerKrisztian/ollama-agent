@@ -26,6 +26,7 @@ function getInitialPersistedConfig(): {
   allowedCommands: string[];
   terminalMode: 'confirm' | 'auto';
   fileEditMode: 'confirm' | 'auto';
+  enableThinking: boolean;
 } {
   let workingDir = process.cwd();
   let ollamaHost = process.env.OLLAMA_HOST || 'http://127.0.0.1:11434';
@@ -34,6 +35,7 @@ function getInitialPersistedConfig(): {
   let allowedCommands = [...DEFAULT_COMMAND_WHITELIST];
   let terminalMode: 'confirm' | 'auto' = 'confirm';
   let fileEditMode: 'confirm' | 'auto' = 'confirm';
+  let enableThinking = true;
 
   try {
     if (fsSync.existsSync(CONFIG_FILE_PATH)) {
@@ -60,10 +62,13 @@ function getInitialPersistedConfig(): {
       if (parsed.fileEditMode === 'confirm' || parsed.fileEditMode === 'auto') {
         fileEditMode = parsed.fileEditMode;
       }
+      if (typeof parsed.enableThinking === 'boolean') {
+        enableThinking = parsed.enableThinking;
+      }
     }
   } catch (_) {}
 
-  return { workingDir, ollamaHost, ollamaToken, model, allowedCommands, terminalMode, fileEditMode };
+  return { workingDir, ollamaHost, ollamaToken, model, allowedCommands, terminalMode, fileEditMode, enableThinking };
 }
 
 function savePersistedConfig(updatedConfig: Record<string, any>) {
@@ -78,7 +83,7 @@ function savePersistedConfig(updatedConfig: Record<string, any>) {
 }
 
 app.use(cors());
-app.use(express.json({ limit: '2mb' }));
+app.use(express.json({ limit: '25mb' }));
 
 const initialConfig = getInitialPersistedConfig();
 
@@ -88,6 +93,7 @@ const agent = new AgentEngine({
   ollamaHost: initialConfig.ollamaHost,
   ollamaToken: initialConfig.ollamaToken,
   workingDir: initialConfig.workingDir,
+  enableThinking: initialConfig.enableThinking,
 });
 
 // Auto-load MCP configuration if available
@@ -251,10 +257,15 @@ app.get('/api/system/metrics', async (_req, res) => {
 app.get('/api/models/show', async (req, res) => {
   try {
     const modelName = typeof req.query.name === 'string' ? req.query.name : agent.getConfig().model;
-    const details = await agent.getModelDetails(modelName);
-    res.json({ success: true, name: modelName, details });
+    try {
+      const details = await agent.getModelDetails(modelName);
+      return res.json({ success: true, name: modelName, details });
+    } catch (err: any) {
+      // If Ollama returns 404 (model not pulled or name missing tag), return success: false with error string (200 status)
+      return res.json({ success: false, name: modelName, error: err.message });
+    }
   } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
+    res.json({ success: false, error: err.message });
   }
 });
 
@@ -614,9 +625,9 @@ app.post('/api/chat/tool-approval', (req, res) => {
   }
 });
 
-// POST /api/chat/tool-settings - Update tool approval preferences & max loops
+// POST /api/chat/tool-settings - Update tool approval preferences & max loops & thinking
 app.post('/api/chat/tool-settings', (req, res) => {
-  const { terminalMode, fileEditMode, allowedCommands, maxLoops } = req.body;
+  const { terminalMode, fileEditMode, allowedCommands, maxLoops, enableThinking } = req.body;
   if (terminalMode === 'confirm' || terminalMode === 'auto') {
     terminalRequireConfirm = terminalMode === 'confirm';
   }
@@ -629,11 +640,15 @@ app.post('/api/chat/tool-settings', (req, res) => {
   if (typeof maxLoops === 'number' && maxLoops >= 0 && maxLoops <= 50) {
     agent.updateConfig({ maxLoops });
   }
+  if (typeof enableThinking === 'boolean') {
+    agent.updateConfig({ enableThinking });
+  }
 
   savePersistedConfig({
     allowedCommands: allowedCommandsState,
     terminalMode: terminalRequireConfirm ? 'confirm' : 'auto',
     fileEditMode: fileEditRequireConfirm ? 'confirm' : 'auto',
+    enableThinking: agent.getConfig().enableThinking,
   });
 
   res.json({
@@ -661,7 +676,7 @@ app.post('/api/chat/cancel', (_req, res) => {
 
 // POST /api/chat - Stream chat completion via Server-Sent Events (SSE)
 app.post('/api/chat', async (req, res) => {
-  const { message, attachments = [] } = req.body;
+  const { message, attachments = [], imageAttachments = [] } = req.body;
 
   if (!message || typeof message !== 'string') {
     return res.status(400).json({ error: 'Field "message" is required.' });
@@ -669,10 +684,22 @@ app.post('/api/chat', async (req, res) => {
   if (!Array.isArray(attachments) || attachments.length > 10) {
     return res.status(400).json({ error: 'Attachments must be an array of at most 10 text files.' });
   }
+  if (!Array.isArray(imageAttachments) || imageAttachments.length > 5) {
+    return res.status(400).json({ error: 'Image attachments must be an array of at most 5 images.' });
+  }
   const validAttachments = attachments.every((file: any) =>
     file && typeof file.name === 'string' && file.name.length <= 255 &&
     typeof file.content === 'string' && typeof file.size === 'number' &&
     file.size >= 0 && Buffer.byteLength(file.content, 'utf8') <= 512 * 1024
+  );
+  const validImages = imageAttachments.every((img: any) =>
+    img && typeof img.name === 'string' && typeof img.base64 === 'string' && img.base64.length > 0
+  );
+  if (!validImages) {
+    return res.status(400).json({ error: 'Invalid image attachment data.' });
+  }
+  const rawImagesBase64 = imageAttachments.map((img: any) =>
+    img.base64.replace(/^data:image\/[a-zA-Z]+;base64,/, '')
   );
   const totalAttachmentSize = attachments.reduce(
     (total: number, file: any) =>
@@ -721,6 +748,14 @@ app.post('/api/chat', async (req, res) => {
   }
   const generationController = new AbortController();
   activeGenerationController = generationController;
+  res.on('close', () => {
+    if (res.writableEnded || activeGenerationController !== generationController) return;
+    generationController.abort();
+    if (pendingApprovalResolve) {
+      pendingApprovalResolve({ decision: 'reject', reason: 'Client disconnected' });
+      pendingApprovalResolve = null;
+    }
+  });
 
   // Intercept mutating tools to pause & ask for approval when required
   const executor = agent.getToolExecutor();
@@ -797,8 +832,13 @@ app.post('/api/chat', async (req, res) => {
     const finalContent = await agent.sendMessage(modelMessage, {
       userDisplayContent: message,
       userAttachments: attachments,
+      userImages: rawImagesBase64,
+      userImageAttachments: imageAttachments,
       onChunk: (chunk) => {
         sendEvent('chunk', { chunk });
+      },
+      onThinkingChunk: (thinkingChunk) => {
+        sendEvent('thinking_chunk', { chunk: thinkingChunk });
       },
       onMessageAdded: (msg) => {
         sendEvent('message_added', msg);

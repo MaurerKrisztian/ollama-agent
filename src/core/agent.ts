@@ -6,6 +6,7 @@ import { buildWorkingDirectoryContext } from './workdir-context.js';
 
 export interface AgentSendMessageOptions {
   onChunk?: (chunk: string) => void;
+  onThinkingChunk?: (chunk: string) => void;
   onToolStart?: (name: string, args: Record<string, any>) => void;
   onToolEnd?: (name: string, result: any) => void;
   onMessageAdded?: (message: ChatMessage) => void;
@@ -13,6 +14,8 @@ export interface AgentSendMessageOptions {
   signal?: AbortSignal;
   userDisplayContent?: string;
   userAttachments?: ChatMessage['attachments'];
+  userImages?: string[];
+  userImageAttachments?: ChatMessage['imageAttachments'];
 }
 
 export type AgentConfigUpdate = Partial<AgentConfig> & { ollamaToken?: string };
@@ -133,6 +136,7 @@ export class AgentEngine {
       showWorkingDirInfo: config?.showWorkingDirInfo ?? true,
       contextWindow: config?.contextWindow !== undefined ? config.contextWindow : 16384,
       maxLoops: config?.maxLoops !== undefined ? config.maxLoops : 10,
+      enableThinking: config?.enableThinking ?? true,
     };
 
     this.toolExecutor = new ToolExecutor(this.config.workingDir);
@@ -270,6 +274,8 @@ ${conversationText}`;
       content: userMessage,
       displayContent: callbacks?.userDisplayContent,
       attachments: callbacks?.userAttachments,
+      images: callbacks?.userImages,
+      imageAttachments: callbacks?.userImageAttachments,
     });
     if (callbacks?.onMessageAdded) callbacks.onMessageAdded(userMsg);
 
@@ -327,6 +333,7 @@ ${conversationText}`;
           content: m.content,
           name: m.name,
           tool_calls: m.tool_calls,
+          images: m.images,
         })),
       ];
 
@@ -346,18 +353,22 @@ ${conversationText}`;
         model: this.config.model,
         temperature: isContinuationAttempt ? 0 : this.config.temperature,
         contextWindow: this.config.contextWindow,
+        enableThinking: this.config.enableThinking,
         messages: messagesForOllama,
         tools: activeTools,
         onChunk: callbacks?.onChunk,
+        onThinkingChunk: callbacks?.onThinkingChunk,
         signal: callbacks?.signal,
       });
 
-      // Add Assistant response message to Context if it has content or tool calls
-      const hasContentOrTools = !!(res.content?.trim() || (res.tool_calls && res.tool_calls.length > 0));
+      // Add Assistant response message to Context if it has content, thinking, or tool calls
+      const hasContentOrTools = !!(res.content?.trim() || res.thinking?.trim() || (res.tool_calls && res.tool_calls.length > 0));
       if (hasContentOrTools) {
         const assistantMsg = this.contextManager.addMessage({
           role: 'assistant',
           content: res.content,
+          thinking: res.thinking,
+          thinkingTokens: res.thinkingTokens,
           tool_calls: res.tool_calls,
         });
         if (callbacks?.onMessageAdded) callbacks.onMessageAdded(assistantMsg);

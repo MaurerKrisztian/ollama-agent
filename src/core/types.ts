@@ -6,6 +6,13 @@ export interface ToolCall {
   arguments: Record<string, any>;
 }
 
+export interface ImageAttachment {
+  name: string;
+  type: string;
+  base64: string;
+  size: number;
+}
+
 export interface ChatMessage {
   id: string;
   role: Role;
@@ -16,6 +23,10 @@ export interface ChatMessage {
   timestamp: number;
   displayContent?: string;
   attachments?: TextAttachment[];
+  images?: string[];
+  imageAttachments?: ImageAttachment[];
+  thinking?: string;
+  thinkingTokens?: number;
 }
 
 export interface TextAttachment {
@@ -118,6 +129,7 @@ export interface AgentConfig {
   maxLoops?: number;
   complexityProfile?: ToolComplexityProfile;
   pruningConfig?: ContextPruningConfig;
+  enableThinking?: boolean;
 }
 
 export interface ContextInfo {

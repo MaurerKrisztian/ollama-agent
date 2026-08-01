@@ -208,6 +208,10 @@ export class ContextManager {
     tool_call_id?: string;
     displayContent?: string;
     attachments?: ChatMessage['attachments'];
+    images?: string[];
+    imageAttachments?: ChatMessage['imageAttachments'];
+    thinking?: string;
+    thinkingTokens?: number;
   }): ChatMessage {
     const newMessage: ChatMessage = {
       id: `msg_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
@@ -219,6 +223,10 @@ export class ContextManager {
       timestamp: Date.now(),
       displayContent: msg.displayContent,
       attachments: msg.attachments,
+      images: msg.images,
+      imageAttachments: msg.imageAttachments,
+      thinking: msg.thinking,
+      thinkingTokens: msg.thinkingTokens,
     };
     this.messages.push(newMessage);
     if (this.pruningConfig.enabled) {

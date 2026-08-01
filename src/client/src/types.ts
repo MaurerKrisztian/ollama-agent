@@ -18,6 +18,7 @@ export interface AgentConfig {
   maxLoops?: number;
   ollamaTokenConfigured?: boolean;
   pruningConfig?: ContextPruningConfig;
+  enableThinking?: boolean;
 }
 
 export type ToolComplexityProfile = 'simple' | 'medium' | 'advanced';
@@ -28,6 +29,7 @@ export interface ToolSettings {
   allowedCommands?: string[];
   maxLoops?: number;
   complexityProfile?: ToolComplexityProfile;
+  enableThinking?: boolean;
   enabledTools: {
     list_directory: boolean;
     read_file: boolean;
@@ -102,6 +104,13 @@ export interface OllamaRunningModelInfo {
   };
 }
 
+export interface ImageAttachment {
+  name: string;
+  type: string;
+  base64: string;
+  size: number;
+}
+
 export interface ChatMessage {
   id: string;
   role: 'system' | 'user' | 'assistant' | 'tool';
@@ -116,6 +125,10 @@ export interface ChatMessage {
   timestamp: number;
   displayContent?: string;
   attachments?: TextAttachment[];
+  images?: string[];
+  imageAttachments?: ImageAttachment[];
+  thinking?: string;
+  thinkingTokens?: number;
 }
 
 export interface TextAttachment {
