@@ -142,6 +142,13 @@ agent.getContextManager().setMessages(chatSessions.getActive().messages);
 type ChatRuntime = { engine: AgentEngine; ready: Promise<void> };
 const chatRuntimes = new Map<string, ChatRuntime>();
 
+// The original engine is also the authoritative source for global configuration
+// endpoints. Its chat session can be deleted, which removes it from chatRuntimes,
+// so global settings must not rely on the runtime map containing it.
+function getConfigurableEngines(): AgentEngine[] {
+  return [...new Set([agent, ...[...chatRuntimes.values()].map(({ engine }) => engine)])];
+}
+
 function createChatRuntime(sessionId: string, existingEngine?: AgentEngine): ChatRuntime {
   const session = chatSessions.getSession(sessionId);
   if (!session) throw new Error('Chat session not found.');
@@ -530,7 +537,7 @@ app.post('/api/config', (req, res) => {
   }
 
   const configUpdate = { model, systemPrompt, workingDir, showWorkingDirInfo, ollamaHost, ollamaToken, temperature, contextWindow, maxLoops };
-  for (const { engine } of chatRuntimes.values()) engine.updateConfig(configUpdate);
+  for (const engine of getConfigurableEngines()) engine.updateConfig(configUpdate);
 
   const currentConfig = agent.getConfig();
   savePersistedConfig({
@@ -963,13 +970,13 @@ app.post('/api/chat/tool-settings', (req, res) => {
     allowedCommandsState = allowedCommands.map((c) => String(c).trim()).filter(Boolean);
   }
   if (typeof maxLoops === 'number' && maxLoops >= 0 && maxLoops <= 50) {
-    for (const { engine } of chatRuntimes.values()) engine.updateConfig({ maxLoops });
+    for (const engine of getConfigurableEngines()) engine.updateConfig({ maxLoops });
   }
   if (typeof enableThinking === 'boolean') {
-    for (const { engine } of chatRuntimes.values()) engine.updateConfig({ enableThinking });
+    for (const engine of getConfigurableEngines()) engine.updateConfig({ enableThinking });
   }
   if (complexityProfile === 'simple' || complexityProfile === 'medium' || complexityProfile === 'advanced') {
-    for (const { engine } of chatRuntimes.values()) engine.updateConfig({ complexityProfile });
+    for (const engine of getConfigurableEngines()) engine.updateConfig({ complexityProfile });
   }
 
   savePersistedConfig({
