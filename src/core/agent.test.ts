@@ -132,20 +132,20 @@ test('explicit skill instructions apply to one turn without replacing the user r
     };
 
     await agent.sendMessage('Check the current price.', {
-      userDisplayContent: '/skill research-official-sources Check the current price.',
-      selectedSkill: {
+      userDisplayContent: '@skill:research-official-sources Check the current price.',
+      selectedSkills: [{
         name: 'research-official-sources',
         description: 'Verify current claims.',
         path: '.agent/skills/research-official-sources/SKILL.md',
         instructions: 'Use first-party sources and cite each current claim.',
-      },
+      }],
     });
 
     assert.match(request.messages[0].content, /Explicitly selected skill: research-official-sources/);
     assert.match(request.messages[0].content, /Use first-party sources/);
     assert.equal(request.messages[1].content, 'Check the current price.');
     const userMessage = agent.getContextManager().getMessages().find((message) => message.role === 'user');
-    assert.equal(userMessage?.displayContent, '/skill research-official-sources Check the current price.');
+    assert.equal(userMessage?.displayContent, '@skill:research-official-sources Check the current price.');
   });
 });
 

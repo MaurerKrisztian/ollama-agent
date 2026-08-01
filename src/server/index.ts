@@ -37,7 +37,7 @@ import {
   formatProjectSkillList,
   listProjectSkills,
   loadProjectSkill,
-  parseSkillCommand,
+  parseSkillReferences,
 } from '../core/skills.js';
 
 import fsSync from 'node:fs';
@@ -1090,11 +1090,7 @@ app.post('/api/chat', async (req, res) => {
     return res.status(400).json({ error: 'Invalid attachment or attachment size limit exceeded (512 KB each, 1 MB total).' });
   }
 
-  const skillCommand = parseSkillCommand(message);
-  if (skillCommand.kind === 'invalid') {
-    return res.status(400).json({ error: skillCommand.error });
-  }
-  if (skillCommand.kind === 'list') {
+  if (/^\/skills\s*$/i.test(message)) {
     const skills = await listProjectSkills(agent.getConfig().workingDir);
     const content = formatProjectSkillList(skills);
     res.setHeader('Content-Type', 'text/event-stream');
@@ -1113,13 +1109,21 @@ app.post('/api/chat', async (req, res) => {
     return;
   }
 
-  const selectedSkill = skillCommand.kind === 'invoke'
-    ? await loadProjectSkill(agent.getConfig().workingDir, skillCommand.name)
-    : null;
-  if (skillCommand.kind === 'invoke' && !selectedSkill) {
-    return res.status(404).json({ error: `Skill "${skillCommand.name}" was not found. Use /skills to list available skills.` });
+  const skillReferences = parseSkillReferences(message);
+  if (skillReferences.names.length > 0 && !skillReferences.request) {
+    return res.status(400).json({ error: 'Add a request before or after the @skill:<name> reference.' });
   }
-  const effectiveMessage = skillCommand.kind === 'invoke' ? skillCommand.request : message;
+  const loadedSkills = await Promise.all(
+    skillReferences.names.map((name) => loadProjectSkill(agent.getConfig().workingDir, name))
+  );
+  const missingSkillIndex = loadedSkills.findIndex((skill) => skill === null);
+  if (missingSkillIndex >= 0) {
+    return res.status(404).json({
+      error: `Skill "${skillReferences.names[missingSkillIndex]}" was not found. Type @ to see available skills.`,
+    });
+  }
+  const selectedSkills = loadedSkills.filter((skill): skill is NonNullable<typeof skill> => skill !== null);
+  const effectiveMessage = selectedSkills.length > 0 ? skillReferences.request : message;
 
   const generationController = new AbortController();
   activeGenerationControllers.set(sessionId, generationController);
@@ -1260,7 +1264,7 @@ app.post('/api/chat', async (req, res) => {
       userAttachments: attachments,
       userImages: rawImagesBase64,
       userImageAttachments: imageAttachments,
-      selectedSkill: selectedSkill || undefined,
+      selectedSkills: selectedSkills.length > 0 ? selectedSkills : undefined,
       onChunk: (chunk) => {
         sendEvent('chunk', { chunk });
       },

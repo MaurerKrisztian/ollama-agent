@@ -18,11 +18,10 @@ export interface LoadedProjectSkill extends ProjectSkillMetadata {
   instructions: string;
 }
 
-export type SkillCommand =
-  | { kind: 'none' }
-  | { kind: 'list' }
-  | { kind: 'invoke'; name: string; request: string }
-  | { kind: 'invalid'; error: string };
+export interface ParsedSkillReferences {
+  names: string[];
+  request: string;
+}
 
 export interface SkillRegistryOptions {
   /** Include skills shipped with this application in addition to workspace skills. */
@@ -132,30 +131,32 @@ export async function loadProjectSkill(
   return { ...skill.metadata, instructions };
 }
 
-export function parseSkillCommand(input: string): SkillCommand {
-  const trimmed = input.trim();
-  if (!trimmed.startsWith('/')) return { kind: 'none' };
-  if (/^\/skills\s*$/i.test(trimmed)) return { kind: 'list' };
-  if (!/^\/skill(?:\s|$)/i.test(trimmed)) return { kind: 'none' };
-
-  const match = trimmed.match(/^\/skill\s+([^\s]+)(?:\s+([\s\S]*))?$/i);
-  if (!match) return { kind: 'invalid', error: 'Usage: /skill <name> <request>' };
-  const name = match[1].toLowerCase();
-  const request = (match[2] || '').trim();
-  if (!SKILL_NAME_PATTERN.test(name)) {
-    return { kind: 'invalid', error: `Invalid skill name "${match[1]}".` };
-  }
-  if (!request) return { kind: 'invalid', error: 'Usage: /skill <name> <request>' };
-  return { kind: 'invoke', name, request };
+export function parseSkillReferences(input: string): ParsedSkillReferences {
+  const names: string[] = [];
+  const seenNames = new Set<string>();
+  // A reference must be its own whitespace-delimited token. This deliberately
+  // excludes embedded @ characters such as k@gmail.com and x@skill:name.
+  const request = input.replace(
+    /(^|\s)@skill:([a-z0-9]+(?:-[a-z0-9]+)*)(?=\s|$)/gi,
+    (_reference, leadingWhitespace: string, rawName: string) => {
+      const name = rawName.toLowerCase();
+      if (!seenNames.has(name)) {
+        seenNames.add(name);
+        names.push(name);
+      }
+      return leadingWhitespace;
+    }
+  ).replace(/[ \t]{2,}/g, ' ').trim();
+  return { names, request };
 }
 
 export function formatProjectSkillList(skills: ProjectSkillMetadata[]): string {
   if (skills.length === 0) return 'No workspace or bundled skills found.';
   return [
     'Available skills:',
-    ...skills.map((skill) => `- ${skill.name}: ${skill.description}`),
+    ...skills.map((skill) => `- @skill:${skill.name}: ${skill.description}`),
     '',
-    'Use one with: /skill <name> <request>',
+    'Reference one in a prompt with: @skill:<name>',
   ].join('\n');
 }
 

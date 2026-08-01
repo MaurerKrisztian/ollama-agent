@@ -8,7 +8,7 @@ import {
   formatProjectSkillList,
   listProjectSkills,
   loadProjectSkill,
-  parseSkillCommand,
+  parseSkillReferences,
 } from './skills.js';
 
 async function writeSkill(root: string, base: '.agent' | '.agents', folder: string, document: string) {
@@ -74,18 +74,23 @@ test('bundled skills remain available outside the application workspace and work
   }
 });
 
-test('skill slash commands parse listing and explicit invocation', () => {
-  assert.deepEqual(parseSkillCommand('/skills'), { kind: 'list' });
-  assert.deepEqual(parseSkillCommand('/skill VERIFY-SOURCES Check this price'), {
-    kind: 'invoke',
-    name: 'verify-sources',
+test('skill references are standalone tokens and can appear anywhere in a prompt', () => {
+  assert.deepEqual(parseSkillReferences('@skill:VERIFY-SOURCES Check this price'), {
+    names: ['verify-sources'],
     request: 'Check this price',
   });
-  assert.deepEqual(parseSkillCommand('/skill verify-sources'), {
-    kind: 'invalid',
-    error: 'Usage: /skill <name> <request>',
+  assert.deepEqual(parseSkillReferences('Compare this @skill:verify-sources carefully @skill:second-pass'), {
+    names: ['verify-sources', 'second-pass'],
+    request: 'Compare this carefully',
   });
-  assert.deepEqual(parseSkillCommand('ordinary request'), { kind: 'none' });
+  assert.deepEqual(parseSkillReferences('Email k@gmail.com or x@skill:verify-sources for help.'), {
+    names: [],
+    request: 'Email k@gmail.com or x@skill:verify-sources for help.',
+  });
+  assert.deepEqual(parseSkillReferences('@skill:verify-sources'), {
+    names: ['verify-sources'],
+    request: '',
+  });
 });
 
 test('skill formatting provides discoverable usage and bounded prompt framing', () => {
@@ -95,7 +100,7 @@ test('skill formatting provides discoverable usage and bounded prompt framing', 
     path: '.agent/skills/verify-sources/SKILL.md',
     instructions: '---\nname: verify-sources\ndescription: Verify claims.\n---\n\nUse official pages.',
   };
-  assert.match(formatProjectSkillList([skill]), /\/skill <name> <request>/);
+  assert.match(formatProjectSkillList([skill]), /@skill:<name>/);
   const prompt = buildSelectedSkillPrompt(skill);
   assert.match(prompt, /Explicitly selected skill: verify-sources/);
   assert.match(prompt, /Use official pages\./);

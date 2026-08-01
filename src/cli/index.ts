@@ -13,7 +13,7 @@ import {
   formatProjectSkillList,
   listProjectSkills,
   loadProjectSkill,
-  parseSkillCommand,
+  parseSkillReferences,
 } from '../core/skills.js';
 import type { LoadedProjectSkill } from '../core/skills.js';
 
@@ -292,36 +292,40 @@ async function startCli() {
   rl.on('line', async (line) => {
     const originalInput = line.trim();
     let input = originalInput;
-    let selectedSkill: LoadedProjectSkill | undefined;
+    let selectedSkills: LoadedProjectSkill[] = [];
     if (!input) {
       rl.prompt();
       return;
     }
 
-    const skillCommand = parseSkillCommand(input);
-    if (skillCommand.kind === 'list') {
+    if (/^\/skills\s*$/i.test(input)) {
       console.log(`\n${formatProjectSkillList(await listProjectSkills(agent.getConfig().workingDir))}`);
       rl.prompt();
       return;
     }
-    if (skillCommand.kind === 'invalid') {
-      console.log(chalk.red(skillCommand.error));
-      rl.prompt();
-      return;
-    }
-    if (skillCommand.kind === 'invoke') {
-      selectedSkill = await loadProjectSkill(agent.getConfig().workingDir, skillCommand.name) || undefined;
-      if (!selectedSkill) {
-        console.log(chalk.red(`Skill "${skillCommand.name}" was not found. Use /skills to list available skills.`));
+    const skillReferences = parseSkillReferences(input);
+    if (skillReferences.names.length > 0) {
+      if (!skillReferences.request) {
+        console.log(chalk.red('Add a request before or after the @skill:<name> reference.'));
         rl.prompt();
         return;
       }
-      input = skillCommand.request;
-      console.log(chalk.dim(`Using skill: ${selectedSkill.name}`));
+      const loadedSkills = await Promise.all(
+        skillReferences.names.map((name) => loadProjectSkill(agent.getConfig().workingDir, name))
+      );
+      const missingSkillIndex = loadedSkills.findIndex((skill) => skill === null);
+      if (missingSkillIndex >= 0) {
+        console.log(chalk.red(`Skill "${skillReferences.names[missingSkillIndex]}" was not found. Use /skills to list available skills.`));
+        rl.prompt();
+        return;
+      }
+      selectedSkills = loadedSkills.filter((skill): skill is LoadedProjectSkill => skill !== null);
+      input = skillReferences.request;
+      console.log(chalk.dim(`Using skills: ${selectedSkills.map((skill) => skill.name).join(', ')}`));
     }
 
     // Command handling
-    if (input.startsWith('/') && !selectedSkill) {
+    if (input.startsWith('/') && selectedSkills.length === 0) {
       const [cmd, ...args] = input.split(' ');
       const argString = args.join(' ');
 
@@ -338,7 +342,7 @@ async function startCli() {
           console.log('  /context                   - Show converted text context & stats');
           console.log('  /json                      - Output raw context JSON');
           console.log('  /skills                    - List available skills');
-          console.log('  /skill <name> <request>    - Run a request with a skill');
+          console.log('  @skill:<name> <request>    - Reference a skill in any prompt');
           console.log('  /clear                     - Reset current chat context');
           console.log('  /benchmark [category]      - Run benchmark suite (optional category filter)');
           console.log('  /exit                      - Exit CLI application');
@@ -539,8 +543,8 @@ async function startCli() {
 
     try {
       await agent.sendMessage(input, {
-        userDisplayContent: selectedSkill ? originalInput : undefined,
-        selectedSkill,
+        userDisplayContent: selectedSkills.length > 0 ? originalInput : undefined,
+        selectedSkills: selectedSkills.length > 0 ? selectedSkills : undefined,
         onChunk: (chunk) => {
           process.stdout.write(chunk);
         },

@@ -99,7 +99,7 @@ export async function buildWorkingDirectoryContext(workingDir: string): Promise<
   const [{ files, truncated }, packageSummary, projectSkills] = await Promise.all([
     collectFiles(resolvedDir),
     getPackageSummary(resolvedDir),
-    // Bundled skills are invoked through /skill. Only workspace-local skills have
+    // Bundled skills are invoked through @skill references. Only workspace-local skills have
     // paths that the model can inspect with its workspace file tools.
     listProjectSkills(resolvedDir, { includeBundled: false }),
   ]);

@@ -564,7 +564,7 @@ The repository includes `.agent/skills/research-official-sources/SKILL.md`. It g
 List available skills with `/skills`, or invoke this bundled workflow explicitly from any working directory:
 
 ```text
-/skill research-official-sources Fact-check these provider prices and cite the official rate cards.
+@skill:research-official-sources Fact-check these provider prices and cite the official rate cards.
 ```
 
 ## Example user prompts

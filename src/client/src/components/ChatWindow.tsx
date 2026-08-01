@@ -5,6 +5,7 @@ import remarkGfm from 'remark-gfm';
 import { Send, Square, Wrench, CheckCircle2, XCircle, ShieldAlert, User, Bot, Loader2, FileText, Folder, Terminal, Edit3, Search, PlusCircle, Sparkles, Code2, Eye, ChevronDown, ChevronRight, Brain, X, Globe, ExternalLink, Layers, RotateCcw, Copy, Check, Scissors, Image as ImageIcon } from 'lucide-react';
 import { ChatMessage, FileDiffData, ImageAttachment, PendingApprovalCall, TextAttachment } from '../types';
 import { getLinkPresentation } from '../linkPresentation';
+import { findActiveSkillMention } from '../skillMention';
 
 const compactValue = (value: unknown, maxLength = 64): string => {
   if (value === undefined || value === null || value === '') return '';
@@ -1609,6 +1610,11 @@ interface SlashCommandItem {
   icon: React.ElementType;
 }
 
+interface SkillListItem {
+  name: string;
+  description: string;
+}
+
 const SLASH_COMMANDS: SlashCommandItem[] = [
   {
     cmd: '/compact',
@@ -1627,12 +1633,6 @@ const SLASH_COMMANDS: SlashCommandItem[] = [
     label: '/skills',
     description: 'List reusable workspace and bundled skills',
     icon: Layers,
-  },
-  {
-    cmd: '/skill',
-    label: '/skill',
-    description: 'Run a request with a specific skill',
-    icon: Sparkles,
   },
   {
     cmd: '/settings',
@@ -1681,6 +1681,10 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   const [rejectionReason, setRejectionReason] = useState('');
   const [slashMenuOpen, setSlashMenuOpen] = useState(false);
   const [selectedSlashIndex, setSelectedSlashIndex] = useState(0);
+  const [availableSkills, setAvailableSkills] = useState<SkillListItem[]>([]);
+  const [inputCursor, setInputCursor] = useState(0);
+  const [selectedSkillIndex, setSelectedSkillIndex] = useState(0);
+  const [skillMenuDismissed, setSkillMenuDismissed] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatMainRef = useRef<HTMLDivElement>(null);
@@ -1756,6 +1760,35 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
     return SLASH_COMMANDS.filter((cmd) => cmd.cmd.toLowerCase().startsWith(query));
   }, [input]);
 
+  const activeSkillMention = useMemo(
+    () => findActiveSkillMention(input, inputCursor),
+    [input, inputCursor]
+  );
+  const skillMentionActive = activeSkillMention !== null;
+  const filteredSkills = useMemo(() => {
+    if (!activeSkillMention) return [];
+    return availableSkills.filter((skill) => skill.name.toLowerCase().startsWith(activeSkillMention.query));
+  }, [activeSkillMention, availableSkills]);
+  const skillMenuOpen = skillMentionActive && !skillMenuDismissed && filteredSkills.length > 0;
+
+  useEffect(() => {
+    if (!skillMentionActive) return;
+    let cancelled = false;
+    void fetch('/api/skills')
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error('Could not load skills.')))
+      .then((data) => {
+        if (!cancelled) setAvailableSkills(Array.isArray(data.skills) ? data.skills : []);
+      })
+      .catch(() => {
+        if (!cancelled) setAvailableSkills([]);
+      });
+    return () => { cancelled = true; };
+  }, [skillMentionActive]);
+
+  useEffect(() => {
+    setSelectedSkillIndex(0);
+  }, [activeSkillMention?.query, filteredSkills.length]);
+
   useEffect(() => {
     if (input.startsWith('/') && filteredCommands.length > 0) {
       setSlashMenuOpen(true);
@@ -1789,6 +1822,23 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
     } else {
       setInput(`${cmd.cmd} `);
     }
+  };
+
+  const handleSelectSkill = (skill: SkillListItem) => {
+    if (!activeSkillMention) return;
+    const before = input.slice(0, activeSkillMention.start);
+    const after = input.slice(activeSkillMention.end);
+    const suffix = after.length === 0 || !/^\s/.test(after) ? ` ${after}` : after;
+    const reference = `@skill:${skill.name}`;
+    const nextInput = `${before}${reference}${suffix}`;
+    const nextCursor = before.length + reference.length + (suffix.startsWith(' ') ? 1 : 0);
+    setInput(nextInput);
+    setInputCursor(nextCursor);
+    setSkillMenuDismissed(false);
+    requestAnimationFrame(() => {
+      textareaRef.current?.focus();
+      textareaRef.current?.setSelectionRange(nextCursor, nextCursor);
+    });
   };
 
   const handleRewind = (messageId: string, content: string) => {
@@ -2597,6 +2647,63 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
         )}
         {attachmentError && <div style={{ color: 'var(--accent-amber)', fontSize: '0.76rem' }}>{attachmentError}</div>}
 
+        {/* Skill reference autocomplete. It only opens for a standalone @ token. */}
+        {skillMenuOpen && (
+          <div
+            className="animate-fade-in"
+            style={{
+              background: 'rgba(15, 23, 42, 0.95)',
+              backdropFilter: 'blur(12px)',
+              border: '1px solid var(--accent-primary)',
+              borderRadius: '10px',
+              padding: '6px',
+              boxShadow: '0 10px 25px rgba(0, 0, 0, 0.5)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '4px',
+              marginBottom: '4px',
+            }}
+          >
+            <div style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--accent-primary)', padding: '4px 8px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+              Skills (Use ↑↓ Arrow Keys & Enter)
+            </div>
+            {filteredSkills.map((skill, idx) => {
+              const isSelected = idx === selectedSkillIndex;
+              return (
+                <button
+                  key={skill.name}
+                  type="button"
+                  onClick={() => handleSelectSkill(skill)}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: '16px',
+                    padding: '8px 12px',
+                    borderRadius: '6px',
+                    border: 'none',
+                    background: isSelected ? 'rgba(99, 102, 241, 0.25)' : 'transparent',
+                    color: isSelected ? '#fff' : 'var(--text-muted)',
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                    width: '100%',
+                  }}
+                >
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+                    <Sparkles size={14} color={isSelected ? 'var(--accent-primary)' : 'var(--text-muted)'} />
+                    <span style={{ fontWeight: 700, fontFamily: 'var(--font-code)', fontSize: '0.85rem', color: isSelected ? '#fff' : 'var(--text-main)' }}>
+                      @skill:{skill.name}
+                    </span>
+                  </span>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {skill.description}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+
         {/* Slash Command Autocomplete Popup Menu */}
         {slashMenuOpen && filteredCommands.length > 0 && (
           <div
@@ -2693,8 +2800,36 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
           <textarea
             ref={textareaRef}
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={(e) => {
+              setInput(e.target.value);
+              setInputCursor(e.target.selectionStart);
+              setSkillMenuDismissed(false);
+            }}
+            onClick={(e) => setInputCursor(e.currentTarget.selectionStart)}
+            onKeyUp={(e) => setInputCursor(e.currentTarget.selectionStart)}
             onKeyDown={(e) => {
+              if (skillMenuOpen) {
+                if (e.key === 'ArrowDown') {
+                  e.preventDefault();
+                  setSelectedSkillIndex((prev) => (prev + 1) % filteredSkills.length);
+                  return;
+                }
+                if (e.key === 'ArrowUp') {
+                  e.preventDefault();
+                  setSelectedSkillIndex((prev) => (prev - 1 + filteredSkills.length) % filteredSkills.length);
+                  return;
+                }
+                if (e.key === 'Enter' || e.key === 'Tab') {
+                  e.preventDefault();
+                  handleSelectSkill(filteredSkills[selectedSkillIndex]);
+                  return;
+                }
+                if (e.key === 'Escape') {
+                  e.preventDefault();
+                  setSkillMenuDismissed(true);
+                  return;
+                }
+              }
               if (slashMenuOpen && filteredCommands.length > 0) {
                 if (e.key === 'ArrowDown') {
                   e.preventDefault();
@@ -2718,7 +2853,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
               }
               handleKeyDown(e);
             }}
-            placeholder={supportsVision ? "Type a message, attach images, or drag & drop files..." : "Type a message, '/' for commands (/compact, /clear...), or drag & drop files..."}
+            placeholder={supportsVision ? "Type a message, @ for skills, or attach images..." : "Type a message, @ for skills, or / for commands..."}
             rows={2}
             style={{
               flex: 1,

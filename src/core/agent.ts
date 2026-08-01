@@ -21,7 +21,7 @@ export interface AgentSendMessageOptions {
   userAttachments?: ChatMessage['attachments'];
   userImages?: string[];
   userImageAttachments?: ChatMessage['imageAttachments'];
-  selectedSkill?: LoadedProjectSkill;
+  selectedSkills?: LoadedProjectSkill[];
 }
 
 export type AgentConfigUpdate = Partial<AgentConfig> & { ollamaToken?: string };
@@ -374,8 +374,10 @@ ${conversationText}`;
       if (this.config.showWorkingDirInfo) {
         effectiveSystemPrompt += `\n\n${await this.getWorkingDirectoryPromptContext()}`;
       }
-      if (callbacks?.selectedSkill) {
-        effectiveSystemPrompt += `\n\n${buildSelectedSkillPrompt(callbacks.selectedSkill)}`;
+      if (callbacks?.selectedSkills?.length) {
+        effectiveSystemPrompt += `\n\n${callbacks.selectedSkills
+          .map((skill) => buildSelectedSkillPrompt(skill))
+          .join('\n\n')}`;
       }
 
       const messagesForOllama = [
