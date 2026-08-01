@@ -64,8 +64,9 @@ per-test comparisons across different test selections.
 
 ## Reliability and timing
 
-Suite and individual-case runs execute each selected case 3–10 times in independent
-containers (default: 3). The success rate is successful attempts divided by total
+Suite and individual-case runs execute each selected case 1–10 times in independent
+containers (default: 3). A one-attempt run is useful for a quick check; selecting the
+maximum displays a warning because it can consume significant time and compute. The success rate is successful attempts divided by total
 attempts. A case is marked fully reliable only when every configured attempt passes.
 Attempts run sequentially by default. Run parallelism can be set from 1–10 to execute
 that many attempts concurrently in independent containers.

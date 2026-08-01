@@ -42,7 +42,7 @@ program
   .option('-b, --benchmark', 'Run the benchmark suite instead of chat mode')
   .option('-c, --category <name>', 'Filter benchmark to a specific category (use with --benchmark)')
   .option('--test <id-or-number>', 'Run one benchmark scenario by test ID or 1-based number')
-  .option('--attempts <count>', 'Reliability attempts per benchmark case (3-10)', '3')
+  .option('--attempts <count>', 'Reliability attempts per benchmark case (1-10)', '3')
   .option('--parallelism <count>', 'Concurrent benchmark attempts (1-10)', '1')
   .parse(process.argv);
 
@@ -66,8 +66,11 @@ async function startCli() {
     webOutputTTLTurns: parseTtl(options.webTtl, '--web-ttl'),
   };
   const benchmarkAttempts = Number(options.attempts);
-  if (!Number.isInteger(benchmarkAttempts) || benchmarkAttempts < 3 || benchmarkAttempts > 10) {
-    program.error('--attempts must be an integer between 3 and 10.');
+  if (!Number.isInteger(benchmarkAttempts) || benchmarkAttempts < 1 || benchmarkAttempts > 10) {
+    program.error('--attempts must be an integer between 1 and 10.');
+  }
+  if (options.benchmark && benchmarkAttempts === 10) {
+    console.warn(chalk.yellow('Warning: 10 attempts is the maximum and can take significant time and compute for every selected case.'));
   }
   const benchmarkParallelism = Number(options.parallelism);
   if (!Number.isInteger(benchmarkParallelism) || benchmarkParallelism < 1 || benchmarkParallelism > 10) {

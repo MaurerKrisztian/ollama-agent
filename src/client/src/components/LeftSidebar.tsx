@@ -173,7 +173,7 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
           <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: '8px' }}>
             Chat Sessions
           </span>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+          <div className="chat-session-list" style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
             {chatSessions.map((session) => (
               <div
                 key={session.id}

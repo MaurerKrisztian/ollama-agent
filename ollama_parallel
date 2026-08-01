@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+if [[ $# -ne 1 || ! $1 =~ ^[1-9][0-9]*$ ]]; then
+  echo "Usage: $0 <positive-parallel-count>" >&2
+  echo "Example: $0 4" >&2
+  exit 2
+fi
+
+parallel_count=$1
+override_directory=/etc/systemd/system/ollama.service.d
+override_file=$override_directory/parallel.conf
+
+sudo mkdir -p "$override_directory"
+printf '[Service]\nEnvironment="OLLAMA_NUM_PARALLEL=%s"\n' "$parallel_count" \
+  | sudo tee "$override_file" >/dev/null
+
+sudo systemctl daemon-reload
+sudo systemctl restart ollama
+
+echo "Ollama restarted with OLLAMA_NUM_PARALLEL=$parallel_count"
+sudo systemctl show ollama --property=Environment --value --no-pager \
+  | tr ' ' '\n' \
+  | grep '^OLLAMA_NUM_PARALLEL=' || true

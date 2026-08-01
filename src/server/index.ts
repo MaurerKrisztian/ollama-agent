@@ -1453,8 +1453,8 @@ const parseBenchmarkAgentConfig = (value: unknown): BenchmarkAgentConfig => {
 
 const parseBenchmarkAttempts = (value: unknown): number => {
   const attempts = typeof value === 'number' ? value : Number(value ?? 3);
-  if (!Number.isInteger(attempts) || attempts < 3 || attempts > 10) {
-    throw new Error('Benchmark attempts per case must be an integer between 3 and 10.');
+  if (!Number.isInteger(attempts) || attempts < 1 || attempts > 10) {
+    throw new Error('Benchmark attempts per case must be an integer between 1 and 10.');
   }
   return attempts;
 };

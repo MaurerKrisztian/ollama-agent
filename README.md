@@ -243,7 +243,7 @@ Options:
   -b, --benchmark          Run benchmark mode
   -c, --category <name>    Run one benchmark category
   --test <id-or-number>    Run one benchmark scenario
-  --attempts <count>       Reliability attempts per case, 3–10 (default: 3)
+  --attempts <count>       Reliability attempts per case, 1–10 (default: 3)
   --parallelism <count>    Concurrent benchmark attempts, 1–10 (default: 1)
   --help                   Show help
 ```
@@ -303,7 +303,7 @@ curl -X POST http://localhost:3001/api/benchmark/run
 ```
 
 - **47 outcome-based test cases** across 13 categories including AST/LSP navigation, information retrieval, terminal execution, project context, and web research.
-- Every case uses a configurable reliability profile of 3–10 fresh attempts (default: 3). Reports show per-case and overall success rates and retain every attempt trace.
+- Every case uses a configurable reliability profile of 1–10 fresh attempts (default: 3). Selecting the maximum shows a resource warning. Reports show per-case and overall success rates and retain every attempt trace.
 - Timing is split into image/setup, container startup, model load, prompt evaluation, generation, tool execution, verification, and end-to-end wall time. Model rankings compare only the average per-attempt prompt evaluation + generation + tool execution time.
 - Pass/fail is determined from final answers, command results, or final workspace state—not from matching a prescribed tool call.
 - Results retain assistant thinking, tool arguments, tool results, and their ordered execution trace for diagnosis.

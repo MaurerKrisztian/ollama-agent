@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Send, Square, Wrench, CheckCircle2, XCircle, ShieldAlert, User, Bot, Loader2, FileText, Folder, Terminal, Edit3, Search, PlusCircle, Sparkles, Code2, Eye, ChevronDown, ChevronRight, Brain, X, Globe, ExternalLink, Layers, RotateCcw, Copy, Check, Scissors, Image as ImageIcon } from 'lucide-react';
+import { Send, Square, Wrench, CheckCircle2, XCircle, ShieldAlert, User, Bot, Loader2, FileText, Folder, Terminal, Edit3, Search, PlusCircle, Sparkles, Code2, Eye, ChevronDown, ChevronRight, Brain, X, Globe, ExternalLink, Layers, RotateCcw, Copy, Check, Scissors, Info, Image as ImageIcon } from 'lucide-react';
 import { ChatMessage, FileDiffData, ImageAttachment, PendingApprovalCall, TextAttachment } from '../types';
 import { getLinkPresentation } from '../linkPresentation';
 import { findActiveSkillMention } from '../skillMention';
@@ -334,6 +334,45 @@ const WebPageReaderView: React.FC<{
   </div>
 );
 
+const WebsiteFavicon: React.FC<{ url: string; size?: number }> = ({ url, size = 16 }) => {
+  const presentation = getLinkPresentation(url);
+
+  return (
+    <span aria-hidden="true" style={{ position: 'relative', display: 'grid', placeItems: 'center', width: `${size}px`, height: `${size}px`, flexShrink: 0, overflow: 'hidden', borderRadius: '4px', background: 'rgba(56, 189, 248, 0.12)' }}>
+      <Globe size={Math.max(10, size - 5)} color="#7dd3fc" />
+      {presentation && (
+        <img
+          src={presentation.faviconUrl}
+          alt=""
+          loading="lazy"
+          referrerPolicy="no-referrer"
+          onError={(event) => { event.currentTarget.style.display = 'none'; }}
+          style={{ position: 'absolute', inset: '2px', width: `${size - 4}px`, height: `${size - 4}px`, objectFit: 'contain' }}
+        />
+      )}
+    </span>
+  );
+};
+
+const CompactWebsiteLink: React.FC<{ url: string; color?: string }> = ({ url, color = '#7dd3fc' }) => {
+  const presentation = getLinkPresentation(url);
+  if (!presentation) return null;
+
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noreferrer"
+      title={url}
+      style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', minWidth: 0, maxWidth: '100%', color, textDecoration: 'none', fontFamily: 'var(--font-code)', fontSize: '0.66rem' }}
+    >
+      <WebsiteFavicon url={url} size={15} />
+      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{presentation.shortUrl}</span>
+      <ExternalLink size={9} style={{ flexShrink: 0 }} />
+    </a>
+  );
+};
+
 const ResearchTrail: React.FC<{
   steps?: Array<{ id?: number; phase?: string; kind?: string; status?: string; label?: string; url?: string; detail?: string }>;
   searchQueries?: string[];
@@ -357,7 +396,12 @@ const ResearchTrail: React.FC<{
               : <Search size={12} color="#7dd3fc" style={{ marginTop: '2px', flexShrink: 0 }} />}
           <div style={{ minWidth: 0, flex: 1 }}>
             {step.url ? (
-              <a href={step.url} target="_blank" rel="noreferrer" style={{ color: step.status === 'error' ? '#fda4af' : '#bae6fd', textDecoration: 'none', overflowWrap: 'anywhere' }}>{step.label || step.url}</a>
+              <>
+                <a href={step.url} target="_blank" rel="noreferrer" style={{ color: step.status === 'error' ? '#fda4af' : '#bae6fd', textDecoration: 'none', overflowWrap: 'anywhere' }}>{step.label || getLinkPresentation(step.url)?.shortUrl || step.url}</a>
+                <span style={{ display: 'block', marginTop: '3px' }}>
+                  <CompactWebsiteLink url={step.url} color={step.status === 'error' ? '#fda4af' : '#7dd3fc'} />
+                </span>
+              </>
             ) : (
               <span style={{ color: step.status === 'error' ? '#fda4af' : 'var(--text-main)', overflowWrap: 'anywhere' }}>{step.label}</span>
             )}
@@ -543,22 +587,32 @@ const DeepResearchResultsView: React.FC<{
         </span>
       )}
     </div>
+    <div style={{ display: 'flex', alignItems: 'flex-start', gap: '7px', padding: '8px 10px', borderRadius: '6px', border: '1px solid rgba(99, 102, 241, 0.24)', background: 'rgba(99, 102, 241, 0.08)', color: 'var(--text-muted)', fontSize: '0.71rem', lineHeight: 1.45 }}>
+      <Info size={13} style={{ marginTop: '2px', flexShrink: 0, color: '#a5b4fc' }} />
+      <span>
+        <strong style={{ color: '#c7d2fe' }}>Tool-collected research, not an AI-written answer.</strong>{' '}
+        Search queries are planned automatically, while excerpts and page content come from the linked websites. The AI uses this evidence in its separate response.
+      </span>
+    </div>
     <ResearchTrail steps={steps} searchQueries={searchQueries} errors={errors} />
     <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '320px', overflowY: 'auto' }}>
-      {sources.map((source) => (
-        <details
-          key={`${source.id}-${source.url}`}
-          style={{ padding: '8px 10px', borderRadius: '7px', background: 'rgba(15, 23, 42, 0.5)', border: '1px solid var(--border-color)', color: '#38bdf8' }}
-        >
-          <summary style={{ cursor: 'pointer', fontSize: '0.78rem' }}>
-            <span style={{ marginRight: '7px', color: 'var(--accent-teal)', fontFamily: 'var(--font-code)', fontSize: '0.72rem' }}>{source.id}</span>
-            <span>{source.title || source.url}</span>
-            {source.discovery === 'website_link' && <span style={{ marginLeft: '7px', color: 'var(--text-muted)', fontSize: '0.68rem' }}>followed link</span>}
-          </summary>
-          <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid var(--border-color)', color: 'var(--text-muted)', fontSize: '0.72rem', lineHeight: 1.45 }}>
-            <a href={source.url} target="_blank" rel="noreferrer" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', color: '#38bdf8', overflowWrap: 'anywhere' }}>
-              {source.url}<ExternalLink size={10} />
-            </a>
+      {sources.map((source) => {
+        const presentation = getLinkPresentation(source.url);
+        return (
+          <details
+            key={`${source.id}-${source.url}`}
+            style={{ padding: '8px 10px', borderRadius: '7px', background: 'rgba(15, 23, 42, 0.5)', border: '1px solid var(--border-color)', color: '#38bdf8' }}
+          >
+            <summary style={{ cursor: 'pointer', fontSize: '0.78rem' }}>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', maxWidth: '100%', verticalAlign: 'middle' }}>
+                <WebsiteFavicon url={source.url} />
+                <span style={{ color: 'var(--accent-teal)', fontFamily: 'var(--font-code)', fontSize: '0.72rem' }}>{source.id}</span>
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{source.title || presentation?.shortUrl || source.url}</span>
+              </span>
+              {source.discovery === 'website_link' && <span style={{ marginLeft: '7px', color: 'var(--text-muted)', fontSize: '0.68rem' }}>followed link</span>}
+            </summary>
+            <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid var(--border-color)', color: 'var(--text-muted)', fontSize: '0.72rem', lineHeight: 1.45 }}>
+              <CompactWebsiteLink url={source.url} color="#38bdf8" />
             {source.discovered_by && <span style={{ display: 'block', marginTop: '5px' }}>Discovered by: {source.discovered_by}</span>}
             {source.excerpt && <span style={{ display: 'block', marginTop: '6px', color: '#cbd5e1' }}>{source.excerpt}</span>}
             {source.content && (
@@ -566,9 +620,10 @@ const DeepResearchResultsView: React.FC<{
                 {source.content}{source.content_truncated ? '\n\n[content truncated]' : ''}
               </div>
             )}
-          </div>
-        </details>
-      ))}
+            </div>
+          </details>
+        );
+      })}
     </div>
     {images.length > 0 && (
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: '8px', maxHeight: '360px', overflowY: 'auto' }}>

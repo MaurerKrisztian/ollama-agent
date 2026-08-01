@@ -342,8 +342,8 @@ export async function runBenchmarkCase(
   onAttemptStart?: (attempt: number, total: number) => void,
   parallelism: number = 1,
 ): Promise<TestResultTrace> {
-  if (!Number.isInteger(attemptsPerCase) || attemptsPerCase < 3 || attemptsPerCase > 10) {
-    throw new Error('Benchmark attempts per case must be an integer between 3 and 10.');
+  if (!Number.isInteger(attemptsPerCase) || attemptsPerCase < 1 || attemptsPerCase > 10) {
+    throw new Error('Benchmark attempts per case must be an integer between 1 and 10.');
   }
   if (!Number.isInteger(parallelism) || parallelism < 1 || parallelism > 10) {
     throw new Error('Benchmark parallelism must be an integer between 1 and 10.');

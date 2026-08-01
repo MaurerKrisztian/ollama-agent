@@ -417,7 +417,7 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
     if (!Number.isFinite(benchmarkConfig.temperature) || benchmarkConfig.temperature < 0 || benchmarkConfig.temperature > 1) return 'Temperature must be between 0 and 1.';
     if (!Number.isInteger(benchmarkConfig.contextWindow) || benchmarkConfig.contextWindow < 1024) return 'Context window must be an integer of at least 1024.';
     if (!Number.isInteger(benchmarkConfig.maxLoops) || benchmarkConfig.maxLoops < 0 || benchmarkConfig.maxLoops > 50) return 'Maximum tool loops must be an integer between 0 and 50.';
-    if (!Number.isInteger(attemptsPerCase) || attemptsPerCase < 3 || attemptsPerCase > 10) return 'Attempts per case must be an integer between 3 and 10.';
+    if (!Number.isInteger(attemptsPerCase) || attemptsPerCase < 1 || attemptsPerCase > 10) return 'Attempts per case must be an integer between 1 and 10.';
     if (!Number.isInteger(parallelism) || parallelism < 1 || parallelism > 10) return 'Parallelism must be an integer between 1 and 10.';
     if (!benchmarkConfig.systemPrompt.trim()) return 'System prompt cannot be empty.';
     if (!Number.isInteger(benchmarkConfig.pruningConfig.terminalOutputTTLTurns) || benchmarkConfig.pruningConfig.terminalOutputTTLTurns < 0) return 'Terminal output TTL must be a non-negative integer.';
@@ -902,8 +902,8 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
           </label>
 
           <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', color: 'var(--text-muted)', fontSize: '0.78rem' }}>
-            Reliability attempts per case (3–10)
-            <input type="number" min="3" max="10" value={attemptsPerCase} disabled={configLocked} onChange={(event) => setAttemptsPerCase(Number(event.target.value))} style={{ padding: '10px', borderRadius: '8px', border: '1px solid var(--border-color)', background: '#111827', color: 'var(--text-main)' }} />
+            Reliability attempts per case (1–10)
+            <input type="number" min="1" max="10" value={attemptsPerCase} disabled={configLocked} onChange={(event) => setAttemptsPerCase(Number(event.target.value))} style={{ padding: '10px', borderRadius: '8px', border: '1px solid var(--border-color)', background: '#111827', color: 'var(--text-main)' }} />
           </label>
 
           <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', color: 'var(--text-muted)', fontSize: '0.78rem' }}>
@@ -911,6 +911,12 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
             <input type="number" min="1" max="10" value={parallelism} disabled={configLocked} onChange={(event) => setParallelism(Number(event.target.value))} title="1 runs attempts sequentially; higher values start this many isolated containers at once." style={{ padding: '10px', borderRadius: '8px', border: '1px solid var(--border-color)', background: '#111827', color: 'var(--text-main)' }} />
           </label>
         </div>
+
+        {attemptsPerCase === 10 && (
+          <div role="alert" style={{ marginTop: '12px', padding: '10px 12px', borderRadius: '8px', border: '1px solid rgba(245, 158, 11, 0.55)', background: 'rgba(245, 158, 11, 0.1)', color: '#fbbf24', fontSize: '0.82rem' }}>
+            <strong>Maximum reliability run:</strong> every selected case will run 10 times. This can take significant time and compute.
+          </div>
+        )}
 
         <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap', marginTop: '14px', paddingTop: '14px', borderTop: '1px solid var(--border-color)' }}>
           <button className="benchmark-secondary-button" disabled={!selectedBenchmark || editingBenchmarkId !== null} onClick={() => setShowSelectedBenchmarkTests((visible) => !visible)}>

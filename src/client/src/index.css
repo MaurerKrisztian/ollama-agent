@@ -68,6 +68,15 @@ input {
   background: rgba(148, 163, 184, 0.4);
 }
 
+.chat-session-list {
+  max-height: min(34vh, 320px);
+  min-height: 0;
+  padding-right: 4px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
 /* Code Styles */
 pre, code {
   font-family: var(--font-code);
