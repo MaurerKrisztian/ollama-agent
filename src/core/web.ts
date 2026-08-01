@@ -22,6 +22,11 @@ export interface WebSearchResult {
 export interface WebPageLink {
   title: string;
   url: string;
+  heading?: string | null;
+  section?: string | null;
+  surroundingText?: string;
+  textBefore?: string;
+  textAfter?: string;
 }
 
 export interface WebPageImage {
@@ -143,6 +148,43 @@ function cleanText(value: string | null | undefined): string {
   return (value || '').replace(/\s+/g, ' ').trim();
 }
 
+function nearestHeading(anchor: HTMLAnchorElement): string | null {
+  let current: Element | null = anchor;
+  while (current) {
+    let sibling = current.previousElementSibling;
+    while (sibling) {
+      const heading = sibling.matches('h1, h2, h3, h4, h5, h6')
+        ? sibling
+        : sibling.querySelector('h1, h2, h3, h4, h5, h6');
+      const text = cleanText(heading?.textContent);
+      if (text) return text.slice(0, 240);
+      sibling = sibling.previousElementSibling;
+    }
+    current = current.parentElement;
+  }
+  return null;
+}
+
+function linkTextContext(anchor: HTMLAnchorElement): Pick<WebPageLink, 'heading' | 'section' | 'surroundingText' | 'textBefore' | 'textAfter'> {
+  const contextElement = anchor.closest('p, li, blockquote, td, dd') || anchor.parentElement;
+  const context = cleanText(contextElement?.textContent).slice(0, 700);
+  const anchorText = cleanText(anchor.textContent);
+  const anchorOffset = anchorText ? context.toLowerCase().indexOf(anchorText.toLowerCase()) : -1;
+  const heading = nearestHeading(anchor);
+  const sectionElement = anchor.closest('section, article, main, aside');
+  const labelledSection = cleanText(
+    sectionElement?.getAttribute('aria-label') ||
+    (sectionElement?.id ? sectionElement.id.replace(/[-_]+/g, ' ') : ''),
+  );
+  return {
+    heading,
+    section: (labelledSection || heading || null)?.slice(0, 240) || null,
+    surroundingText: context,
+    textBefore: anchorOffset >= 0 ? context.slice(Math.max(0, anchorOffset - 240), anchorOffset).trim() : context.slice(0, 240),
+    textAfter: anchorOffset >= 0 ? context.slice(anchorOffset + anchorText.length, anchorOffset + anchorText.length + 240).trim() : '',
+  };
+}
+
 function extractPageLinks(document: Document, baseUrl: URL): WebPageLink[] {
   const links: WebPageLink[] = [];
   const seen = new Set<string>();
@@ -156,7 +198,11 @@ function extractPageLinks(document: Document, baseUrl: URL): WebPageLink[] {
       if (seen.has(normalized)) continue;
       if (/\.(?:pdf|zip|gz|png|jpe?g|gif|webp|svg|mp[34]|avi|mov|woff2?)(?:$|\?)/i.test(url.pathname)) continue;
       seen.add(normalized);
-      links.push({ title: cleanText(anchor.textContent) || url.pathname, url: normalized });
+      links.push({
+        title: cleanText(anchor.textContent) || url.pathname,
+        url: normalized,
+        ...linkTextContext(anchor),
+      });
       if (links.length >= 40) break;
     } catch (_) {}
   }

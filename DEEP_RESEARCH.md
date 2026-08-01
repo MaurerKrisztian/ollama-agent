@@ -45,7 +45,10 @@ Only `query` is required. All budgets have adaptive defaults and can be overridd
 | `search_queries` | string array | Optional focused queries inserted after the original question and before generated variants. |
 | `search_count` | 1–12 | Maximum number of searches. |
 | `page_count` | 1–30 | Maximum number of primary search-result pages selected for inspection. |
-| `linked_page_count` | 0–20 | Maximum number of relevant follow-up links inspected from primary pages. |
+| `linked_page_count` | 0–20 | Total maximum number of relevant follow-up links inspected across all depth levels. |
+| `link_depth` | 0–3 | Maximum recursive relevant-link depth. `0` reads only search-result pages; default is `1`. |
+| `semantic_link_classification` | boolean | Use the active Ollama model to rank links from their semantic context. Defaults to `true`; deterministic fallback remains available. |
+| `link_relevance_threshold` | 40–100 | Minimum semantic score for prioritized links. Defaults to `70`. |
 | `evidence_char_budget` | 4,000–120,000 | Approximate extracted-text budget shared across inspected sources. |
 
 The ranges are safety ceilings for local inference and web crawling. They are not fixed crawl sizes. Search and page budgets are upper bounds: fewer operations may complete when searches return fewer unique relevant results or pages fail to load. The evidence-character budget is approximate because every successful source receives at least 800 characters, as explained below.
@@ -132,6 +135,9 @@ A caller can override any budget without changing the others:
   "search_count": 10,
   "page_count": 24,
   "linked_page_count": 12,
+  "link_depth": 2,
+  "semantic_link_classification": true,
+  "link_relevance_threshold": 70,
   "evidence_char_budget": 90000
 }
 ```
@@ -277,16 +283,19 @@ Example source metadata:
 
 ### 9. Discover and follow evidence links
 
-The runtime examines links extracted from successful primary pages. It can follow relevant links on the same site or another public website, allowing it to inspect citations and supporting material rather than remaining trapped on the first domain.
+The runtime examines links extracted from successful primary pages. Every link includes its anchor, nearest heading, section, surrounding paragraph, nearby text, and parent-page identity. This makes vague anchors such as “Read more” classifiable from their context.
 
 Links are skipped when they:
 
-- have already been visited;
 - are not public HTTP/HTTPS URLs;
 - point to common login, account, privacy, terms, contact, search, tag, category, or author paths;
-- have no token overlap with the research question.
+- duplicate an already extracted or visited URL.
 
-Remaining links are scored by relevance. A soft per-parent penalty encourages the crawler to follow evidence from several primary pages instead of taking every follow-up from the same article.
+Remaining candidates are sent to the active Ollama model in batches of at most 12, with no more than two classification calls running together. Page text is explicitly treated as untrusted data. The model returns `relevant`, `uncertain`, or `not_relevant`, a 0–100 relevance score, confidence, and a short reason. Only supplied URLs are accepted; invented and duplicate decisions are ignored, scores are clamped, and missing, malformed, or unavailable model output falls back to deterministic keyword scoring.
+
+Scores of 70 or more are prioritized by default, scores from 40–69 are uncertain and use spare budget, and lower scores are skipped. Selection still respects the global follow-up budget, configured depth, URL deduplication, and soft parent/domain diversity penalties.
+
+After a selected URL opens, its actual title, excerpt, and content are classified again. The link is marked confirmed relevant or low relevance (or failed if retrieval failed). A low-relevance page remains in the inspected evidence and UI, but its outgoing links cannot expand the next crawl depth. This prevents a misleading anchor from steering recursive research away from the request.
 
 Follow-up pages are one evidence-expansion stage from the primary pages. Successful reads use `discovery: "website_link"` and record the parent page in `discovered_by`.
 
@@ -318,6 +327,8 @@ The result marks `content_truncated: true` when either the web reader truncated 
 This budget controls the evidence passed into the local model. Raising it can preserve more source detail but consumes more of the model's context window. Increasing page counts without increasing the evidence budget spreads the same text allowance across more sources.
 
 Because of the 800-character minimum, a very low evidence budget combined with many successfully inspected sources can produce more text than the nominal shared budget. For example, 20 sources receive at least 16,000 characters in total even if `evidence_char_budget` is 4,000. The minimum prevents each source from becoming too short to interpret.
+
+The active Ollama model then creates request-focused relevance notes. A highly relevant source may receive a note of up to 2,000 words, a moderately relevant source normally receives 150–300 words, and a weak source stays under 80 words. These notes help the final model navigate the retrieved evidence but do not replace the original page content.
 
 ### 11. Collect images only when requested
 
@@ -421,6 +432,7 @@ Expand **Peek into live research steps** in the active Deep Research card. It sh
 - each successfully inspected or failed page;
 - each followed evidence link;
 - each collected image;
+- live AI-note count and approximate note-context tokens;
 - the current phase and aggregate counters.
 
 Tasks can complete out of order because searches and page reads run concurrently. The trail represents actual completion order.
@@ -431,7 +443,8 @@ Tasks can complete out of order because searches and page reads run concurrently
 2. Select **Formatted**.
 3. Expand **Inspect research trail**.
 4. Expand any individual source to see its URL, discovery path, excerpt, extracted evidence, and truncation marker.
-5. Select **Raw JSON** to inspect the complete machine-readable payload.
+5. Use **View AI final-answer context** to inspect or copy the exact serialized deep-research payload placed in the model conversation, including evidence, notes, link decisions, and answer guidance.
+6. Select **Raw JSON** to inspect the complete machine-readable payload inline.
 
 The completed trail is stored with the conversation, so it remains inspectable after the live progress card disappears.
 
@@ -517,6 +530,8 @@ Use custom search queries when particular jurisdictions, evidence types, or cont
 - Increase `search_count` when the topic has several distinct subquestions or terminology varies across sources.
 - Increase `page_count` when source diversity matters or search results contain many primary documents.
 - Increase `linked_page_count` when useful evidence is likely to be found in citations, appendices, regulations, or methodology pages.
+- Increase `link_depth` only when useful evidence chains are likely to require multiple hops.
+- Raise `link_relevance_threshold` to make follow-up selection stricter, or disable `semantic_link_classification` to use deterministic scoring alone.
 - Increase `evidence_char_budget` when sources are technical and the final answer needs methodological detail.
 - Increase `image_count` only when images are part of the requested deliverable.
 - Supply `search_queries` when required perspectives might not be discovered reliably from generic variants.

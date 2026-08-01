@@ -102,7 +102,8 @@ test('web page reader extracts article content as Markdown', async () => {
 test('web page reader returns bounded navigable page links', async () => {
   const html = `
     <html><body><article>
-      <a href="/guide/details#section">Detailed guide</a>
+      <h2>Battery recycling costs</h2>
+      <p>The complete methodology and dataset are in the <a href="/guide/details#section">Detailed guide</a> for this study.</p>
       <a href="mailto:test@example.com">Email</a>
       <a href="/asset.pdf">PDF</a>
     </article></body></html>
@@ -113,7 +114,15 @@ test('web page reader returns bounded navigable page links', async () => {
   );
 
   const page = await client.readPage('https://example.com/guide');
-  assert.deepEqual(page.links, [{ title: 'Detailed guide', url: 'https://example.com/guide/details' }]);
+  assert.deepEqual(page.links, [{
+    title: 'Detailed guide',
+    url: 'https://example.com/guide/details',
+    heading: 'Battery recycling costs',
+    section: 'Battery recycling costs',
+    surroundingText: 'The complete methodology and dataset are in the Detailed guide for this study.',
+    textBefore: 'The complete methodology and dataset are in the',
+    textAfter: 'for this study.',
+  }]);
 });
 
 test('web page reader returns useful absolute image URLs', async () => {

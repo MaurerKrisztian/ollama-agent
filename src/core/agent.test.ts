@@ -5,6 +5,22 @@ import path from 'node:path';
 import test from 'node:test';
 import { AgentEngine } from './agent.js';
 
+test('deep-research relevance notes allow up to 2,000 words for highly relevant sources', async () => {
+  const agent = new AgentEngine();
+  let request: any = null;
+  (agent as any).ollamaClient.chatStream = async (captured: any) => {
+    request = captured;
+    return { content: '{"notes":[{"source_id":"S1","relevant":true,"note":"Evidence","key_points":[],"limitations":null}]}' };
+  };
+
+  await (agent as any).generateDeepResearchNotes({
+    query: 'test question',
+    sources: [{ id: 'S1', title: 'Source', url: 'https://example.com', excerpt: null, content: 'Evidence', relevant_links: [] }],
+  });
+
+  assert.match(request.messages[0].content, /up to 2,000 words/);
+});
+
 async function withAgent(
   responses: Array<{ content: string; tool_calls?: any[] }>,
   run: (agent: AgentEngine, workspace: string) => Promise<void>

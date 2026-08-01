@@ -4,6 +4,7 @@ import { exec } from 'child_process';
 import { ToolDefinition, ToolComplexityProfile } from './types.js';
 import { WebClient } from './web.js';
 import { DeepResearchRunner } from './deepResearch.js';
+import type { DeepResearchNoteGenerator, DeepResearchSemanticClassifier } from './deepResearch.js';
 import { McpClientManager } from './mcp.js';
 import { TerminalSessionManager, stripAnsiCodes } from './terminalManager.js';
 import { LspManager } from './lsp.js';
@@ -403,6 +404,22 @@ export const BUILTIN_TOOLS: ToolDefinition[] = [
           minimum: 0,
           maximum: 20,
         },
+        link_depth: {
+          type: 'number',
+          description: 'Maximum relevant-link traversal depth from 0 to 3. Use 0 to inspect only search-result pages; defaults to 1.',
+          minimum: 0,
+          maximum: 3,
+        },
+        semantic_link_classification: {
+          type: 'boolean',
+          description: 'Use the active Ollama model to classify link meaning from anchor and surrounding context. Defaults to true and safely falls back to deterministic scoring.',
+        },
+        link_relevance_threshold: {
+          type: 'number',
+          description: 'Minimum semantic relevance score for prioritized links, from 40 to 100. Defaults to 70.',
+          minimum: 40,
+          maximum: 100,
+        },
         evidence_char_budget: {
           type: 'number',
           description: 'Optional total extracted evidence budget from 4,000 to 120,000 characters, shared across inspected sources.',
@@ -725,6 +742,14 @@ export class ToolExecutor {
 
   public getWorkingDir(): string {
     return this.workingDir;
+  }
+
+  public setDeepResearchNoteGenerator(noteGenerator?: DeepResearchNoteGenerator): void {
+    this.deepResearchRunner.setNoteGenerator(noteGenerator);
+  }
+
+  public setDeepResearchSemanticClassifier(classifier?: DeepResearchSemanticClassifier): void {
+    this.deepResearchRunner.setSemanticClassifier(classifier);
   }
 
   public setWorkingDir(newDir: string): { success: boolean; path: string; error?: string } {
@@ -1418,6 +1443,9 @@ export class ToolExecutor {
             searchCount: args.search_count,
             pageCount: args.page_count,
             linkedPageCount: args.linked_page_count,
+            linkDepth: args.link_depth,
+            semanticLinkClassification: args.semantic_link_classification,
+            linkRelevanceThreshold: args.link_relevance_threshold,
             evidenceCharBudget: args.evidence_char_budget,
           });
         } catch (err: any) {
