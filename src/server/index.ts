@@ -3,8 +3,10 @@ import cors from 'cors';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
+import { createServer } from 'node:http';
 import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
+import { Server as SocketIOServer } from 'socket.io';
 import { AgentEngine } from '../core/agent.js';
 import { TOOL_DEFINITIONS } from '../core/tools.js';
 import { BENCHMARK_TEST_CASES } from '../benchmark/cases/index.js';
@@ -33,6 +35,10 @@ import { handleOpenAiChatCompletions, handleOpenAiModels } from './openaiAdapter
 import fsSync from 'node:fs';
 
 const app = express();
+const httpServer = createServer(app);
+const io = new SocketIOServer(httpServer, {
+  cors: { origin: true, credentials: true },
+});
 const PORT = process.env.PORT || 3001;
 
 const CONFIG_FILE_PATH = path.join(os.homedir(), '.local-model-chat-config.json');
@@ -203,7 +209,7 @@ async function getGpuMetrics(): Promise<{ name: string; gpuUtil: number; memUtil
   try {
     const cmd = 'nvidia-smi --query-gpu=name,utilization.gpu,utilization.memory,memory.used,memory.total --format=csv,noheader,nounits';
     const { stdout } = await execAsync(cmd, { timeout: 1500 });
-    const parts = stdout.trim().split(',').map((p) => p.trim());
+    const parts = stdout.trim().split(/\r?\n/, 1)[0].split(',').map((p) => p.trim());
     if (parts.length >= 5 && parts[0]) {
       return {
         name: parts[0],
@@ -218,7 +224,7 @@ async function getGpuMetrics(): Promise<{ name: string; gpuUtil: number; memUtil
       try {
         const nvsmiPath = '"C:\\Program Files\\NVIDIA Corporation\\NVSMI\\nvidia-smi.exe"';
         const { stdout } = await execAsync(`${nvsmiPath} --query-gpu=name,utilization.gpu,utilization.memory,memory.used,memory.total --format=csv,noheader,nounits`, { timeout: 1500 });
-        const parts = stdout.trim().split(',').map((p) => p.trim());
+        const parts = stdout.trim().split(/\r?\n/, 1)[0].split(',').map((p) => p.trim());
         if (parts.length >= 5 && parts[0]) {
           return {
             name: parts[0],
@@ -252,32 +258,102 @@ async function getGpuMetrics(): Promise<{ name: string; gpuUtil: number; memUtil
   return null;
 }
 
-// GET /api/system/metrics - Fetch live CPU, System RAM, and GPU utilization metrics
+async function getSystemMetrics() {
+  const cpuUtil = getCpuUsage();
+  const totalMem = os.totalmem();
+  const freeMem = os.freemem();
+  const usedMem = totalMem - freeMem;
+  const memUtil = Number(((usedMem / totalMem) * 100).toFixed(1));
+  const gpu = await getGpuMetrics();
+
+  return {
+    cpu: {
+      utilization: cpuUtil,
+      cores: os.cpus().length,
+    },
+    memory: {
+      usedGb: Number((usedMem / (1024 * 1024 * 1024)).toFixed(2)),
+      totalGb: Number((totalMem / (1024 * 1024 * 1024)).toFixed(2)),
+      utilization: memUtil,
+    },
+    gpu,
+  };
+}
+
+// Keep the endpoint for API compatibility; the web client receives these metrics via Socket.IO.
 app.get('/api/system/metrics', async (_req, res) => {
   try {
-    const cpuUtil = getCpuUsage();
-    const totalMem = os.totalmem();
-    const freeMem = os.freemem();
-    const usedMem = totalMem - freeMem;
-    const memUtil = Number(((usedMem / totalMem) * 100).toFixed(1));
-    const gpu = await getGpuMetrics();
-
-    res.json({
-      success: true,
-      cpu: {
-        utilization: cpuUtil,
-        cores: os.cpus().length,
-      },
-      memory: {
-        usedGb: Number((usedMem / (1024 * 1024 * 1024)).toFixed(2)),
-        totalGb: Number((totalMem / (1024 * 1024 * 1024)).toFixed(2)),
-        utilization: memUtil,
-      },
-      gpu,
-    });
+    res.json({ success: true, ...await getSystemMetrics() });
   } catch (_) {
     res.json({ success: false, error: 'Hardware metrics unavailable' });
   }
+});
+
+let liveStateInterval: NodeJS.Timeout | null = null;
+let metricsCollectionInFlight = false;
+let runningModelsCollectionInFlight = false;
+
+const getConfigState = () => ({
+  config: getPublicConfig(),
+  context: agent.getContextManager().getContextInfo(),
+});
+
+function broadcastTerminalSessions() {
+  const terminalManager = agent.getToolExecutor().getTerminalManager();
+  io.emit('terminal:sessions', terminalManager.listSessions());
+}
+
+async function broadcastRunningModels() {
+  if (runningModelsCollectionInFlight) return;
+  runningModelsCollectionInFlight = true;
+  try {
+    io.emit('models:running', await agent.getRunningModels());
+  } catch (_) {
+    io.emit('models:running', []);
+  } finally {
+    runningModelsCollectionInFlight = false;
+  }
+}
+
+async function broadcastSystemMetrics() {
+  if (metricsCollectionInFlight) return;
+  metricsCollectionInFlight = true;
+  try {
+    io.emit('system:metrics', await getSystemMetrics());
+  } catch (_) {
+    io.emit('system:metrics:error');
+  } finally {
+    metricsCollectionInFlight = false;
+  }
+}
+
+io.on('connection', (socket) => {
+  socket.emit('config:state', getConfigState());
+  socket.emit('terminal:sessions', agent.getToolExecutor().getTerminalManager().listSessions());
+  void broadcastSystemMetrics();
+  void broadcastRunningModels();
+  if (!liveStateInterval) {
+    liveStateInterval = setInterval(() => {
+      broadcastTerminalSessions();
+      void broadcastSystemMetrics();
+      void broadcastRunningModels();
+    }, 3000);
+  }
+
+  socket.on('terminal:sessions:request', () => {
+    socket.emit('terminal:sessions', agent.getToolExecutor().getTerminalManager().listSessions());
+  });
+
+  socket.on('models:running:request', () => {
+    void broadcastRunningModels();
+  });
+
+  socket.on('disconnect', () => {
+    if (io.engine.clientsCount === 0 && liveStateInterval) {
+      clearInterval(liveStateInterval);
+      liveStateInterval = null;
+    }
+  });
 });
 app.get('/api/models/show', async (req, res) => {
   try {
@@ -362,6 +438,8 @@ app.post('/api/config', (req, res) => {
     model: currentConfig.model,
   });
 
+  io.emit('config:state', getConfigState());
+
   res.json({
     success: true,
     config: getPublicConfig(),
@@ -428,6 +506,7 @@ app.post('/api/terminal/sessions', (req, res) => {
   if (!result.success) {
     return res.status(400).json({ success: false, error: result.error });
   }
+  broadcastTerminalSessions();
   res.json({ success: true, session: result.session });
 });
 
@@ -452,6 +531,7 @@ app.delete('/api/terminal/sessions/:id', (req, res) => {
   if (!result.success) {
     return res.status(404).json({ success: false, error: result.error });
   }
+  broadcastTerminalSessions();
   res.json({ success: true });
 });
 
@@ -577,6 +657,7 @@ app.post('/api/clear', (req, res) => {
   agent.resetChat();
   const terminalManager = agent.getToolExecutor().getTerminalManager();
   terminalManager.clearAllSessions();
+  broadcastTerminalSessions();
   res.json({
     success: true,
     context: agent.getContextManager().getContextInfo(),
@@ -679,6 +760,8 @@ app.post('/api/chat/tool-settings', (req, res) => {
     enableThinking: agent.getConfig().enableThinking,
     complexityProfile: agent.getConfig().complexityProfile,
   });
+
+  io.emit('config:state', getConfigState());
 
   res.json({
     success: true,
@@ -1176,7 +1259,7 @@ app.post('/api/benchmark/run-stream', async (req, res) => {
 app.get('/v1/models', (req, res) => handleOpenAiModels(agent, req, res));
 app.post('/v1/chat/completions', (req, res) => handleOpenAiChatCompletions(agent, req, res));
 
-app.listen(PORT, () => {
+httpServer.listen(PORT, () => {
   console.log(`\n🚀 Server listening on http://localhost:${PORT}`);
   console.log(`🔌 Agent configured for Ollama host: ${agent.getConfig().ollamaHost}`);
   console.log(`📁 Active Working Directory: ${agent.getConfig().workingDir}\n`);

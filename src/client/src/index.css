@@ -756,11 +756,15 @@ code {
   }
 
   .attachment-viewer {
-    position: absolute;
+    position: absolute !important;
     inset: 0;
     z-index: 30;
     width: 100% !important;
     border-left: 0 !important;
+  }
+
+  .attachment-resize-handle {
+    display: none !important;
   }
 
   .benchmark-view {

@@ -639,7 +639,8 @@ const ToolInvocationCard: React.FC<{
 const ToolResultCard: React.FC<{
   message: ChatMessage;
   args: Record<string, any>;
-}> = ({ message, args }) => {
+  onOpenFile?: (file: TextAttachment) => void;
+}> = ({ message, args, onOpenFile }) => {
   const [expanded, setExpanded] = useState(false);
   const [viewMode, setViewMode] = useState<'formatted' | 'raw'>('formatted');
 
@@ -667,6 +668,27 @@ const ToolResultCard: React.FC<{
     ? message.content.replace(/^\[Context Pruned:\s*/, '').replace(/\]$/, '')
     : getToolResultSummary(message.name, args, parsedContent);
 
+  const readFilePath = message.name === 'read_file' && !isFailed && typeof parsedContent?.content === 'string'
+    ? String(parsedContent.file_path || args.relative_path || '')
+    : '';
+  const readFileLineCount = readFilePath
+    ? (parsedContent.content ? parsedContent.content.split('\n').length : 0)
+    : 0;
+  const readFileSize = typeof parsedContent?.size_bytes === 'number'
+    ? parsedContent.size_bytes
+    : new Blob([parsedContent?.content || '']).size;
+
+  const openReadFile = (event: React.MouseEvent) => {
+    event.stopPropagation();
+    if (!readFilePath || !onOpenFile) return;
+    onOpenFile({
+      name: readFilePath,
+      content: parsedContent.content,
+      size: readFileSize,
+      type: 'text/plain',
+    });
+  };
+
   const isWebSearch = message.name === 'web_search' && parsedContent?.results;
   const isWebPageRead = message.name === 'read_web_page' && parsedContent?.markdown;
   const hasFormattedView = isWebSearch || isWebPageRead || fileDiff;
@@ -680,9 +702,17 @@ const ToolResultCard: React.FC<{
   return (
     <div className="animate-fade-in" style={{ marginLeft: '44px', maxWidth: '80%' }}>
       <div style={{ background: bgColor, border: `1px solid ${borderColor}`, borderRadius: '8px', fontSize: '0.825rem', overflow: 'hidden' }}>
-        <button
-          type="button"
+        <div
+          role="button"
+          tabIndex={0}
           onClick={() => setExpanded((current) => !current)}
+          onKeyDown={(event) => {
+            if (event.target !== event.currentTarget) return;
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              setExpanded((current) => !current);
+            }
+          }}
           aria-expanded={expanded}
           title={expanded ? 'Hide tool result' : 'Show tool result'}
           style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '7px', padding: '7px 10px', border: 0, background: 'transparent', color: mainColor, cursor: 'pointer', textAlign: 'left', font: 'inherit' }}
@@ -700,13 +730,27 @@ const ToolResultCard: React.FC<{
               Pruned
             </span>
           )}
-          {summary && (
+          {readFilePath ? (
+            <span style={{ minWidth: 0, display: 'flex', alignItems: 'center', gap: '5px', overflow: 'hidden', color: 'var(--text-muted)', fontFamily: 'var(--font-code)', fontSize: '0.75rem' }}>
+              <button
+                type="button"
+                onClick={openReadFile}
+                title={`Open ${readFilePath} in file viewer`}
+                style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', padding: 0, border: 0, background: 'transparent', color: '#38bdf8', font: 'inherit', fontFamily: 'inherit', textDecoration: 'underline', textUnderlineOffset: '2px', cursor: 'pointer' }}
+              >
+                {readFilePath}
+              </button>
+              <span style={{ whiteSpace: 'nowrap' }}>
+                ({readFileLineCount} {readFileLineCount === 1 ? 'line' : 'lines'}, {readFileSize} bytes)
+              </span>
+            </span>
+          ) : summary && (
             <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: isPruned ? '#d8b4fe' : isFailed ? '#f87171' : 'var(--text-muted)', fontFamily: 'var(--font-code)', fontSize: '0.75rem' }}>
               {summary}
             </span>
           )}
           <ChevronDown size={15} style={{ marginLeft: 'auto', flexShrink: 0, transform: expanded ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s ease' }} />
-        </button>
+        </div>
 
         {expanded && (
           <div style={{ padding: '0 12px 12px', borderTop: `1px solid ${borderTopColor}` }}>
@@ -1114,15 +1158,57 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   const [imageAttachments, setImageAttachments] = useState<ImageAttachment[]>([]);
   const [attachmentError, setAttachmentError] = useState('');
   const [viewedAttachment, setViewedAttachment] = useState<TextAttachment | null>(null);
+  const [attachmentViewMode, setAttachmentViewMode] = useState<'source' | 'rendered'>('source');
+  const [attachmentViewerWidth, setAttachmentViewerWidth] = useState(420);
+  const [isResizingAttachmentViewer, setIsResizingAttachmentViewer] = useState(false);
   const [rejectionReason, setRejectionReason] = useState('');
   const [slashMenuOpen, setSlashMenuOpen] = useState(false);
   const [selectedSlashIndex, setSelectedSlashIndex] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const chatMainRef = useRef<HTMLDivElement>(null);
   const dragDepth = useRef(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const [previewImage, setPreviewImage] = useState<{ src: string; alt?: string } | null>(null);
+
+  const openAttachmentViewer = (file: TextAttachment) => {
+    setAttachmentViewMode('source');
+    setViewedAttachment(file);
+  };
+
+  const clampAttachmentViewerWidth = (width: number) => {
+    const availableWidth = chatMainRef.current?.getBoundingClientRect().width ?? window.innerWidth;
+    const maximumWidth = Math.max(300, Math.min(900, availableWidth - 280));
+    return Math.min(maximumWidth, Math.max(300, width));
+  };
+
+  useEffect(() => {
+    if (!isResizingAttachmentViewer) return;
+
+    const previousCursor = document.body.style.cursor;
+    const previousUserSelect = document.body.style.userSelect;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+
+    const handlePointerMove = (event: PointerEvent) => {
+      const mainBounds = chatMainRef.current?.getBoundingClientRect();
+      if (!mainBounds) return;
+      setAttachmentViewerWidth(clampAttachmentViewerWidth(mainBounds.right - event.clientX));
+    };
+    const handlePointerUp = () => setIsResizingAttachmentViewer(false);
+
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', handlePointerUp);
+    window.addEventListener('pointercancel', handlePointerUp);
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+      window.removeEventListener('pointercancel', handlePointerUp);
+      document.body.style.cursor = previousCursor;
+      document.body.style.userSelect = previousUserSelect;
+    };
+  }, [isResizingAttachmentViewer]);
 
   useEffect(() => {
     const handlePaste = (e: ClipboardEvent) => {
@@ -1370,7 +1456,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
           </div>
         </div>
       )}
-      <div className="chat-main" style={{ flex: 1, display: 'flex', minHeight: 0 }}>
+      <div ref={chatMainRef} className="chat-main" style={{ flex: 1, display: 'flex', minHeight: 0 }}>
       {/* Messages Scrollable Container */}
       <div className="messages-container" style={{ flex: 1, minWidth: 0, overflowY: 'auto', padding: '24px 32px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
         {messages.length === 0 && !streamingText && (
@@ -1461,7 +1547,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                           <button
                             type="button"
                             key={`${file.name}-${index}`}
-                            onClick={() => setViewedAttachment(file)}
+                            onClick={() => openAttachmentViewer(file)}
                             title={`Open ${file.name}`}
                             style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '4px 8px', border: '1px solid rgba(255, 255, 255, 0.18)', borderRadius: '7px', background: 'rgba(15, 23, 42, 0.28)', color: 'inherit', font: 'inherit', fontSize: '0.74rem', cursor: 'pointer' }}
                           >
@@ -1528,7 +1614,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
             const matchingCall = messages
               .flatMap((message) => message.tool_calls || [])
               .find((call) => call.id === msg.tool_call_id);
-            return <ToolResultCard key={msg.id} message={msg} args={matchingCall?.arguments || {}} />;
+            return <ToolResultCard key={msg.id} message={msg} args={matchingCall?.arguments || {}} onOpenFile={openAttachmentViewer} />;
           }
 
           return null;
@@ -1741,7 +1827,30 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
       </div>
 
       {viewedAttachment && (
-        <aside className="attachment-viewer" style={{ width: 'min(420px, 42vw)', flexShrink: 0, display: 'flex', flexDirection: 'column', borderLeft: '1px solid var(--border-color)', background: 'rgba(15, 23, 42, 0.96)', minHeight: 0 }}>
+        <aside className="attachment-viewer" style={{ position: 'relative', width: `${attachmentViewerWidth}px`, flexShrink: 0, display: 'flex', flexDirection: 'column', borderLeft: '1px solid var(--border-color)', background: 'rgba(15, 23, 42, 0.96)', minHeight: 0 }}>
+          <div
+            className="attachment-resize-handle"
+            role="separator"
+            aria-label="Resize file viewer"
+            aria-orientation="vertical"
+            aria-valuenow={attachmentViewerWidth}
+            tabIndex={0}
+            title="Drag to resize file viewer"
+            onPointerDown={(event) => {
+              event.preventDefault();
+              setIsResizingAttachmentViewer(true);
+            }}
+            onDoubleClick={() => setAttachmentViewerWidth(clampAttachmentViewerWidth(420))}
+            onKeyDown={(event) => {
+              if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+              event.preventDefault();
+              const change = event.key === 'ArrowLeft' ? 24 : -24;
+              setAttachmentViewerWidth((current) => clampAttachmentViewerWidth(current + change));
+            }}
+            style={{ position: 'absolute', zIndex: 2, insetBlock: 0, left: '-6px', width: '12px', display: 'flex', justifyContent: 'center', cursor: 'col-resize', touchAction: 'none', outline: 'none' }}
+          >
+            <span style={{ width: '2px', height: '100%', background: isResizingAttachmentViewer ? 'var(--accent-primary)' : 'var(--border-color)', transition: 'background 0.15s' }} />
+          </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '9px', padding: '14px 16px', borderBottom: '1px solid var(--border-color)' }}>
             <FileText size={18} color="var(--accent-primary)" />
             <div style={{ flex: 1, minWidth: 0 }}>
@@ -1755,6 +1864,28 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                 </span>
               </div>
             </div>
+            {/\.(?:md|markdown)$/i.test(viewedAttachment.name) && (
+              <div style={{ display: 'flex', gap: '2px', padding: '2px', border: '1px solid var(--border-color)', borderRadius: '7px', background: 'rgba(30, 41, 59, 0.7)' }}>
+                <button
+                  type="button"
+                  onClick={() => setAttachmentViewMode('source')}
+                  aria-pressed={attachmentViewMode === 'source'}
+                  title="Show Markdown source"
+                  style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '4px 7px', border: 0, borderRadius: '5px', background: attachmentViewMode === 'source' ? 'rgba(99, 102, 241, 0.25)' : 'transparent', color: attachmentViewMode === 'source' ? '#c7d2fe' : 'var(--text-muted)', fontSize: '0.7rem', fontWeight: 600, cursor: 'pointer' }}
+                >
+                  <Code2 size={12} /> Source
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAttachmentViewMode('rendered')}
+                  aria-pressed={attachmentViewMode === 'rendered'}
+                  title="Render Markdown"
+                  style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '4px 7px', border: 0, borderRadius: '5px', background: attachmentViewMode === 'rendered' ? 'rgba(99, 102, 241, 0.25)' : 'transparent', color: attachmentViewMode === 'rendered' ? '#c7d2fe' : 'var(--text-muted)', fontSize: '0.7rem', fontWeight: 600, cursor: 'pointer' }}
+                >
+                  <Eye size={12} /> Preview
+                </button>
+              </div>
+            )}
             <button
               type="button"
               onClick={() => setViewedAttachment(null)}
@@ -1765,9 +1896,15 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
               <X size={16} />
             </button>
           </div>
-          <pre style={{ flex: 1, minHeight: 0, margin: 0, padding: '16px', overflow: 'auto', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', color: 'var(--text-main)', background: 'transparent', fontFamily: 'var(--font-code)', fontSize: '0.8rem', lineHeight: 1.55 }}>
-            <HighlightedAttachment file={viewedAttachment} />
-          </pre>
+          {/\.(?:md|markdown)$/i.test(viewedAttachment.name) && attachmentViewMode === 'rendered' ? (
+            <div style={{ flex: 1, minHeight: 0, padding: '18px', overflow: 'auto', color: 'var(--text-main)', fontSize: '0.875rem', lineHeight: 1.6 }}>
+              <MarkdownContent content={viewedAttachment.content} />
+            </div>
+          ) : (
+            <pre style={{ flex: 1, minHeight: 0, margin: 0, padding: '16px', overflow: 'auto', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', color: 'var(--text-main)', background: 'transparent', fontFamily: 'var(--font-code)', fontSize: '0.8rem', lineHeight: 1.55 }}>
+              <HighlightedAttachment file={viewedAttachment} />
+            </pre>
+          )}
         </aside>
       )}
       </div>

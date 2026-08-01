@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { io, type Socket } from 'socket.io-client';
 import { Header } from './components/Header';
 import { ChatWindow } from './components/ChatWindow';
 import { ContextSidebar } from './components/ContextSidebar';
@@ -69,45 +70,14 @@ export const App: React.FC = () => {
   const [terminalSessions, setTerminalSessions] = useState<TerminalSessionInfo[]>([]);
   const [terminalSessionsModalOpen, setTerminalSessionsModalOpen] = useState(false);
   const [terminalSidebarOpen, setTerminalSidebarOpen] = useState(false);
+  const liveSocketRef = useRef<Socket | null>(null);
 
-  const fetchRunningModels = async () => {
-    try {
-      const res = await fetch('/api/models/running');
-      if (res.ok) {
-        const data = await res.json();
-        if (data.runningModels) {
-          setRunningModels(data.runningModels);
-        }
-      }
-    } catch (_) {}
-  };
-
-  const fetchSystemMetrics = async () => {
-    try {
-      const res = await fetch('/api/system/metrics');
-      if (res.ok) {
-        const data = await res.json();
-        if (data && data.success) {
-          setSystemMetrics(data);
-          return;
-        }
-      }
-      setSystemMetrics(null);
-    } catch (_) {
-      setSystemMetrics(null);
-    }
+  const requestRunningModels = async () => {
+    liveSocketRef.current?.emit('models:running:request');
   };
 
   const fetchTerminalSessions = async () => {
-    try {
-      const res = await fetch('/api/terminal/sessions');
-      if (res.ok) {
-        const data = await res.json();
-        if (data.success && data.sessions) {
-          setTerminalSessions(data.sessions);
-        }
-      }
-    } catch (_) {}
+    liveSocketRef.current?.emit('terminal:sessions:request');
   };
 
   const handleTerminateTerminalSession = async (sessionId: string) => {
@@ -119,36 +89,28 @@ export const App: React.FC = () => {
     } catch (_) {}
   };
 
-  const fetchConfig = async () => {
-    try {
-      const configRes = await fetch('/api/config');
-      if (configRes.ok) {
-        const data = await configRes.json();
-        if (data.config) {
-          setConfig((prev) => ({
-            ...prev,
-            ...data.config,
-          }));
-          if (data.config.workingDir) {
-            localStorage.setItem('local-model-chat.workingDir', data.config.workingDir);
-          }
-        }
-        if (data.context) {
-          setContextInfo(data.context);
+  useEffect(() => {
+    const socket = io();
+    liveSocketRef.current = socket;
+    socket.on('system:metrics', (metrics: SystemMetrics) => setSystemMetrics(metrics));
+    socket.on('system:metrics:error', () => setSystemMetrics(null));
+    socket.on('terminal:sessions', (sessions: TerminalSessionInfo[]) => setTerminalSessions(sessions));
+    socket.on('models:running', (activeModels: OllamaRunningModelInfo[]) => setRunningModels(activeModels));
+    socket.on('config:state', (data: { config?: AgentConfig; context?: ContextInfo }) => {
+      if (data.config) {
+        setConfig((prev) => ({ ...prev, ...data.config }));
+        if (data.config.workingDir) {
+          localStorage.setItem('local-model-chat.workingDir', data.config.workingDir);
         }
       }
-    } catch (_) {}
-  };
-
-  useEffect(() => {
-    fetchSystemMetrics();
-    fetchTerminalSessions();
-    const interval = setInterval(() => {
-      fetchSystemMetrics();
-      fetchTerminalSessions();
-      fetchConfig();
-    }, 3000);
-    return () => clearInterval(interval);
+      if (data.context) {
+        setContextInfo(data.context);
+      }
+    });
+    return () => {
+      liveSocketRef.current = null;
+      socket.disconnect();
+    };
   }, []);
 
   const loadInitialState = async () => {
@@ -206,8 +168,6 @@ export const App: React.FC = () => {
         }
       }
 
-      await fetchRunningModels();
-
       const contextRes = await fetch('/api/context');
       if (contextRes.ok) {
         const data = await contextRes.json();
@@ -219,6 +179,8 @@ export const App: React.FC = () => {
         const data = await messagesRes.json();
         setMessages(Array.isArray(data.messages) ? data.messages : []);
       }
+
+      await requestRunningModels();
     } catch (err) {
       console.error('Error loading initial app state:', err);
     }
@@ -233,12 +195,6 @@ export const App: React.FC = () => {
   useEffect(() => {
     void loadInitialState();
   }, []);
-
-  useEffect(() => {
-    void fetchRunningModels();
-    const interval = setInterval(fetchRunningModels, isGenerating ? 750 : 4000);
-    return () => clearInterval(interval);
-  }, [isGenerating]);
 
   useEffect(() => {
     if (!isGenerating || isActiveModelLoaded) {
@@ -353,7 +309,7 @@ export const App: React.FC = () => {
     setConfig(configData.config);
     setModels(modelsData.models || []);
     setRunningModels([]);
-    await fetchRunningModels();
+    await requestRunningModels();
   };
 
   const handleNewChat = async () => {

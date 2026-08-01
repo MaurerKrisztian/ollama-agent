@@ -58,6 +58,10 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
 }) => {
   if (!isOpen) return null;
 
+  const vramUsage = systemMetrics?.gpu && systemMetrics.gpu.memTotalMb > 0
+    ? (systemMetrics.gpu.memUsedMb / systemMetrics.gpu.memTotalMb) * 100
+    : 0;
+
   return (
     <aside
       className="glass-panel animate-fade-in left-sidebar"
@@ -387,10 +391,26 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
               <strong style={{ color: systemMetrics.memory.utilization > 85 ? '#ef4444' : '#fff' }}>{systemMetrics.memory.usedGb} / {systemMetrics.memory.totalGb} GB</strong>
             </div>
             {systemMetrics.gpu && (
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.78rem' }}>
-                <span style={{ color: 'var(--text-muted)' }}>GPU Load:</span>
-                <strong style={{ color: '#4ade80' }}>{systemMetrics.gpu.gpuUtil}%</strong>
-              </div>
+              <>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px', fontSize: '0.78rem' }}>
+                  <span style={{ color: 'var(--text-muted)', flexShrink: 0 }}>GPU Model:</span>
+                  <strong style={{ color: '#fff', textAlign: 'right', overflowWrap: 'anywhere' }} title={systemMetrics.gpu.name}>
+                    {systemMetrics.gpu.name}
+                  </strong>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.78rem' }}>
+                  <span style={{ color: 'var(--text-muted)' }}>GPU Load:</span>
+                  <strong style={{ color: '#4ade80' }}>{systemMetrics.gpu.gpuUtil}%</strong>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.78rem' }}>
+                  <span style={{ color: 'var(--text-muted)' }}>VRAM Usage:</span>
+                  <strong style={{ color: vramUsage > 85 ? '#ef4444' : '#fff' }}>
+                    {systemMetrics.gpu.memTotalMb > 0
+                      ? `${(systemMetrics.gpu.memUsedMb / 1024).toFixed(1)} / ${(systemMetrics.gpu.memTotalMb / 1024).toFixed(1)} GB`
+                      : 'Unavailable'}
+                  </strong>
+                </div>
+              </>
             )}
           </div>
         )}
