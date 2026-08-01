@@ -60,7 +60,7 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
 
   return (
     <aside
-      className="glass-panel animate-fade-in"
+      className="glass-panel animate-fade-in left-sidebar"
       style={{
         width: '280px',
         height: '100%',

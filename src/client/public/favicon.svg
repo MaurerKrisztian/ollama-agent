@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Ollama Agent Studio">
+  <defs>
+    <linearGradient id="background" x1="8" y1="8" x2="56" y2="56" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#6366f1"/>
+      <stop offset="1" stop-color="#8b5cf6"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="15" fill="#0f172a"/>
+  <rect x="5" y="5" width="54" height="54" rx="13" fill="url(#background)"/>
+  <path d="M32 15v6m-3-6h6M18 29a7 7 0 0 1 7-7h14a7 7 0 0 1 7 7v14a7 7 0 0 1-7 7H25a7 7 0 0 1-7-7V29Z" fill="#fff" fill-opacity=".96"/>
+  <circle cx="27" cy="34" r="3" fill="#6366f1"/>
+  <circle cx="37" cy="34" r="3" fill="#6366f1"/>
+  <path d="M26 42c1.8 1.5 3.8 2.2 6 2.2s4.2-.7 6-2.2" fill="none" stroke="#6366f1" stroke-linecap="round" stroke-width="2.5"/>
+  <path d="M18 32h-3m34 0h-3" stroke="#fff" stroke-linecap="round" stroke-width="3"/>
+</svg>

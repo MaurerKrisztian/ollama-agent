@@ -302,6 +302,7 @@ export const ToolSettingsModal: React.FC<ToolSettingsModalProps> = ({
 
   return (
     <div
+      className="tool-settings-overlay"
       style={{
         position: 'fixed',
         inset: 0,
@@ -315,7 +316,7 @@ export const ToolSettingsModal: React.FC<ToolSettingsModalProps> = ({
       }}
     >
       <div
-        className="glass-panel animate-fade-in"
+        className="glass-panel animate-fade-in tool-settings-modal"
         style={{
           width: '100%',
           maxWidth: '560px',
@@ -329,6 +330,7 @@ export const ToolSettingsModal: React.FC<ToolSettingsModalProps> = ({
       >
         {/* Modal Header */}
         <div
+          className="tool-settings-header"
           style={{
             padding: '18px 24px',
             background: 'rgba(30, 41, 59, 0.8)',
@@ -353,10 +355,10 @@ export const ToolSettingsModal: React.FC<ToolSettingsModalProps> = ({
         </div>
 
         {/* Modal Body */}
-        <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '20px', maxHeight: '75vh', overflowY: 'auto' }}>
+        <div className="tool-settings-body" style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '20px', maxHeight: '75vh', overflowY: 'auto' }}>
           {/* Section 0: Tool Complexity Profile Selector */}
-          <div style={{ background: 'rgba(15, 23, 42, 0.7)', padding: '16px', borderRadius: '12px', border: '1px solid var(--accent-primary)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+          <div className="tool-settings-section" style={{ background: 'rgba(15, 23, 42, 0.7)', padding: '16px', borderRadius: '12px', border: '1px solid var(--accent-primary)' }}>
+            <div className="tool-settings-section-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <Cpu size={18} color="var(--accent-primary)" />
                 <span style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--text-main)' }}>
@@ -392,7 +394,7 @@ export const ToolSettingsModal: React.FC<ToolSettingsModalProps> = ({
               Select the tool schema complexity sent to the model context. Match your active Ollama model size to ensure reliable tool calls. Only one schema profile is active at a time.
             </p>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
+            <div className="tool-profile-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
               {[
                 {
                   id: 'simple',
@@ -449,7 +451,7 @@ export const ToolSettingsModal: React.FC<ToolSettingsModalProps> = ({
           </div>
 
           {/* Section 1: Terminal Execution Preferences */}
-          <div style={{ background: 'rgba(15, 23, 42, 0.6)', padding: '16px', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
+          <div className="tool-settings-section" style={{ background: 'rgba(15, 23, 42, 0.6)', padding: '16px', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
               <Terminal size={18} color="var(--accent-amber)" />
               <span style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--text-main)' }}>
@@ -460,7 +462,7 @@ export const ToolSettingsModal: React.FC<ToolSettingsModalProps> = ({
               Choose whether the agent must ask for your confirmation before running shell commands.
             </p>
 
-            <div style={{ display: 'flex', gap: '10px' }}>
+            <div className="tool-settings-choice-row" style={{ display: 'flex', gap: '10px' }}>
               <button
                 onClick={() => handleTerminalModeChange('confirm')}
                 style={{
@@ -553,7 +555,7 @@ export const ToolSettingsModal: React.FC<ToolSettingsModalProps> = ({
                 ))}
               </div>
 
-              <form onSubmit={handleAddAllowedCommand} style={{ display: 'flex', gap: '8px' }}>
+              <form className="tool-command-form" onSubmit={handleAddAllowedCommand} style={{ display: 'flex', gap: '8px' }}>
                 <input
                   type="text"
                   value={newCmdInput}
@@ -590,7 +592,7 @@ export const ToolSettingsModal: React.FC<ToolSettingsModalProps> = ({
           </div>
 
           {/* Section 2: File Modification Preferences */}
-          <div style={{ background: 'rgba(15, 23, 42, 0.6)', padding: '16px', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
+          <div className="tool-settings-section" style={{ background: 'rgba(15, 23, 42, 0.6)', padding: '16px', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
               <Edit3 size={18} color="var(--accent-primary)" />
               <span style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--text-main)' }}>
@@ -601,7 +603,7 @@ export const ToolSettingsModal: React.FC<ToolSettingsModalProps> = ({
               Configure approval requirements for editing existing workspace files.
             </p>
 
-            <div style={{ display: 'flex', gap: '10px' }}>
+            <div className="tool-settings-choice-row" style={{ display: 'flex', gap: '10px' }}>
               <button
                 onClick={() => handleFileEditModeChange('auto')}
                 style={{
@@ -648,8 +650,8 @@ export const ToolSettingsModal: React.FC<ToolSettingsModalProps> = ({
           </div>
 
           {/* Section 3: Max Tool Call Iterations */}
-          <div style={{ background: 'rgba(15, 23, 42, 0.6)', padding: '16px', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+          <div className="tool-settings-section" style={{ background: 'rgba(15, 23, 42, 0.6)', padding: '16px', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
+            <div className="tool-settings-section-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <RotateCcw size={18} color="var(--accent-primary)" />
                 <span style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--text-main)' }}>
@@ -703,8 +705,8 @@ export const ToolSettingsModal: React.FC<ToolSettingsModalProps> = ({
           </div>
 
           {/* Section 3.5: Model Reasoning / Thinking */}
-          <div style={{ background: 'rgba(15, 23, 42, 0.6)', padding: '16px', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+          <div className="tool-settings-section" style={{ background: 'rgba(15, 23, 42, 0.6)', padding: '16px', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
+            <div className="tool-settings-section-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <Brain size={18} color="#c084fc" />
                 <span style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--text-main)' }}>
@@ -743,7 +745,7 @@ export const ToolSettingsModal: React.FC<ToolSettingsModalProps> = ({
           </div>
 
           {/* Section 4: Categorized Toolset Controls */}
-          <div style={{ background: 'rgba(15, 23, 42, 0.6)', padding: '16px', borderRadius: '12px', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '18px' }}>
+          <div className="tool-settings-section" style={{ background: 'rgba(15, 23, 42, 0.6)', padding: '16px', borderRadius: '12px', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '18px' }}>
             <div style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '8px' }}>
               <span style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--text-main)', display: 'block' }}>
                 🧰 Active Toolset Controls & Categories
@@ -811,7 +813,7 @@ export const ToolSettingsModal: React.FC<ToolSettingsModalProps> = ({
                     border: '1px solid var(--border-color)',
                   }}
                 >
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                  <div className="tool-group-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
                     <span style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--text-main)' }}>
                       {group.title}
                     </span>
@@ -842,7 +844,7 @@ export const ToolSettingsModal: React.FC<ToolSettingsModalProps> = ({
                     {group.description}
                   </p>
 
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px' }}>
+                  <div className="tool-list-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px' }}>
                     {group.tools.map((toolKey) => {
                       const isChecked = settings.enabledTools[toolKey] !== false;
                       return (
@@ -936,6 +938,7 @@ export const ToolSettingsModal: React.FC<ToolSettingsModalProps> = ({
 
         {/* Modal Footer */}
         <div
+          className="tool-settings-footer"
           style={{
             padding: '16px 24px',
             background: 'rgba(30, 41, 59, 0.8)',
@@ -1209,9 +1212,9 @@ const McpServersSection: React.FC = () => {
   }, []);
 
   return (
-    <div style={{ background: 'rgba(15, 23, 42, 0.6)', padding: '16px', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
+    <div className="tool-settings-section mcp-section" style={{ background: 'rgba(15, 23, 42, 0.6)', padding: '16px', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
       {/* Header & Master Toggle */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
+      <div className="mcp-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           <Cpu size={18} color={mcpEnabled ? 'var(--accent-primary)' : 'var(--text-dim)'} />
           <div>
@@ -1220,7 +1223,7 @@ const McpServersSection: React.FC = () => {
             </span>
           </div>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+        <div className="mcp-actions" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           {/* Master Enable/Disable Toggle */}
           <button
             type="button"
@@ -1370,6 +1373,7 @@ const McpServersSection: React.FC = () => {
             return (
               <div
                 key={s.name}
+                className="mcp-server-row"
                 style={{
                   display: 'flex',
                   alignItems: 'center',

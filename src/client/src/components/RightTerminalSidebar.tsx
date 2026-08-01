@@ -134,7 +134,7 @@ export const RightTerminalSidebar: React.FC<RightTerminalSidebarProps> = ({
 
   return (
     <aside
-      className="glass-panel animate-fade-in"
+      className="glass-panel animate-fade-in terminal-sidebar"
       style={{
         width: '460px',
         height: '100%',

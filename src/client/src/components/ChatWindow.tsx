@@ -1359,6 +1359,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
         setIsDragging(false);
         if (!isGenerating) void addFiles(Array.from(event.dataTransfer.files));
       }}
+      className="chat-window"
       style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', position: 'relative' }}
     >
       {isDragging && (
@@ -1369,9 +1370,9 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
           </div>
         </div>
       )}
-      <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
+      <div className="chat-main" style={{ flex: 1, display: 'flex', minHeight: 0 }}>
       {/* Messages Scrollable Container */}
-      <div style={{ flex: 1, minWidth: 0, overflowY: 'auto', padding: '24px 32px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+      <div className="messages-container" style={{ flex: 1, minWidth: 0, overflowY: 'auto', padding: '24px 32px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
         {messages.length === 0 && !streamingText && (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '80%', color: 'var(--text-dim)', textAlign: 'center', gap: '20px' }}>
             <div style={{ width: '64px', height: '64px', borderRadius: '16px', background: 'rgba(99, 102, 241, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -1387,7 +1388,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
             </div>
 
             {/* Starter Template Grid */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px', maxWidth: '780px', width: '100%', marginTop: '10px' }}>
+            <div className="quick-prompts-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px', maxWidth: '780px', width: '100%', marginTop: '10px' }}>
               {QUICK_HELPER_PROMPTS.map((item, idx) => {
                 const IconComponent = item.icon;
                 return (
@@ -1429,8 +1430,8 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
 
           if (msg.role === 'user') {
             return (
-              <div key={msg.id} className="animate-fade-in" style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px', maxWidth: '75%' }}>
+              <div key={msg.id} className="animate-fade-in chat-message chat-message-user" style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
+                <div className="message-content" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px', maxWidth: '75%' }}>
                   <div style={{ background: 'var(--accent-gradient)', color: '#fff', padding: '12px 16px', borderRadius: '16px 16px 4px 16px', fontSize: '0.925rem', lineHeight: 1.5, boxShadow: '0 4px 12px rgba(99, 102, 241, 0.25)', width: '100%' }}>
                     <div style={{ whiteSpace: 'pre-wrap' }}>{msg.displayContent ?? msg.content}</div>
                     {msg.imageAttachments && msg.imageAttachments.length > 0 && (
@@ -1502,11 +1503,11 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
 
           if (msg.role === 'assistant') {
             return (
-              <div key={msg.id} className="animate-fade-in" style={{ display: 'flex', gap: '12px', justifyContent: 'flex-start' }}>
+              <div key={msg.id} className="animate-fade-in chat-message" style={{ display: 'flex', gap: '12px', justifyContent: 'flex-start' }}>
                 <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: 'var(--accent-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                   <Bot size={18} color="#fff" />
                 </div>
-                <div style={{ maxWidth: '80%', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <div className="message-content" style={{ maxWidth: '80%', display: 'flex', flexDirection: 'column', gap: '8px' }}>
                   {msg.tool_calls && msg.tool_calls.length > 0 && (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                       {msg.tool_calls.map((tc, idx) => (
@@ -1740,7 +1741,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
       </div>
 
       {viewedAttachment && (
-        <aside style={{ width: 'min(420px, 42vw)', flexShrink: 0, display: 'flex', flexDirection: 'column', borderLeft: '1px solid var(--border-color)', background: 'rgba(15, 23, 42, 0.96)', minHeight: 0 }}>
+        <aside className="attachment-viewer" style={{ width: 'min(420px, 42vw)', flexShrink: 0, display: 'flex', flexDirection: 'column', borderLeft: '1px solid var(--border-color)', background: 'rgba(15, 23, 42, 0.96)', minHeight: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '9px', padding: '14px 16px', borderBottom: '1px solid var(--border-color)' }}>
             <FileText size={18} color="var(--accent-primary)" />
             <div style={{ flex: 1, minWidth: 0 }}>
@@ -1838,7 +1839,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
       )}
 
       {/* Input Prompt Box */}
-      <div style={{ padding: '14px 24px', background: 'rgba(15, 23, 42, 0.8)', borderTop: '1px solid var(--border-color)', zIndex: 5, display: 'flex', flexDirection: 'column', gap: '10px' }}>
+      <div className="chat-composer" style={{ padding: '14px 24px', background: 'rgba(15, 23, 42, 0.8)', borderTop: '1px solid var(--border-color)', zIndex: 5, display: 'flex', flexDirection: 'column', gap: '10px' }}>
         {/* Quick Helper Chips Bar */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px', overflowX: 'auto', paddingBottom: '2px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.725rem', fontWeight: 600, color: 'var(--accent-primary)', paddingRight: '6px', whiteSpace: 'nowrap' }}>

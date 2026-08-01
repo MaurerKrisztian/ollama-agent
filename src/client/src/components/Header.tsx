@@ -13,6 +13,7 @@ import {
   Zap,
   FolderOpen,
   Brain,
+  SlidersHorizontal,
 } from 'lucide-react';
 import { AgentConfig, ContextInfo, OllamaModelInfo, OllamaRunningModelInfo, SystemMetrics } from '../types';
 
@@ -39,6 +40,7 @@ interface HeaderProps {
   onToggleWorkingDirInfo: (enabled: boolean) => void;
   onRefreshModels: () => void;
   onOpenModelDetails: () => void;
+  onOpenModelSettings: () => void;
   systemMetrics?: SystemMetrics | null;
   leftSidebarOpen?: boolean;
   onToggleLeftSidebar?: () => void;
@@ -69,6 +71,7 @@ export const Header: React.FC<HeaderProps> = ({
   onToggleWorkingDirInfo,
   onRefreshModels,
   onOpenModelDetails,
+  onOpenModelSettings,
   systemMetrics,
   leftSidebarOpen = false,
   onToggleLeftSidebar,
@@ -76,9 +79,9 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenTerminalSessions,
 }) => {
   return (
-    <header className="glass-panel" style={{ padding: '12px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', zIndex: 10 }}>
+    <header className="glass-panel app-header" style={{ padding: '12px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', zIndex: 10 }}>
       {/* Brand & Logo */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+      <div className="header-left-controls" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
         {onToggleLeftSidebar && (
           <button
             onClick={onToggleLeftSidebar}
@@ -99,7 +102,7 @@ export const Header: React.FC<HeaderProps> = ({
             <Menu size={18} />
           </button>
         )}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+        <div className="header-brand" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           <div style={{
             width: '38px',
             height: '38px',
@@ -124,7 +127,7 @@ export const Header: React.FC<HeaderProps> = ({
       </div>
 
       {/* Navigation View Switcher Tabs: Chat Agent Studio & Benchmark Runner */}
-      <div style={{ display: 'flex', alignItems: 'center', background: 'rgba(15, 23, 42, 0.7)', padding: '4px', borderRadius: '10px', border: '1px solid var(--border-color)', gap: '4px' }}>
+      <div className="header-view-switcher" style={{ display: 'flex', alignItems: 'center', background: 'rgba(15, 23, 42, 0.7)', padding: '4px', borderRadius: '10px', border: '1px solid var(--border-color)', gap: '4px' }}>
         <button
           onClick={() => onSelectView('chat')}
           title="Switch to Chat Agent Studio View"
@@ -172,9 +175,20 @@ export const Header: React.FC<HeaderProps> = ({
       </div>
 
       {/* Center Controls: Workdir, Model Selector & VRAM Status */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+      <button
+        type="button"
+        className="header-model-settings-button"
+        onClick={onOpenModelSettings}
+        title={`Model settings · ${config.model}`}
+      >
+        <Cpu size={16} />
+        <span>{config.model}</span>
+        <SlidersHorizontal size={14} />
+      </button>
+      <div className="header-center-controls" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
         {/* Active Working Directory Picker */}
         <button
+          className="header-workdir-control"
           onClick={onOpenWorkingDirPicker}
           title={`Active Working Directory: ${config.workingDir}\nClick to change folder`}
           style={{
@@ -199,7 +213,7 @@ export const Header: React.FC<HeaderProps> = ({
         </button>
 
         {/* Model Selector */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'rgba(15, 23, 42, 0.6)', padding: '6px 12px', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
+        <div className="header-model-control" style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'rgba(15, 23, 42, 0.6)', padding: '6px 12px', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
           <Cpu size={16} color="var(--accent-primary)" />
           <select
             value={config.model}
@@ -256,6 +270,7 @@ export const Header: React.FC<HeaderProps> = ({
         {/* Thinking Toggle */}
         {onToggleThinking && (
           <button
+            className="header-thinking-control"
             type="button"
             onClick={() => onToggleThinking(config.enableThinking === false)}
             title={config.enableThinking !== false ? "Disable Model Reasoning / Thinking" : "Enable Model Reasoning / Thinking"}
@@ -282,6 +297,7 @@ export const Header: React.FC<HeaderProps> = ({
         {/* Context Window Selector */}
         {onChangeContextWindow && (
           <div
+            className="header-context-control"
             title="Overwrite Ollama Context Window (num_ctx)"
             style={{
               display: 'flex',
@@ -323,7 +339,7 @@ export const Header: React.FC<HeaderProps> = ({
           if (isGenerating && (!loadedModel || loadedModel.size_vram === 0)) {
             return (
               <div
-                className="animate-fade-in"
+                className="animate-fade-in header-vram-control"
                 title={`Ollama is currently loading ${config.model} weights into GPU VRAM...`}
                 style={{
                   display: 'flex',
@@ -355,7 +371,7 @@ export const Header: React.FC<HeaderProps> = ({
             const quant = loadedModel.details?.quantization_level || '';
             return (
               <div
-                className="animate-fade-in"
+                className="animate-fade-in header-vram-control"
                 title={`Model "${loadedModel.name}" is active & loaded in GPU VRAM (${vramGb} GB)`}
                 style={{
                   display: 'flex',
@@ -378,6 +394,7 @@ export const Header: React.FC<HeaderProps> = ({
           } else {
             return (
               <div
+                className="header-vram-control"
                 title="No model currently loaded in GPU VRAM (Idle). Will auto-load on next prompt."
                 style={{
                   display: 'flex',
@@ -400,7 +417,7 @@ export const Header: React.FC<HeaderProps> = ({
       </div>
 
       {/* Right Controls: New Chat Session & Context Inspector Sidebar Toggle */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+      <div className="header-right-controls" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
         {activeView === 'chat' && (
           <button
             onClick={onNewChat}

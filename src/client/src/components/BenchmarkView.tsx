@@ -237,11 +237,11 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
   const totalDurationMs = liveResults.reduce((sum, r) => sum + r.durationMs, 0);
 
   return (
-    <div style={{ flex: 1, overflowY: 'auto', padding: '32px 40px', display: 'flex', flexDirection: 'column', gap: '24px' }}>
+    <div className="benchmark-view" style={{ flex: 1, overflowY: 'auto', padding: '32px 40px', display: 'flex', flexDirection: 'column', gap: '24px' }}>
       {/* Top Banner & Control Panel */}
-      <div className="glass-panel" style={{ padding: '24px', borderRadius: '16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '20px' }}>
-        <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '6px' }}>
+      <div className="glass-panel benchmark-hero" style={{ padding: '24px', borderRadius: '16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '20px' }}>
+        <div className="benchmark-hero-copy">
+          <div className="benchmark-title" style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '6px' }}>
             <Zap size={22} color="var(--accent-amber)" />
             <h2 style={{ fontSize: '1.4rem', fontWeight: 700, color: 'var(--text-main)' }}>
               Real-Time Tool Calling Benchmark Suite
@@ -253,8 +253,8 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
         </div>
 
         {/* Model Picker & Trigger Button */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'rgba(15, 23, 42, 0.8)', padding: '8px 14px', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
+        <div className="benchmark-actions" style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+          <div className="benchmark-model-picker" style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'rgba(15, 23, 42, 0.8)', padding: '8px 14px', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
             <Cpu size={16} color="var(--accent-primary)" />
             <select
               value={activeModel}
@@ -320,7 +320,7 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
       {/* Live Stream Progress Bar */}
       {isRunning && progress && (
         <div className="glass-panel animate-fade-in" style={{ padding: '16px 20px', borderRadius: '12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+          <div className="benchmark-progress-labels" style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
             <span style={{ fontWeight: 600, color: 'var(--accent-amber)' }}>
               ⚡ Running {progress.current} of {progress.total}
               {progress.testName ? `: ${progress.testName}` : '...'}
@@ -343,7 +343,7 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
 
       {/* Live Scorecards */}
       {liveResults.length > 0 && (
-        <div className="animate-fade-in" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px' }}>
+        <div className="animate-fade-in benchmark-scorecards" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px' }}>
           <div className="glass-panel" style={{ padding: '20px', borderRadius: '14px', borderLeft: `4px solid ${accuracyPercentage === 100 ? '#10b981' : accuracyPercentage >= 75 ? '#f59e0b' : '#ef4444'}` }}>
             <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase' }}>Accuracy Score</span>
             <div style={{ fontSize: '2rem', fontWeight: 800, color: accuracyPercentage === 100 ? '#10b981' : accuracyPercentage >= 75 ? '#f59e0b' : '#ef4444', marginTop: '4px' }}>
@@ -384,13 +384,13 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
 
       {/* Task List (With 1-by-1 Run / Rerun Buttons & Category Filters) */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
+        <div className="benchmark-list-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
           <h3 style={{ fontSize: '1.1rem', fontWeight: 600, color: 'var(--text-main)' }}>
             Benchmark Tasks ({testCasesInfo.length}) - Run Individual Tests 1-by-1 or Rerun
           </h3>
 
           {/* Category Filter Pills */}
-          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+          <div className="benchmark-filters" style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
             {[
               { id: 'all', label: `All (${testCasesInfo.length})` },
               { id: 'directory_reading', label: 'Directory' },
@@ -462,7 +462,7 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
           return (
             <div
               key={tc.id}
-              className="glass-panel animate-fade-in"
+              className="glass-panel animate-fade-in benchmark-test-card"
               style={{
                 borderRadius: '12px',
                 overflow: 'hidden',
@@ -471,6 +471,7 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
             >
               {/* Card Header */}
               <div
+                className="benchmark-test-header"
                 style={{
                   padding: '16px 20px',
                   display: 'flex',
@@ -479,14 +480,14 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
                   background: 'rgba(30, 41, 59, 0.4)',
                 }}
               >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                <div className="benchmark-test-summary" style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
                   {resultTrace ? (
                     resultTrace.passed ? <CheckCircle2 size={22} color="#10b981" /> : <XCircle size={22} color="#ef4444" />
                   ) : (
                     <div style={{ width: '22px', height: '22px', borderRadius: '50%', border: '2px solid var(--text-dim)' }} />
                   )}
                   <div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <div className="benchmark-test-title" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                       <span style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--text-main)' }}>{tc.name}</span>
                       <span style={{ fontSize: '0.7rem', padding: '2px 8px', borderRadius: '12px', background: 'rgba(255, 255, 255, 0.08)', color: 'var(--text-muted)' }}>
                         {tc.category}
@@ -518,7 +519,7 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
                   </div>
                 </div>
 
-                <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                <div className="benchmark-test-actions" style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
                   {resultTrace && (
                     <div style={{ textAlign: 'right', fontSize: '0.8rem' }}>
                       <div style={{ color: 'var(--text-muted)' }}>
@@ -581,12 +582,12 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
 
               {/* Expandable Trace Drawer */}
               {resultTrace && isExpanded && (
-                <div style={{ padding: '16px 20px', borderTop: '1px solid var(--border-color)', background: 'rgba(15, 23, 42, 0.8)', fontSize: '0.85rem' }}>
+                <div className="benchmark-trace" style={{ padding: '16px 20px', borderTop: '1px solid var(--border-color)', background: 'rgba(15, 23, 42, 0.8)', fontSize: '0.85rem' }}>
                   <div style={{ marginBottom: '12px', padding: '8px 12px', borderRadius: '6px', background: resultTrace.passed ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)', color: resultTrace.passed ? '#34d399' : '#f87171' }}>
                     <strong>Verdict Reason:</strong> {resultTrace.reason}
                   </div>
 
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                  <div className="benchmark-trace-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
                     <div>
                       <strong style={{ color: 'var(--accent-primary)', display: 'block', marginBottom: '4px' }}>Tools Invoked ({resultTrace.actualToolsCalled.length}):</strong>
                       <pre style={{ fontSize: '0.775rem' }}>
@@ -610,8 +611,8 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
 
       {/* Test Case Specification Modal */}
       {selectedInfoTest && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0, 0, 0, 0.75)', backdropFilter: 'blur(4px)', zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
-          <div className="glass-panel animate-fade-in" style={{ width: '100%', maxWidth: '640px', borderRadius: '16px', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <div className="benchmark-spec-overlay" style={{ position: 'fixed', inset: 0, background: 'rgba(0, 0, 0, 0.75)', backdropFilter: 'blur(4px)', zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
+          <div className="glass-panel animate-fade-in benchmark-spec-modal" style={{ width: '100%', maxWidth: '640px', borderRadius: '16px', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
             {/* Modal Header */}
             <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -626,7 +627,7 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
             </div>
 
             {/* Modal Content */}
-            <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px', fontSize: '0.875rem', lineHeight: 1.6 }}>
+            <div className="benchmark-spec-content" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px', fontSize: '0.875rem', lineHeight: 1.6 }}>
               {/* Objective */}
               <div style={{ background: 'rgba(15, 23, 42, 0.6)', padding: '14px', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--accent-primary)', fontWeight: 600, marginBottom: '4px' }}>

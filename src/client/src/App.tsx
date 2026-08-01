@@ -9,6 +9,7 @@ import { ToolSettingsModal } from './components/ToolSettingsModal';
 import { ConnectionSettingsModal } from './components/ConnectionSettingsModal';
 import { DirectoryPickerModal } from './components/DirectoryPickerModal';
 import { ModelDetailsModal } from './components/ModelDetailsModal';
+import { ModelSettingsModal } from './components/ModelSettingsModal';
 import { TerminalSessionsModal } from './components/TerminalSessionsModal';
 import { RightTerminalSidebar } from './components/RightTerminalSidebar';
 import { AgentConfig, ChatMessage, ContextInfo, OllamaModelInfo, OllamaRunningModelInfo, PendingApprovalCall, SystemMetrics, TerminalSessionInfo, TextAttachment, ToolSettings } from './types';
@@ -53,6 +54,7 @@ export const App: React.FC = () => {
   const [connectionSettingsModalOpen, setConnectionSettingsModalOpen] = useState(false);
   const [directoryPickerOpen, setDirectoryPickerOpen] = useState(false);
   const [modelDetailsModalOpen, setModelDetailsModalOpen] = useState(false);
+  const [modelSettingsModalOpen, setModelSettingsModalOpen] = useState(false);
 
   const [streamingText, setStreamingText] = useState('');
   const [streamingThinking, setStreamingThinking] = useState('');
@@ -600,7 +602,7 @@ export const App: React.FC = () => {
   );
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', width: '100vw', overflow: 'hidden' }}>
+    <div className="app-shell" style={{ display: 'flex', flexDirection: 'column', height: '100vh', width: '100vw', overflow: 'hidden' }}>
       <Header
         config={config}
         contextInfo={contextInfo}
@@ -624,6 +626,7 @@ export const App: React.FC = () => {
         onToggleWorkingDirInfo={handleToggleWorkingDirInfo}
         onRefreshModels={loadInitialState}
         onOpenModelDetails={() => setModelDetailsModalOpen(true)}
+        onOpenModelSettings={() => setModelSettingsModalOpen(true)}
         systemMetrics={systemMetrics}
         leftSidebarOpen={leftSidebarOpen}
         onToggleLeftSidebar={() => setLeftSidebarOpen((prev) => !prev)}
@@ -631,7 +634,7 @@ export const App: React.FC = () => {
         onOpenTerminalSessions={() => setTerminalSidebarOpen((prev) => !prev)}
       />
 
-      <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+      <div className="app-content" style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
         <LeftSidebar
           isOpen={leftSidebarOpen}
           onClose={() => setLeftSidebarOpen(false)}
@@ -709,6 +712,22 @@ export const App: React.FC = () => {
         currentPrompt={config.systemPrompt}
         onClose={() => setSystemPromptModalOpen(false)}
         onSave={handleSaveSystemPrompt}
+      />
+
+      <ModelSettingsModal
+        isOpen={modelSettingsModalOpen}
+        config={config}
+        models={models}
+        runningModels={runningModels}
+        onClose={() => setModelSettingsModalOpen(false)}
+        onSelectModel={handleSelectModel}
+        onChangeTemperature={handleChangeTemperature}
+        onChangeContextWindow={handleChangeContextWindow}
+        onToggleThinking={handleToggleThinking}
+        onOpenModelDetails={() => {
+          setModelSettingsModalOpen(false);
+          setModelDetailsModalOpen(true);
+        }}
       />
 
       <ToolSettingsModal

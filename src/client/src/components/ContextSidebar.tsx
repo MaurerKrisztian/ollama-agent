@@ -230,7 +230,7 @@ export const ContextSidebar: React.FC<ContextSidebarProps> = ({
 
   return (
     <aside
-      className="glass-panel animate-fade-in"
+      className="glass-panel animate-fade-in context-sidebar"
       style={{
         width: 'var(--sidebar-width)',
         height: '100%',
