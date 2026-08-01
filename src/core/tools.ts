@@ -3,6 +3,7 @@ import path from 'path';
 import { exec } from 'child_process';
 import { ToolDefinition, ToolComplexityProfile } from './types.js';
 import { WebClient } from './web.js';
+import { DeepResearchRunner } from './deepResearch.js';
 import { McpClientManager } from './mcp.js';
 import { TerminalSessionManager, stripAnsiCodes } from './terminalManager.js';
 import { LspManager } from './lsp.js';
@@ -364,6 +365,55 @@ export const BUILTIN_TOOLS: ToolDefinition[] = [
     },
   },
   {
+    name: 'deep_research',
+    description: 'Research one topic thoroughly with adaptive or caller-specified search, page, follow-up, and evidence budgets plus up to 60 attributed images. Preserve explicit user quantities. Call this once instead of chaining web_search and read_web_page.',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: {
+          type: 'string',
+          description: 'The complete topic or question to research.',
+        },
+        image_count: {
+          type: 'number',
+          description: 'Requested number of relevant images, from 0 to 60. Use 0 when the user did not ask for images, and preserve an explicit quantity from the user.',
+          minimum: 0,
+          maximum: 60,
+        },
+        search_queries: {
+          type: 'array',
+          description: 'Optional focused search queries supplied by the model or user. The original research question is always included.',
+          items: { type: 'string' },
+        },
+        search_count: {
+          type: 'number',
+          description: 'Optional search budget from 1 to 12. Defaults adapt to the question complexity.',
+          minimum: 1,
+          maximum: 12,
+        },
+        page_count: {
+          type: 'number',
+          description: 'Optional primary page-reading budget from 1 to 30. Defaults adapt to the search budget.',
+          minimum: 1,
+          maximum: 30,
+        },
+        linked_page_count: {
+          type: 'number',
+          description: 'Optional relevant follow-up page budget from 0 to 20, including useful links to other public websites.',
+          minimum: 0,
+          maximum: 20,
+        },
+        evidence_char_budget: {
+          type: 'number',
+          description: 'Optional total extracted evidence budget from 4,000 to 120,000 characters, shared across inspected sources.',
+          minimum: 4000,
+          maximum: 120000,
+        },
+      },
+      required: ['query'],
+    },
+  },
+  {
     name: 'start_terminal_session',
     description: 'Start a long-running background or interactive terminal session (e.g. dev servers, interactive tests like test:interactive, log tailing, background builds with &). Prefer this over execute_command for any background or interactive processes.',
     parameters: {
@@ -641,6 +691,7 @@ export const TOOL_DEFINITIONS = getToolDefinitions('simple');
 export class ToolExecutor {
   private workingDir: string;
   private webClient: WebClient;
+  private deepResearchRunner: DeepResearchRunner;
   private mcpManager: McpClientManager;
   private terminalManager: TerminalSessionManager;
   private lspManager: LspManager;
@@ -654,6 +705,7 @@ export class ToolExecutor {
   ) {
     this.workingDir = path.resolve(initialWorkingDir);
     this.webClient = webClient;
+    this.deepResearchRunner = new DeepResearchRunner(webClient);
     this.mcpManager = mcpManager;
     this.terminalManager = terminalManager;
     this.lspManager = lspManager;
@@ -1033,7 +1085,7 @@ export class ToolExecutor {
     };
   }
 
-  public async executeTool(name: string, args: Record<string, any>): Promise<any> {
+  public async executeTool(name: string, args: Record<string, any>, onProgress?: (progress: any) => void): Promise<any> {
     if (this.mcpManager.hasTool(name)) {
       return await this.mcpManager.executeTool(name, args);
     }
@@ -1355,6 +1407,21 @@ export class ToolExecutor {
           return await this.webClient.readPage(args.url);
         } catch (err: any) {
           return { error: `Web page read failed: ${err.message}`, url: args.url };
+        }
+      }
+
+      case 'deep_research': {
+        if (!args.query) return { error: 'Parameter query is required.' };
+        try {
+          return await this.deepResearchRunner.run(String(args.query), args.image_count, onProgress, {
+            searchQueries: Array.isArray(args.search_queries) ? args.search_queries.map(String) : undefined,
+            searchCount: args.search_count,
+            pageCount: args.page_count,
+            linkedPageCount: args.linked_page_count,
+            evidenceCharBudget: args.evidence_char_budget,
+          });
+        } catch (err: any) {
+          return { error: `Deep research failed: ${err.message}` };
         }
       }
 

@@ -39,6 +39,8 @@ export interface ToolParameter {
   type: string;
   description: string;
   enum?: string[];
+  minimum?: number;
+  maximum?: number;
   items?: {
     type: string;
     properties?: Record<string, ToolParameter>;
@@ -130,6 +132,7 @@ export interface AgentConfig {
   complexityProfile?: ToolComplexityProfile;
   pruningConfig?: ContextPruningConfig;
   enableThinking?: boolean;
+  enabledTools?: Record<string, boolean>;
 }
 
 export interface ContextInfo {
@@ -230,7 +233,7 @@ export const categorizeError = (error: unknown, result?: any): CategorizedError 
   if (/MCP tool .* is disabled|MCP execution error/i.test(text)) {
     return { code: 'MCP_ERROR', reason: 'MCP tool execution failed' };
   }
-  if (/web search failed|web page read failed|private network/i.test(text)) {
+  if (/web search failed|web page read failed|deep research failed|private network/i.test(text)) {
     return { code: 'WEB_ERROR', reason: 'Web request failed' };
   }
   if (result?.exitCode !== undefined && result.exitCode !== 0) {

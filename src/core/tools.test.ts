@@ -255,6 +255,18 @@ test('getToolDefinitions generates single schema profile based on complexity lev
   assert.ok(simpleGrep.parameters.properties.relative_path);
   assert.equal(simpleGrep.parameters.properties.is_regex, undefined);
   assert.equal(simpleGrep.parameters.properties.whole_word, undefined);
+  const deepResearch = simpleTools.find((t) => t.name === 'deep_research');
+  assert.deepEqual(Object.keys(deepResearch?.parameters.properties || {}), [
+    'query',
+    'image_count',
+    'search_queries',
+    'search_count',
+    'page_count',
+    'linked_page_count',
+    'evidence_char_budget',
+  ]);
+  assert.equal(deepResearch?.parameters.properties.image_count.minimum, 0);
+  assert.equal(deepResearch?.parameters.properties.image_count.maximum, 60);
 
   const mediumTools = getToolDefinitions('medium');
   const mediumGrep = mediumTools.find((t) => t.name === 'grep_search');

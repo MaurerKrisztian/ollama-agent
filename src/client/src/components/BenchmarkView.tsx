@@ -217,7 +217,7 @@ const getBenchmarkDefaults = (config: AgentConfig, toolSettings: ToolSettings): 
   ollamaHost: config.ollamaHost,
   temperature: config.temperature,
   contextWindow: config.contextWindow ?? 16384,
-  maxLoops: toolSettings.maxLoops ?? config.maxLoops ?? 10,
+  maxLoops: toolSettings.maxLoops ?? config.maxLoops ?? 25,
   enableThinking: toolSettings.enableThinking ?? config.enableThinking ?? true,
   showWorkingDirInfo: config.showWorkingDirInfo,
   complexityProfile: toolSettings.complexityProfile ?? config.complexityProfile ?? 'simple',

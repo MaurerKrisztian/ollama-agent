@@ -3,7 +3,11 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { buildWorkingDirectoryContext } from './workdir-context.js';
+import { buildWorkingDirectoryContext, getSystemEnvironmentSummary } from './workdir-context.js';
+
+test('system environment gives the model the current UTC date', () => {
+  assert.match(getSystemEnvironmentSummary(), /Current Date \(UTC\): \d{4}-\d{2}-\d{2}/);
+});
 
 test('working directory context includes project files, package info, and agent instructions', async () => {
   const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'local-model-chat-context-'));

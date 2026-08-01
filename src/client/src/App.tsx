@@ -31,6 +31,7 @@ export const App: React.FC = () => {
     terminalMode: 'confirm',
     fileEditMode: 'confirm',
     allowedCommands: ['ls', 'pwd'],
+    maxLoops: 25,
     enabledTools: {
       list_directory: true,
       read_file: true,
@@ -41,6 +42,7 @@ export const App: React.FC = () => {
       execute_command: true,
       web_search: true,
       read_web_page: true,
+      deep_research: true,
     },
   });
 
@@ -67,7 +69,7 @@ export const App: React.FC = () => {
     useState<'idle' | 'generating' | 'completed' | 'cancelled' | 'error'>('idle');
   const [pendingApprovalCall, setPendingApprovalCall] = useState<PendingApprovalCall | null>(null);
   const [isSubmittingToolApproval, setIsSubmittingToolApproval] = useState(false);
-  const [activeToolCall, setActiveToolCall] = useState<{ name: string; args?: any } | null>(null);
+  const [activeToolCall, setActiveToolCall] = useState<{ name: string; args?: any; progress?: any } | null>(null);
   const [systemMetrics, setSystemMetrics] = useState<SystemMetrics | null>(null);
   const [terminalSessions, setTerminalSessions] = useState<TerminalSessionInfo[]>([]);
   const [terminalSessionsModalOpen, setTerminalSessionsModalOpen] = useState(false);
@@ -172,6 +174,9 @@ export const App: React.FC = () => {
             complexityProfile: activeConfig.complexityProfile || prev.complexityProfile,
             maxLoops: activeConfig.maxLoops ?? prev.maxLoops,
             enableThinking: activeConfig.enableThinking ?? prev.enableThinking,
+            enabledTools: activeConfig.enabledTools
+              ? { ...prev.enabledTools, ...activeConfig.enabledTools }
+              : prev.enabledTools,
           }));
         }
         if (activeContext) {
@@ -464,6 +469,7 @@ export const App: React.FC = () => {
         maxLoops: newSettings.maxLoops,
         enableThinking: newSettings.enableThinking,
         complexityProfile: newSettings.complexityProfile,
+        enabledTools: newSettings.enabledTools,
       }),
     });
   };
@@ -578,6 +584,10 @@ export const App: React.FC = () => {
             } else if (eventType === 'tool_start') {
               setPendingApprovalCall(null);
               setActiveToolCall({ name: eventData.name, args: eventData.args });
+            } else if (eventType === 'tool_progress') {
+              setActiveToolCall((current) => current?.name === eventData.name
+                ? { ...current, progress: eventData.progress }
+                : current);
             } else if (eventType === 'tool_end') {
               setActiveToolCall(null);
               setPendingApprovalCall(null);

@@ -10,6 +10,7 @@ const MAX_SKILL_HEADER_CHARS = 16_000;
 const SKIPPED_DIRECTORIES = new Set(['.git', 'node_modules', 'dist', 'build', 'coverage']);
 
 export function getSystemEnvironmentSummary(): string {
+  const now = new Date();
   const platformNames: Record<string, string> = {
     linux: 'Linux',
     win32: 'Windows (win32)',
@@ -31,6 +32,7 @@ export function getSystemEnvironmentSummary(): string {
 
   return [
     '## System Environment & PC Info',
+    `- Current Date (UTC): ${now.toISOString().slice(0, 10)}`,
     `- Operating System: ${osName} (${osType} ${osRelease})`,
     `- Architecture: ${arch}`,
     `- CPU: ${cpuModel} (${cpuCores} cores)`,

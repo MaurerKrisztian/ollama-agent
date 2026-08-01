@@ -20,6 +20,7 @@ export interface AgentConfig {
   pruningConfig?: ContextPruningConfig;
   enableThinking?: boolean;
   complexityProfile?: ToolComplexityProfile;
+  enabledTools?: Record<string, boolean>;
 }
 
 export type ToolComplexityProfile = 'simple' | 'medium' | 'advanced';
@@ -42,6 +43,7 @@ export interface ToolSettings {
     execute_command: boolean;
     web_search: boolean;
     read_web_page: boolean;
+    deep_research: boolean;
     get_document_symbols?: boolean;
     go_to_definition?: boolean;
     find_symbol_references?: boolean;

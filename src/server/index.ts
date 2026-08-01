@@ -9,7 +9,7 @@ import { promisify } from 'node:util';
 import { Server as SocketIOServer } from 'socket.io';
 import { AgentEngine } from '../core/agent.js';
 import { ContextManager } from '../core/context.js';
-import { TOOL_DEFINITIONS } from '../core/tools.js';
+import { BUILTIN_TOOLS, TOOL_DEFINITIONS } from '../core/tools.js';
 import { BENCHMARK_TEST_CASES } from '../benchmark/cases/index.js';
 import { createBenchmarkSuiteHash } from '../benchmark/cases/benchmarks.js';
 import type { BenchmarkDefinition, BenchmarkTestCase } from '../benchmark/cases/index.js';
@@ -56,6 +56,7 @@ function getInitialPersistedConfig(): {
   fileEditMode: 'confirm' | 'auto';
   enableThinking: boolean;
   complexityProfile: 'simple' | 'medium' | 'advanced';
+  enabledTools: Record<string, boolean>;
 } {
   let workingDir = process.cwd();
   let ollamaHost = process.env.OLLAMA_HOST || 'http://127.0.0.1:11434';
@@ -66,6 +67,7 @@ function getInitialPersistedConfig(): {
   let fileEditMode: 'confirm' | 'auto' = 'confirm';
   let enableThinking = true;
   let complexityProfile: 'simple' | 'medium' | 'advanced' = 'simple';
+  let enabledTools = Object.fromEntries(BUILTIN_TOOLS.map((tool) => [tool.name, true]));
 
   try {
     if (fsSync.existsSync(CONFIG_FILE_PATH)) {
@@ -98,6 +100,12 @@ function getInitialPersistedConfig(): {
       if (parsed.complexityProfile === 'simple' || parsed.complexityProfile === 'medium' || parsed.complexityProfile === 'advanced') {
         complexityProfile = parsed.complexityProfile;
       }
+      if (parsed.enabledTools && typeof parsed.enabledTools === 'object' && !Array.isArray(parsed.enabledTools)) {
+        enabledTools = Object.fromEntries(BUILTIN_TOOLS.map((tool) => [
+          tool.name,
+          parsed.enabledTools[tool.name] !== false,
+        ]));
+      }
     }
   } catch (_) {}
 
@@ -107,7 +115,7 @@ function getInitialPersistedConfig(): {
   if (process.env.OLLAMA_TOKEN !== undefined) ollamaToken = process.env.OLLAMA_TOKEN;
   if (process.env.OLLAMA_MODEL) model = process.env.OLLAMA_MODEL;
 
-  return { workingDir, ollamaHost, ollamaToken, model, allowedCommands, terminalMode, fileEditMode, enableThinking, complexityProfile };
+  return { workingDir, ollamaHost, ollamaToken, model, allowedCommands, terminalMode, fileEditMode, enableThinking, complexityProfile, enabledTools };
 }
 
 function savePersistedConfig(updatedConfig: Record<string, any>) {
@@ -134,6 +142,7 @@ const agent = new AgentEngine({
   workingDir: initialConfig.workingDir,
   enableThinking: initialConfig.enableThinking,
   complexityProfile: initialConfig.complexityProfile,
+  enabledTools: initialConfig.enabledTools,
 });
 
 const chatSessions = new ChatSessionStore(CHAT_SESSIONS_FILE_PATH);
@@ -959,7 +968,7 @@ app.post('/api/chat/tool-approval', (req, res) => {
 
 // POST /api/chat/tool-settings - Update tool approval preferences & max loops & thinking
 app.post('/api/chat/tool-settings', (req, res) => {
-  const { terminalMode, fileEditMode, allowedCommands, maxLoops, enableThinking, complexityProfile } = req.body;
+  const { terminalMode, fileEditMode, allowedCommands, maxLoops, enableThinking, complexityProfile, enabledTools } = req.body;
   if (terminalMode === 'confirm' || terminalMode === 'auto') {
     terminalRequireConfirm = terminalMode === 'confirm';
   }
@@ -978,6 +987,13 @@ app.post('/api/chat/tool-settings', (req, res) => {
   if (complexityProfile === 'simple' || complexityProfile === 'medium' || complexityProfile === 'advanced') {
     for (const engine of getConfigurableEngines()) engine.updateConfig({ complexityProfile });
   }
+  if (enabledTools && typeof enabledTools === 'object' && !Array.isArray(enabledTools)) {
+    const sanitizedEnabledTools = Object.fromEntries(BUILTIN_TOOLS.map((tool) => [
+      tool.name,
+      enabledTools[tool.name] !== false,
+    ]));
+    for (const engine of getConfigurableEngines()) engine.updateConfig({ enabledTools: sanitizedEnabledTools });
+  }
 
   savePersistedConfig({
     allowedCommands: allowedCommandsState,
@@ -985,6 +1001,7 @@ app.post('/api/chat/tool-settings', (req, res) => {
     fileEditMode: fileEditRequireConfirm ? 'confirm' : 'auto',
     enableThinking: agent.getConfig().enableThinking,
     complexityProfile: agent.getConfig().complexityProfile,
+    enabledTools: agent.getConfig().enabledTools,
   });
 
   io.emit('config:state', getConfigState());
@@ -1077,8 +1094,10 @@ app.post('/api/chat', async (req, res) => {
 
   // Setup Server-Sent Events headers
   res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders();
 
   const sendEvent = (event: string, data: any) => {
     res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
@@ -1123,7 +1142,7 @@ app.post('/api/chat', async (req, res) => {
   const originalExecuteCommand = executor.executeCommand.bind(executor);
   const originalExecuteTool = executor.executeTool.bind(executor);
 
-  executor.executeTool = async (name: string, args: Record<string, any>) => {
+  executor.executeTool = async (name: string, args: Record<string, any>, onProgress?: (progress: any) => void) => {
     if (
       name === 'start_terminal_session' &&
       terminalRequireConfirm &&
@@ -1148,7 +1167,7 @@ app.post('/api/chat', async (req, res) => {
       // immediately so the tool error is returned to the model for correction
       // instead of asking the user to approve a guaranteed no-op.
       if (!diff) {
-        return originalExecuteTool(name, args);
+        return originalExecuteTool(name, args, onProgress);
       }
       sendEvent('tool_approval_required', { name, args, diff });
       const { decision, reason } = await new Promise<ApprovalDecisionPayload>((resolve) => {
@@ -1163,7 +1182,7 @@ app.post('/api/chat', async (req, res) => {
         };
       }
     }
-    return originalExecuteTool(name, args);
+    return originalExecuteTool(name, args, onProgress);
   };
 
   executor.executeCommand = async (command: string) => {
@@ -1206,6 +1225,9 @@ app.post('/api/chat', async (req, res) => {
       },
       onToolStart: (name, args) => {
         sendEvent('tool_start', { name, args });
+      },
+      onToolProgress: (name, progress) => {
+        sendEvent('tool_progress', { name, progress });
       },
       onToolEnd: (name, result) => {
         sendEvent('tool_end', { name, result });

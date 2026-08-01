@@ -202,6 +202,25 @@ export const Header: React.FC<HeaderProps> = ({
         />
         <SlidersHorizontal size={14} />
       </button>
+      {onChangeContextWindow && (
+        <label
+          className="header-context-window-control"
+          title="Ollama context window (num_ctx). Larger values retain more conversation and tool evidence but use more memory."
+        >
+          <span className="header-context-window-label">Context</span>
+          <select
+            aria-label="Model context window"
+            value={config.contextWindow || 16384}
+            onChange={(event) => onChangeContextWindow(Number(event.target.value))}
+          >
+            <option value={16384}>16K</option>
+            <option value={32768}>32K</option>
+            <option value={65536}>64K</option>
+            <option value={131072}>128K</option>
+            <option value={262144}>256K</option>
+          </select>
+        </label>
+      )}
       <div className="header-center-controls" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
         {/* Active Working Directory Picker */}
         <button
@@ -309,44 +328,6 @@ export const Header: React.FC<HeaderProps> = ({
             <Brain size={15} color={config.enableThinking !== false ? '#c084fc' : 'var(--text-muted)'} />
             <span>Thinking: {config.enableThinking !== false ? 'ON' : 'OFF'}</span>
           </button>
-        )}
-
-        {/* Context Window Selector */}
-        {onChangeContextWindow && (
-          <div
-            className="header-context-control"
-            title="Overwrite Ollama Context Window (num_ctx)"
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              background: 'rgba(15, 23, 42, 0.6)',
-              padding: '6px 12px',
-              borderRadius: '8px',
-              border: '1px solid var(--border-color)',
-            }}
-          >
-            <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)' }}>Ctx:</span>
-            <select
-              value={config.contextWindow || 16384}
-              onChange={(e) => onChangeContextWindow(Number(e.target.value))}
-              style={{
-                background: 'transparent',
-                color: 'var(--text-main)',
-                border: 'none',
-                fontSize: '0.875rem',
-                fontWeight: 500,
-                outline: 'none',
-                cursor: 'pointer',
-              }}
-            >
-              <option value={16384} style={{ background: '#1e293b' }}>16k (Default)</option>
-              <option value={32768} style={{ background: '#1e293b' }}>32k</option>
-              <option value={65536} style={{ background: '#1e293b' }}>64k</option>
-              <option value={131072} style={{ background: '#1e293b' }}>128k</option>
-              <option value={262144} style={{ background: '#1e293b' }}>256k (Max)</option>
-            </select>
-          </div>
         )}
 
         {/* VRAM Loaded Indicator Badge */}

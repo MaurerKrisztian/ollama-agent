@@ -9,6 +9,7 @@ export interface AgentSendMessageOptions {
   onChunk?: (chunk: string) => void;
   onThinkingChunk?: (chunk: string) => void;
   onToolStart?: (name: string, args: Record<string, any>) => void;
+  onToolProgress?: (name: string, progress: any) => void;
   onToolEnd?: (name: string, result: any) => void;
   onMessageAdded?: (message: ChatMessage) => void;
   onModelResponse?: (metrics: OllamaResponseMetrics) => void;
@@ -41,6 +42,10 @@ function inferExplicitlyRequestedTools(prompt: string): string[] {
   };
 
   const hasUrl = /https?:\/\/[^\s)>\]}]+/.test(prompt);
+  const deepResearchIntent =
+    /\bdeep[- ]res(?:ea|e)rch\b/.test(normalized) ||
+    /\b(?:research|investigate)\b.*\b(?:deeply|thoroughly|extensively|comprehensively)\b/.test(normalized) ||
+    /\b(?:thorough|extensive|comprehensive)\b.*\bresearch\b/.test(normalized);
   const hasWebNoun = /\b(?:web\s?page|webpage|website|url|internet|online)\b/.test(normalized);
   const hasWorkspaceNoun = /\b(?:workspace|codebase|repository|repo|local file|directory|folder)\b/.test(normalized);
   const hasResearchCue =
@@ -63,10 +68,12 @@ function inferExplicitlyRequestedTools(prompt: string): string[] {
   const hasWebIntent =
     webSearchIntent || webPageReadIntent || requiresVerifiedWebResearch || (hasUrl && hasWebNoun);
 
-  if (webSearchIntent || requiresVerifiedWebResearch) {
+  if (deepResearchIntent) {
+    add('deep_research');
+  } else if (webSearchIntent || requiresVerifiedWebResearch) {
     add('web_search');
   }
-  if (webPageReadIntent || requiresVerifiedWebResearch) {
+  if (!deepResearchIntent && (webPageReadIntent || requiresVerifiedWebResearch)) {
     add('read_web_page');
   }
 
@@ -120,6 +127,14 @@ function inferRequiredToolCounts(prompt: string, requestedTools: string[]): Map<
   return counts;
 }
 
+function inferRequestedImageCount(prompt: string): number | undefined {
+  const match =
+    prompt.match(/\b(?:collect|show|find|return|give|include|want|need)\s+(?:me\s+)?(\d{1,3})(?:\s+[a-z-]+){0,6}\s+(?:images?|photos?|pictures?|memes?)\b/i) ||
+    prompt.match(/\b(\d{1,3})\s+(?:unique\s+)?(?:images?|photos?|pictures?|memes?)\b/i);
+  if (!match) return undefined;
+  return Math.min(60, Math.max(1, Number(match[1])));
+}
+
 export class AgentEngine {
   private config: AgentConfig;
   private contextManager: ContextManager;
@@ -137,9 +152,10 @@ export class AgentEngine {
       workingDir: config?.workingDir || process.cwd(),
       showWorkingDirInfo: config?.showWorkingDirInfo ?? true,
       contextWindow: config?.contextWindow !== undefined ? config.contextWindow : 16384,
-      maxLoops: config?.maxLoops !== undefined ? config.maxLoops : 10,
+      maxLoops: config?.maxLoops !== undefined ? config.maxLoops : 25,
       complexityProfile: config?.complexityProfile || 'simple',
       enableThinking: config?.enableThinking ?? true,
+      enabledTools: config?.enabledTools ? { ...config.enabledTools } : undefined,
     };
 
     this.toolExecutor = new ToolExecutor(this.config.workingDir);
@@ -196,7 +212,8 @@ export class AgentEngine {
   }
 
   public getActiveTools() {
-    const builtin = getToolDefinitions(this.config.complexityProfile || 'simple');
+    const builtin = getToolDefinitions(this.config.complexityProfile || 'simple')
+      .filter((tool) => this.config.enabledTools?.[tool.name] !== false);
     return [...builtin, ...this.toolExecutor.getMcpManager().getToolDefinitions()];
   }
 
@@ -303,14 +320,17 @@ ${conversationText}`;
     });
     if (callbacks?.onMessageAdded) callbacks.onMessageAdded(userMsg);
 
-    const maxLoopsConfig = this.config.maxLoops ?? 10;
+    const maxLoopsConfig = this.config.maxLoops ?? 25;
     const isUnlimited = maxLoopsConfig === 0;
     let maxLoops = maxLoopsConfig;
     let maxLoopsReached = false;
     let normalTurnEnd = false;
     let finalAssistantResponse = '';
-    const requestedTools = inferExplicitlyRequestedTools(userMessage);
+    const enabledToolNames = new Set(this.getActiveTools().map((tool) => tool.name));
+    const requestedTools = inferExplicitlyRequestedTools(userMessage)
+      .filter((toolName) => enabledToolNames.has(toolName));
     const requiredToolCounts = inferRequiredToolCounts(userMessage, requestedTools);
+    const requestedImageCount = inferRequestedImageCount(userMessage);
     const executedToolCounts = new Map<string, number>();
     let successfulActionIndex = 0;
     let lastMutationAction = -1;
@@ -337,6 +357,8 @@ ${conversationText}`;
       }
     }
     let continuationReminder: string | null = null;
+    let deepResearchCompleted = false;
+    let deepResearchInsufficient = false;
 
     while (isUnlimited || maxLoops > 0) {
       callbacks?.signal?.throwIfAborted();
@@ -408,6 +430,13 @@ ${conversationText}`;
         let anyToolFailedThisRound = false;
         for (const call of res.tool_calls) {
           callbacks?.signal?.throwIfAborted();
+          if (
+            call.name === 'deep_research' &&
+            requestedImageCount !== undefined &&
+            !(typeof call.arguments.image_count === 'number' && call.arguments.image_count > 0)
+          ) {
+            call.arguments.image_count = requestedImageCount;
+          }
 
           const callFingerprint = JSON.stringify([call.name, call.arguments]);
           const mutationPath =
@@ -474,6 +503,12 @@ ${conversationText}`;
                     changed: false,
                     read_required: true,
                   }
+              : deepResearchCompleted && ['deep_research', 'web_search', 'read_web_page'].includes(call.name)
+            ? {
+                error:
+                  'Deep research has already completed for this turn. Use its supplied sources, image URLs, and source-page links to answer now; do not start another web-search loop.',
+                repeated_web_research: true,
+              }
               : failedToolCalls.has(callFingerprint)
             ? {
                 error:
@@ -481,7 +516,15 @@ ${conversationText}`;
                   'Use the latest tool result to change strategy. For file edits, reread the file, use a smaller exact target, or use replace_file.',
                 repeated_call: true,
               }
-            : await this.toolExecutor.executeTool(call.name, call.arguments);
+            : await this.toolExecutor.executeTool(
+                call.name,
+                call.arguments,
+                (progress) => callbacks?.onToolProgress?.(call.name, progress),
+              );
+          if (call.name === 'deep_research' && toolResult && typeof toolResult === 'object') {
+            deepResearchCompleted = true;
+            deepResearchInsufficient = toolResult.status === 'insufficient_evidence';
+          }
           const toolFailed =
             toolResult !== null &&
             typeof toolResult === 'object' &&
@@ -545,11 +588,17 @@ ${conversationText}`;
             ([toolName, requiredCount]) => (executedToolCounts.get(toolName) || 0) >= requiredCount
           );
         if (workflowCompletedAfterThisCall && !anyToolFailedThisRound && (isUnlimited || maxLoops > 0)) {
-          continuationReminder =
-            'Review the original request against the successful tool results. A tool type succeeding once does not mean every requested operation is complete. ' +
-            'If any requested change or action is not yet reflected in the tool results, invoke the required tool now using the available schemas. ' +
-            'Do not ask the user for instructions already present in the original request. Only provide the final answer once every requested operation has succeeded.' +
-            `\n\nOriginal request: ${userMessage}`;
+          continuationReminder = deepResearchInsufficient
+            ? 'Deep research returned no inspected sources. Do not call more web tools, do not answer from memory, and do not invent facts, citations, links, or images. Briefly answer the exact user request below by explaining that no usable web evidence was found.' +
+              `\n\nOriginal user request:\n${userMessage}`
+            : deepResearchCompleted
+              ? 'Deep research is complete. Answer the exact user request reproduced below now using only the supplied evidence. Do not ask the user to repeat the topic. Do not call deep_research, web_search, or read_web_page again this turn. Lead with the central conclusion, prefer authoritative or primary sources over listicles and personal blogs, and disclose a partial result when retrieval errors occurred. Do not make claims stronger than the inspected evidence. Cite each factual claim near the sentence it supports with a supplied source URL; a generic source list is not a substitute. Only if images were requested, use exact ![alt](url) syntax with no space between ] and (. Put every supplied image embed consecutively first so the UI creates one gallery; do not insert bullets, captions, headings, or source links between images. After the gallery, list the supplied source-page links. Fulfill the requested count when that many images were supplied; otherwise state the exact available count.' +
+                `\n\nOriginal user request:\n${userMessage}`
+              :
+                'Review the original request against the successful tool results. A tool type succeeding once does not mean every requested operation is complete. ' +
+                'If any requested change or action is not yet reflected in the tool results, invoke the required tool now using the available schemas. ' +
+                'Do not ask the user for instructions already present in the original request. Only provide the final answer once every requested operation has succeeded.' +
+                `\n\nOriginal request: ${userMessage}`;
         }
         if (!isUnlimited && maxLoops === 0) {
           maxLoopsReached = true;

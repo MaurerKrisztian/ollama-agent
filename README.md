@@ -23,6 +23,7 @@ No cloud, no API keys, no data leaving your machine.
 - **Working-directory picker** — browse server-local folders and remember the selected project per browser
 - **Remote Ollama connections** — configure an HTTP/HTTPS server URL with an optional bearer token
 - **⚙️ Categorized Tool Settings modal** — grouped controls for 🛠️ Developer Tools, 📁 File System, 🌐 Web Research, and 🐚 Terminal Tools with group master toggles and individual switches
+- **Adaptive deep research** — one medium-model-friendly tool adjusts search, source, follow-up, and evidence budgets to the question, follows relevant public evidence links, and returns inspectable evidence for a cited answer
 - **🎯 Tool Complexity Profiles (`simple` | `medium` | `advanced`)** — tailor tool schema complexity sent to Ollama models based on model size (3B–8B, 14B–32B, 70B+), preventing small-model parameter hallucinations while unlocking advanced options for large models
 - **🎨 Color-Coded Tool Inspector (`ℹ`)** — inspect exact prompt descriptions and syntax color-coded JSON parameter schemas in real time
 - **⚠️ Tool Approval Cards** — approve or reject terminal commands inline in the chat before they run
@@ -65,6 +66,7 @@ No cloud, no API keys, no data leaving your machine.
 | | `grep_replace` | Multi-file batch search and replace (Grep + Sed combo) with `dry_run: true` preview support |
 | 🌐 **Web Research Tools** | `web_search` | Search the public web and return concise result metadata |
 | | `read_web_page` | Extract a public page's main content as bounded Markdown |
+| | `deep_research` | Run several searches, inspect multiple sources, and explore relevant links within visited websites |
 | 🐚 **Terminal Tools** | `execute_command` | Run terminal shell commands (with approval gate & whitelist) |
 
 ---
@@ -96,6 +98,7 @@ local-model-chat/
 │   │   ├── agent.ts        # AgentEngine — agentic loop, streaming, tool dispatch
 │   │   ├── lsp.ts          # LspManager — TypeScript Compiler API AST & LSP engine
 │   │   ├── tools.ts        # Tool definitions, complexity profiles + ToolExecutor
+│   │   ├── deepResearch.ts # Bounded multi-search and website-link research runner
 │   │   ├── context.ts      # ContextManager — system prompt, message history
 │   │   ├── ollama.ts       # OllamaClient — chat stream, model list, VRAM status
 │   │   └── types.ts        # Shared TypeScript interfaces

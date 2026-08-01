@@ -386,6 +386,117 @@ test('simple navigational web search does not require opening a result page', as
   );
 });
 
+test('deep research prevents a redundant follow-up web-search loop', async () => {
+  await withAgent(
+    [
+      {
+        content: '',
+        tool_calls: [{
+          id: 'deep-research',
+          name: 'deep_research',
+          arguments: { query: 'funny programmer meme images' },
+        }],
+      },
+      {
+        content: '',
+        tool_calls: [{
+          id: 'redundant-search',
+          name: 'web_search',
+          arguments: { query: 'programmer memes' },
+        }],
+      },
+      { content: '![Debugging meme](https://images.example/meme.png)\n\n[Source](https://example.com/memes)', tool_calls: [] },
+    ],
+    async (agent) => {
+      const executor = agent.getToolExecutor();
+      const originalExecuteTool = executor.executeTool.bind(executor);
+      const executed: string[] = [];
+      executor.executeTool = async (name, args) => {
+        executed.push(name);
+        if (name === 'deep_research') {
+          return {
+            query: args.query,
+            status: 'complete',
+            searches_completed: 4,
+            pages_read: 1,
+            linked_pages_read: 0,
+            sources: [{ id: 'S1', title: 'Memes', url: 'https://example.com/memes' }],
+            images: [{
+              id: 'I1',
+              url: 'https://images.example/meme.png',
+              alt: 'Debugging meme',
+              source_url: 'https://example.com/memes',
+              source_title: 'Memes',
+            }],
+            errors: [],
+          };
+        }
+        return originalExecuteTool(name, args);
+      };
+
+      const results: any[] = [];
+      const response = await agent.sendMessage('Deep research funny programmer meme images.', {
+        onToolEnd: (_name, result) => results.push(result),
+      });
+
+      assert.deepEqual(executed, ['deep_research']);
+      assert.equal(results[1]?.repeated_web_research, true);
+      assert.match(response, /!\[Debugging meme\]\(https:\/\/images\.example\/meme\.png\)/);
+      assert.match(response, /https:\/\/example\.com\/memes/);
+    },
+  );
+});
+
+test('deep research continuation repeats the original request after a large tool result', async () => {
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'local-model-chat-deep-reminder-'));
+  try {
+    const agent = new AgentEngine({ workingDir: workspace });
+    const requests: any[] = [];
+    let executedDeepResearchArgs: any = null;
+    let callIndex = 0;
+    (agent as any).ollamaClient.chatStream = async (request: any) => {
+      requests.push(request);
+      callIndex++;
+      if (callIndex === 1) {
+        return {
+          content: '',
+          tool_calls: [{
+            id: 'deep-research',
+            name: 'deep_research',
+            arguments: { query: 'funny programmer meme images' },
+          }],
+        };
+      }
+      return { content: 'Here are the requested meme images.', tool_calls: [] };
+    };
+
+    const executor = agent.getToolExecutor();
+    executor.executeTool = async (_name, args) => {
+      executedDeepResearchArgs = args;
+      return ({
+      query: 'funny programmer meme images',
+      status: 'complete',
+      searches_completed: 4,
+      pages_read: 7,
+      linked_pages_read: 2,
+      sources: [{ id: 'S1', title: 'Memes', url: 'https://example.com/memes', content: 'x'.repeat(20_000) }],
+      images: [{ id: 'I1', url: 'https://images.example/meme.png', alt: 'Debugging meme' }],
+      errors: [],
+      });
+    };
+
+    const originalRequest = 'Make deep research and collect 55 funny programmer meme images.';
+    await agent.sendMessage(originalRequest);
+
+    assert.equal(executedDeepResearchArgs.image_count, 55);
+    const continuation = requests[1].messages.at(-1)?.content || '';
+    assert.match(continuation, /Do not ask the user to repeat the topic/);
+    assert.match(continuation, new RegExp(originalRequest.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  } finally {
+    await fs.rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test('maxLoops: 0 allows unlimited tool call iterations without loop exhaustion', async () => {
   const responses = Array.from({ length: 12 }, (_, i) => ({
     content: '',
@@ -471,3 +582,16 @@ test('agent applies tool profile and pruning configuration', () => {
   assert.equal(agent.getContextManager().getPruningConfig().terminalOutputTTLTurns, 7);
 });
 
+test('agent omits disabled built-in tools from the model toolset', () => {
+  const agent = new AgentEngine({ enabledTools: { deep_research: false } });
+  assert.equal(agent.getActiveTools().some((tool) => tool.name === 'deep_research'), false);
+
+  agent.updateConfig({ enabledTools: { deep_research: true, execute_command: false } });
+  assert.equal(agent.getActiveTools().some((tool) => tool.name === 'deep_research'), true);
+  assert.equal(agent.getActiveTools().some((tool) => tool.name === 'execute_command'), false);
+});
+
+test('agent defaults to 25 maximum tool-call iterations', () => {
+  const agent = new AgentEngine();
+  assert.equal(agent.getConfig().maxLoops, 25);
+});

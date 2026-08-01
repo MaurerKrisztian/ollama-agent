@@ -1,8 +1,10 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Send, Square, Wrench, CheckCircle2, XCircle, ShieldAlert, User, Bot, Loader2, FileText, Folder, Terminal, Edit3, Search, PlusCircle, Sparkles, Code2, Eye, ChevronDown, ChevronRight, Brain, X, Globe, ExternalLink, Layers, RotateCcw, Copy, Check, Scissors, Image as ImageIcon } from 'lucide-react';
 import { ChatMessage, FileDiffData, ImageAttachment, PendingApprovalCall, TextAttachment } from '../types';
+import { getLinkPresentation } from '../linkPresentation';
 
 const compactValue = (value: unknown, maxLength = 64): string => {
   if (value === undefined || value === null || value === '') return '';
@@ -102,7 +104,7 @@ export const categorizeError = (error: unknown, result?: any): CategorizedError 
   if (/MCP tool .* is disabled|MCP execution error/i.test(text)) {
     return { code: 'MCP_ERROR', reason: 'MCP tool execution failed' };
   }
-  if (/web search failed|web page read failed|private network/i.test(text)) {
+  if (/web search failed|web page read failed|deep research failed|private network/i.test(text)) {
     return { code: 'WEB_ERROR', reason: 'Web request failed' };
   }
   if (result?.exitCode !== undefined && result.exitCode !== 0) {
@@ -180,6 +182,8 @@ const getToolResultSummary = (
       return `${target} (${result?.result_count ?? 0} results)`.trim();
     case 'read_web_page':
       return `${compactValue(result?.title) || target} (${result?.markdown?.length ?? 0} chars)`.trim();
+    case 'deep_research':
+      return `${target} (${result?.searches_completed ?? 0} searches, ${result?.pages_read ?? 0} pages, ${result?.images?.length ?? 0} images)`.trim();
     case 'get_working_directory':
       return `${target}`.trim();
     case 'set_working_directory':
@@ -324,6 +328,270 @@ const WebPageReaderView: React.FC<{
     {markdown && (
       <div style={{ padding: '12px', background: 'rgba(15, 23, 42, 0.5)', borderRadius: '8px', border: '1px solid var(--border-color)', maxHeight: '360px', overflowY: 'auto' }}>
         <MarkdownContent content={markdown} />
+      </div>
+    )}
+  </div>
+);
+
+const ResearchTrail: React.FC<{
+  steps?: Array<{ id?: number; phase?: string; kind?: string; status?: string; label?: string; url?: string; detail?: string }>;
+  searchQueries?: string[];
+  errors?: string[];
+  live?: boolean;
+}> = ({ steps = [], searchQueries = [], errors = [], live = false }) => (
+  <details style={{ marginTop: '10px', border: '1px solid rgba(125, 211, 252, 0.18)', borderRadius: '8px', background: 'rgba(15, 23, 42, 0.35)', overflow: 'hidden' }}>
+    <summary style={{ padding: '8px 10px', color: '#7dd3fc', cursor: 'pointer', fontSize: '0.74rem', fontWeight: 650 }}>
+      {live ? 'Peek into live research steps' : 'Inspect research trail'}
+      <span style={{ marginLeft: '6px', color: 'var(--text-muted)', fontWeight: 400 }}>
+        ({steps.length || searchQueries.length} events{errors.length ? `, ${errors.length} errors` : ''})
+      </span>
+    </summary>
+    <div style={{ padding: '0 10px 10px', display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '320px', overflowY: 'auto' }}>
+      {steps.length > 0 ? steps.map((step, index) => (
+        <div key={`${step.id || index}-${step.label}`} style={{ display: 'flex', alignItems: 'flex-start', gap: '7px', padding: '6px 8px', borderRadius: '6px', background: 'rgba(2, 6, 23, 0.32)', fontSize: '0.71rem' }}>
+          {step.status === 'error'
+            ? <XCircle size={12} color="#fb7185" style={{ marginTop: '2px', flexShrink: 0 }} />
+            : step.status === 'success'
+              ? <CheckCircle2 size={12} color="#2dd4bf" style={{ marginTop: '2px', flexShrink: 0 }} />
+              : <Search size={12} color="#7dd3fc" style={{ marginTop: '2px', flexShrink: 0 }} />}
+          <div style={{ minWidth: 0, flex: 1 }}>
+            {step.url ? (
+              <a href={step.url} target="_blank" rel="noreferrer" style={{ color: step.status === 'error' ? '#fda4af' : '#bae6fd', textDecoration: 'none', overflowWrap: 'anywhere' }}>{step.label || step.url}</a>
+            ) : (
+              <span style={{ color: step.status === 'error' ? '#fda4af' : 'var(--text-main)', overflowWrap: 'anywhere' }}>{step.label}</span>
+            )}
+            {step.detail && <span style={{ display: 'block', marginTop: '2px', color: 'var(--text-muted)', overflowWrap: 'anywhere' }}>{step.detail}</span>}
+          </div>
+          {step.phase && <span style={{ color: 'var(--text-dim)', fontSize: '0.64rem', flexShrink: 0 }}>{step.phase.replace('_', ' ')}</span>}
+        </div>
+      )) : searchQueries.map((searchQuery, index) => (
+        <div key={`${index}-${searchQuery}`} style={{ color: 'var(--text-muted)', fontSize: '0.71rem', padding: '3px 8px' }}>
+          {index + 1}. {searchQuery}
+        </div>
+      ))}
+      {errors.length > 0 && steps.every((step) => step.status !== 'error') && errors.map((error, index) => (
+        <div key={`${index}-${error}`} style={{ color: '#fda4af', fontSize: '0.71rem', padding: '5px 8px', borderRadius: '6px', background: 'rgba(244, 63, 94, 0.08)', overflowWrap: 'anywhere' }}>
+          {error}
+        </div>
+      ))}
+      {steps.length === 0 && searchQueries.length === 0 && <span style={{ color: 'var(--text-dim)', fontSize: '0.71rem' }}>Waiting for the first research event…</span>}
+    </div>
+  </details>
+);
+
+const DeepResearchProgress: React.FC<{ args: Record<string, any>; progress?: any }> = ({ args, progress }) => {
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+
+  useEffect(() => {
+    const startedAt = Date.now();
+    const timer = window.setInterval(() => {
+      setElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const query = String(args?.query || '').trim() || 'Researching the requested topic';
+  const requestedImages = Number.isFinite(Number(args?.image_count))
+    ? Math.max(0, Math.trunc(Number(args.image_count)))
+    : null;
+  const inspectedPages = Array.isArray(progress?.pages) ? progress.pages : [];
+  const phaseLabels: Record<string, string> = {
+    searching: 'Searching the web',
+    reading: 'Inspecting promising pages',
+    following_links: 'Following relevant website links',
+    collecting_images: 'Collecting and attributing images',
+    complete: 'Research collected',
+  };
+  const phaseLabel = phaseLabels[progress?.phase] || 'Preparing research';
+  const workflow = [
+    { icon: Search, label: 'Search the web', detail: 'Run several focused search queries' },
+    { icon: FileText, label: 'Inspect sources', detail: 'Read the most relevant public pages' },
+    { icon: ExternalLink, label: 'Follow evidence', detail: 'Open useful links from those websites' },
+    {
+      icon: ImageIcon,
+      label: 'Collect images',
+      detail: requestedImages === 0
+        ? 'Skipped because no images were requested'
+        : requestedImages
+          ? `Find up to ${requestedImages} relevant, attributed images`
+          : 'Find images only when the request calls for them',
+    },
+  ];
+
+  return (
+    <div
+      className="glass-panel animate-fade-in"
+      style={{
+        marginLeft: '44px',
+        padding: '16px 18px',
+        borderRadius: '14px',
+        border: '1px solid rgba(56, 189, 248, 0.42)',
+        background: 'linear-gradient(135deg, rgba(14, 116, 144, 0.14), rgba(79, 70, 229, 0.1))',
+        boxShadow: '0 6px 20px rgba(14, 116, 144, 0.12)',
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '9px', minWidth: 0 }}>
+          <Loader2 size={19} className="spin" style={{ flexShrink: 0, color: '#38bdf8' }} />
+          <strong style={{ color: 'var(--text-main)', fontSize: '0.9rem' }}>Deep research in progress</strong>
+        </div>
+        <span style={{ flexShrink: 0, color: '#7dd3fc', fontFamily: 'var(--font-code)', fontSize: '0.75rem' }}>
+          {elapsedSeconds}s
+        </span>
+      </div>
+
+      <div style={{ marginTop: '9px', color: '#bae6fd', fontSize: '0.8rem', lineHeight: 1.45, overflowWrap: 'anywhere' }}>
+        “{query}”
+      </div>
+
+      <div style={{ marginTop: '7px', display: 'flex', alignItems: 'center', gap: '7px', flexWrap: 'wrap', color: 'var(--text-muted)', fontSize: '0.72rem' }}>
+        <span style={{ color: '#7dd3fc', fontWeight: 650 }}>{phaseLabel}</span>
+        {progress && <span>· {progress.searches_completed || 0}/{progress.search_queries?.length || 0} searches</span>}
+        {progress?.search_results_found > 0 && <span>· {progress.search_results_found} results found</span>}
+        {progress?.images_found > 0 && <span>· {progress.images_found} images collected</span>}
+      </div>
+
+      <div style={{ marginTop: '10px' }}>
+        <span style={{ display: 'block', marginBottom: '6px', color: 'var(--text-muted)', fontSize: '0.68rem', fontWeight: 650, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+          Sources inspected
+        </span>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+          {inspectedPages.length === 0 ? (
+            <span style={{ color: 'var(--text-dim)', fontSize: '0.7rem' }}>Domains will appear here as pages are read…</span>
+          ) : inspectedPages.map((page: any, index: number) => {
+            let domain = page.url || 'source';
+            let favicon = '';
+            try {
+              const parsed = new URL(page.url);
+              domain = parsed.hostname.replace(/^www\./, '');
+              favicon = `${parsed.origin}/favicon.ico`;
+            } catch (_) {}
+            return (
+              <a
+                key={`${page.url}-${index}`}
+                href={page.url}
+                target="_blank"
+                rel="noreferrer"
+                title={`${page.title || domain}${page.discovery === 'website_link' ? ' · followed website link' : ''}`}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', maxWidth: '190px', padding: '4px 8px 4px 5px', borderRadius: '999px', border: '1px solid rgba(125, 211, 252, 0.2)', background: 'rgba(15, 23, 42, 0.52)', color: '#bae6fd', textDecoration: 'none', fontSize: '0.69rem' }}
+              >
+                <span style={{ position: 'relative', display: 'grid', placeItems: 'center', width: '17px', height: '17px', flexShrink: 0, overflow: 'hidden', borderRadius: '4px', background: 'rgba(56, 189, 248, 0.12)' }}>
+                  <Globe size={11} color="#7dd3fc" />
+                  {favicon && <img src={favicon} alt="" onError={(event) => { event.currentTarget.style.display = 'none'; }} style={{ position: 'absolute', inset: '2px', width: '13px', height: '13px', objectFit: 'contain' }} />}
+                </span>
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{domain}</span>
+                {page.discovery === 'website_link' && <ExternalLink size={9} style={{ flexShrink: 0, color: 'var(--text-muted)' }} />}
+              </a>
+            );
+          })}
+        </div>
+      </div>
+
+      <ResearchTrail
+        live
+        steps={Array.isArray(progress?.steps) ? progress.steps : []}
+        searchQueries={Array.isArray(progress?.search_queries) ? progress.search_queries : []}
+      />
+
+      <div style={{ marginTop: '12px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(185px, 1fr))', gap: '8px' }}>
+        {workflow.map((step) => {
+          const StepIcon = step.icon;
+          return (
+            <div key={step.label} style={{ display: 'flex', gap: '8px', padding: '9px 10px', borderRadius: '8px', border: '1px solid rgba(125, 211, 252, 0.15)', background: 'rgba(15, 23, 42, 0.38)' }}>
+              <StepIcon size={15} style={{ flexShrink: 0, marginTop: '1px', color: '#38bdf8' }} />
+              <div style={{ minWidth: 0 }}>
+                <span style={{ display: 'block', color: 'var(--text-main)', fontSize: '0.76rem', fontWeight: 650 }}>{step.label}</span>
+                <span style={{ display: 'block', marginTop: '2px', color: 'var(--text-muted)', fontSize: '0.7rem', lineHeight: 1.35 }}>{step.detail}</span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div style={{ marginTop: '10px', color: 'var(--text-muted)', fontSize: '0.7rem', lineHeight: 1.4 }}>
+        Tasks can overlap. Exact search, page, link, and image counts will appear when the research completes.
+      </div>
+    </div>
+  );
+};
+
+const DeepResearchResultsView: React.FC<{
+  query: string;
+  searchesCompleted: number;
+  searchResultsFound?: number;
+  linkedPagesRead: number;
+  researchDate?: string;
+  status?: string;
+  sources: Array<{ id: string; title: string; url: string; discovery: string; discovered_by?: string; excerpt?: string | null; content?: string; content_truncated?: boolean }>;
+  images: Array<{ id: string; url: string; alt: string; source_url: string; source_title: string }>;
+  searchQueries?: string[];
+  steps?: Array<{ id?: number; phase?: string; kind?: string; status?: string; label?: string; url?: string; detail?: string }>;
+  errors?: string[];
+  researchBudget?: { searches?: number; primary_pages?: number; follow_up_pages?: number; evidence_characters?: number };
+}> = ({ query, searchesCompleted, searchResultsFound, linkedPagesRead, researchDate, status, sources, images, searchQueries = [], steps = [], errors = [], researchBudget }) => (
+  <div style={{ marginTop: '10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+    <div style={{ padding: '8px 10px', background: 'rgba(15, 23, 42, 0.6)', borderRadius: '6px', border: '1px solid rgba(56, 189, 248, 0.25)', fontSize: '0.775rem' }}>
+      <strong style={{ color: '#38bdf8' }}>Deep research:</strong>{' '}
+      <span style={{ color: 'var(--text-main)' }}>{query}</span>
+      <span style={{ display: 'block', marginTop: '4px', color: 'var(--text-muted)' }}>
+        {status || 'complete'} · {searchesCompleted} searches{searchResultsFound !== undefined ? ` · ${searchResultsFound} results` : ''} · {sources.length} pages inspected · {images.length} images · {linkedPagesRead} followed website links{researchDate ? ` · ${researchDate}` : ''}
+      </span>
+      {researchBudget && (
+        <span style={{ display: 'block', marginTop: '3px', color: 'var(--text-dim)', fontSize: '0.68rem' }}>
+          Budget: {researchBudget.searches ?? searchesCompleted} searches · {researchBudget.primary_pages ?? 'adaptive'} primary pages · {researchBudget.follow_up_pages ?? 'adaptive'} follow-ups · {Number(researchBudget.evidence_characters || 0).toLocaleString()} evidence characters
+        </span>
+      )}
+    </div>
+    <ResearchTrail steps={steps} searchQueries={searchQueries} errors={errors} />
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '320px', overflowY: 'auto' }}>
+      {sources.map((source) => (
+        <details
+          key={`${source.id}-${source.url}`}
+          style={{ padding: '8px 10px', borderRadius: '7px', background: 'rgba(15, 23, 42, 0.5)', border: '1px solid var(--border-color)', color: '#38bdf8' }}
+        >
+          <summary style={{ cursor: 'pointer', fontSize: '0.78rem' }}>
+            <span style={{ marginRight: '7px', color: 'var(--accent-teal)', fontFamily: 'var(--font-code)', fontSize: '0.72rem' }}>{source.id}</span>
+            <span>{source.title || source.url}</span>
+            {source.discovery === 'website_link' && <span style={{ marginLeft: '7px', color: 'var(--text-muted)', fontSize: '0.68rem' }}>followed link</span>}
+          </summary>
+          <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid var(--border-color)', color: 'var(--text-muted)', fontSize: '0.72rem', lineHeight: 1.45 }}>
+            <a href={source.url} target="_blank" rel="noreferrer" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', color: '#38bdf8', overflowWrap: 'anywhere' }}>
+              {source.url}<ExternalLink size={10} />
+            </a>
+            {source.discovered_by && <span style={{ display: 'block', marginTop: '5px' }}>Discovered by: {source.discovered_by}</span>}
+            {source.excerpt && <span style={{ display: 'block', marginTop: '6px', color: '#cbd5e1' }}>{source.excerpt}</span>}
+            {source.content && (
+              <div style={{ marginTop: '7px', padding: '8px', borderRadius: '5px', background: 'rgba(2, 6, 23, 0.45)', color: '#cbd5e1', whiteSpace: 'pre-wrap', maxHeight: '180px', overflowY: 'auto' }}>
+                {source.content}{source.content_truncated ? '\n\n[content truncated]' : ''}
+              </div>
+            )}
+          </div>
+        </details>
+      ))}
+    </div>
+    {images.length > 0 && (
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: '8px', maxHeight: '360px', overflowY: 'auto' }}>
+        {images.map((researchImage) => (
+          <a
+            key={`${researchImage.id}-${researchImage.url}`}
+            href={researchImage.url}
+            target="_blank"
+            rel="noreferrer"
+            title="Open full-size image"
+            style={{ display: 'flex', flexDirection: 'column', gap: '5px', padding: '6px', borderRadius: '7px', background: 'rgba(15, 23, 42, 0.5)', border: '1px solid var(--border-color)', color: '#38bdf8', textDecoration: 'none' }}
+          >
+            <img
+              src={researchImage.url}
+              alt={researchImage.alt || researchImage.source_title || 'Research image'}
+              loading="lazy"
+              referrerPolicy="no-referrer"
+              style={{ width: '100%', height: '110px', objectFit: 'contain', borderRadius: '4px', background: 'rgba(2, 6, 23, 0.55)' }}
+            />
+            <span style={{ fontSize: '0.7rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {researchImage.id} · {researchImage.alt || researchImage.source_title || 'Image source'}
+            </span>
+          </a>
+        ))}
       </div>
     )}
   </div>
@@ -691,7 +959,8 @@ const ToolResultCard: React.FC<{
 
   const isWebSearch = message.name === 'web_search' && parsedContent?.results;
   const isWebPageRead = message.name === 'read_web_page' && parsedContent?.markdown;
-  const hasFormattedView = isWebSearch || isWebPageRead || fileDiff;
+  const isDeepResearch = message.name === 'deep_research' && parsedContent?.sources;
+  const hasFormattedView = isWebSearch || isWebPageRead || isDeepResearch || fileDiff;
 
   const mainColor = isPruned ? '#c084fc' : isFailed ? '#f43f5e' : 'var(--accent-teal)';
   const bgColor = isPruned ? 'rgba(168, 85, 247, 0.08)' : isFailed ? 'rgba(244, 63, 94, 0.08)' : 'rgba(20, 184, 166, 0.08)';
@@ -825,10 +1094,26 @@ const ToolResultCard: React.FC<{
                         markdown={parsedContent?.markdown}
                       />
                     )}
-                    {!isWebSearch && !isWebPageRead && fileDiff && (
+                    {isDeepResearch && (
+                      <DeepResearchResultsView
+                        query={parsedContent?.query || args?.query || ''}
+                        searchesCompleted={parsedContent?.searches_completed || 0}
+                        searchResultsFound={parsedContent?.search_results_found}
+                        linkedPagesRead={parsedContent?.linked_pages_read || 0}
+                        researchDate={parsedContent?.research_date}
+                        status={parsedContent?.status}
+                        sources={parsedContent?.sources || []}
+                        images={parsedContent?.images || []}
+                        searchQueries={parsedContent?.search_queries || []}
+                        steps={parsedContent?.steps || []}
+                        errors={parsedContent?.errors || []}
+                        researchBudget={parsedContent?.research_budget}
+                      />
+                    )}
+                    {!isWebSearch && !isWebPageRead && !isDeepResearch && fileDiff && (
                       <FileDiff diff={fileDiff} />
                     )}
-                    {!isWebSearch && !isWebPageRead && !fileDiff && (
+                    {!isWebSearch && !isWebPageRead && !isDeepResearch && !fileDiff && (
                       <pre style={{ margin: '10px 0 0', maxHeight: '320px', overflow: 'auto', fontSize: '0.775rem' }}>
                         {resultWithoutDiff ? JSON.stringify(resultWithoutDiff, null, 2) : message.content}
                       </pre>
@@ -901,29 +1186,189 @@ const CopyableCodeBlock: React.FC<{ code: string; language?: string }> = ({ code
   );
 };
 
+const remarkImageBundles = () => (tree: any) => {
+  const bundledVisuals = (node: any): any[] | null => {
+    if (node?.type !== 'paragraph' || !Array.isArray(node.children)) return null;
+    const visuals: any[] = [];
+    for (const child of node.children) {
+      const isWhitespace = child?.type === 'text' && !String(child.value || '').trim();
+      const isBreak = child?.type === 'break' || (child?.type === 'html' && /^<br\s*\/?\s*>$/i.test(String(child.value || '').trim()));
+      const isLinkedImage = child?.type === 'link' && child.children?.length === 1 && child.children[0]?.type === 'image';
+      if (child?.type === 'image' || isLinkedImage) visuals.push(child);
+      else if (!isWhitespace && !isBreak) return null;
+    }
+    return visuals.length > 0 ? visuals : null;
+  };
+
+  const visit = (node: any) => {
+    if (!Array.isArray(node?.children)) return;
+    node.children.forEach(visit);
+    const children: any[] = [];
+    for (let index = 0; index < node.children.length;) {
+      const firstVisuals = bundledVisuals(node.children[index]);
+      if (!firstVisuals) {
+        children.push(node.children[index++]);
+        continue;
+      }
+
+      const originals: any[] = [];
+      const visuals: any[] = [];
+      while (index < node.children.length) {
+        const nextVisuals = bundledVisuals(node.children[index]);
+        if (!nextVisuals) break;
+        originals.push(node.children[index]);
+        visuals.push(...nextVisuals);
+        index++;
+      }
+
+      if (visuals.length < 2) {
+        children.push(...originals);
+      } else {
+        children.push({
+          type: 'paragraph',
+          data: {
+            hName: 'div',
+            hProperties: { className: ['markdown-image-bundle'] },
+          },
+          children: visuals,
+        });
+      }
+    }
+    node.children = children;
+  };
+
+  visit(tree);
+};
+
 const MarkdownContent: React.FC<{ content: string; streaming?: boolean }> = ({
   content,
   streaming = false,
-}) => (
-  <div className={`markdown-body${streaming ? ' markdown-body-streaming' : ''}`}>
-    <ReactMarkdown
-      remarkPlugins={[remarkGfm]}
-      components={{
-        a: ({ children, ...props }) => <a {...props} target="_blank" rel="noreferrer">{children}</a>,
-        pre: ({ children }) => {
-          const child = React.Children.toArray(children).find(React.isValidElement);
-          if (!React.isValidElement(child)) return <pre>{children}</pre>;
-          const props = child.props as { children?: React.ReactNode; className?: string };
-          const code = String(props.children ?? '').replace(/\n$/, '');
-          const language = props.className?.match(/(?:^|\s)language-([^\s]+)/)?.[1];
-          return <CopyableCodeBlock code={code} language={language} />;
-        },
-      }}
-    >
-      {content}
-    </ReactMarkdown>
-  </div>
-);
+}) => {
+  const [viewedImage, setViewedImage] = useState<{ src: string; alt: string } | null>(null);
+
+  useEffect(() => {
+    if (!viewedImage) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setViewedImage(null);
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [viewedImage]);
+
+  return (
+    <>
+      <div className={`markdown-body${streaming ? ' markdown-body-streaming' : ''}`}>
+        <ReactMarkdown
+          remarkPlugins={[remarkGfm, remarkImageBundles]}
+          components={{
+            a: ({ children, href, node, className, title, ...props }) => {
+              const containsImage = node?.children?.some((child) => child.type === 'element' && child.tagName === 'img');
+              const presentation = getLinkPresentation(href);
+              if (containsImage) {
+                return <a {...props} href={href} className={className} title={title} target="_blank" rel="noreferrer">{children}</a>;
+              }
+              return (
+                <a
+                  {...props}
+                  href={href}
+                  target="_blank"
+                  rel="noreferrer"
+                  className={[className, presentation ? 'markdown-pretty-link' : ''].filter(Boolean).join(' ') || undefined}
+                  title={title || presentation?.domain}
+                >
+                  {presentation && (
+                    <span className="markdown-link-icon" aria-hidden="true">
+                      <Globe className="markdown-link-icon-fallback" size={12} />
+                      <img
+                        src={presentation.faviconUrl}
+                        alt=""
+                        loading="lazy"
+                        referrerPolicy="no-referrer"
+                        onError={(event) => { event.currentTarget.style.display = 'none'; }}
+                      />
+                    </span>
+                  )}
+                  <span>{children}</span>
+                </a>
+              );
+            },
+            img: ({ src, alt, title }) => {
+              const imageUrl = typeof src === 'string' ? src : '';
+              const imageAlt = alt || 'Chat response image';
+              return (
+                <img
+                  className="markdown-chat-image"
+                  src={imageUrl}
+                  alt={imageAlt}
+                  title={title || 'View larger image'}
+                  loading="lazy"
+                  referrerPolicy="no-referrer"
+                  role="button"
+                  tabIndex={0}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    if (imageUrl) setViewedImage({ src: imageUrl, alt: imageAlt });
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key !== 'Enter' && event.key !== ' ') return;
+                    event.preventDefault();
+                    event.stopPropagation();
+                    if (imageUrl) setViewedImage({ src: imageUrl, alt: imageAlt });
+                  }}
+                />
+              );
+            },
+            pre: ({ children }) => {
+              const child = React.Children.toArray(children).find(React.isValidElement);
+              if (!React.isValidElement(child)) return <pre>{children}</pre>;
+              const props = child.props as { children?: React.ReactNode; className?: string };
+              const code = String(props.children ?? '').replace(/\n$/, '');
+              const language = props.className?.match(/(?:^|\s)language-([^\s]+)/)?.[1];
+              return <CopyableCodeBlock code={code} language={language} />;
+            },
+          }}
+        >
+          {content}
+        </ReactMarkdown>
+      </div>
+      {viewedImage && createPortal(
+        <div
+          className="markdown-image-lightbox"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Larger image preview"
+          onClick={() => setViewedImage(null)}
+        >
+          <div className="markdown-image-lightbox-content" onClick={(event) => event.stopPropagation()}>
+            <button
+              type="button"
+              className="markdown-image-lightbox-close"
+              onClick={() => setViewedImage(null)}
+              aria-label="Close image preview"
+              title="Close"
+            >
+              <X size={20} />
+            </button>
+            <img src={viewedImage.src} alt={viewedImage.alt} referrerPolicy="no-referrer" />
+            <div className="markdown-image-lightbox-footer">
+              <span>{viewedImage.alt}</span>
+              <a href={viewedImage.src} target="_blank" rel="noreferrer">
+                Open original <ExternalLink size={14} />
+              </a>
+            </div>
+          </div>
+        </div>,
+        document.body,
+      )}
+    </>
+  );
+};
 
 const ThinkingBlock: React.FC<{ thinking: string; thinkingTokens?: number; isStreaming?: boolean }> = ({
   thinking,
@@ -1105,7 +1550,7 @@ interface ChatWindowProps {
   generationStatus: 'idle' | 'generating' | 'completed' | 'cancelled' | 'error';
   pendingApprovalCall?: PendingApprovalCall | null;
   isSubmittingToolApproval?: boolean;
-  activeToolCall?: { name: string; args?: any } | null;
+  activeToolCall?: { name: string; args?: any; progress?: any } | null;
   supportsVision?: boolean;
   onSendMessage: (msg: string, attachments?: TextAttachment[], imageAttachments?: import('../types').ImageAttachment[]) => void;
   onCancelGeneration: () => void;
@@ -1139,8 +1584,8 @@ const QUICK_HELPER_PROMPTS = [
   },
   {
     icon: Globe,
-    label: 'Web Research',
-    prompt: 'Search the web for recent Ollama agent updates and summarize key best practices.',
+    label: 'Deep Research',
+    prompt: 'Make deep research about ',
     category: 'web',
   },
   {
@@ -1699,6 +2144,9 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
 
         {/* Active Tool Execution Indicator */}
         {isGenerating && activeToolCall && (
+          activeToolCall.name === 'deep_research' ? (
+            <DeepResearchProgress args={activeToolCall.args || {}} progress={activeToolCall.progress} />
+          ) : (
           <div
             className="glass-panel animate-fade-in"
             style={{
@@ -1752,6 +2200,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
               )}
             </div>
           </div>
+          )
         )}
 
         {isGenerating && !activeToolCall && !streamingText && !pendingApprovalCall && (
@@ -2255,7 +2704,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
               handleKeyDown(e);
             }}
             placeholder={supportsVision ? "Type a message, attach images, or drag & drop files..." : "Type a message, '/' for commands (/compact, /clear...), or drag & drop files..."}
-            rows={1}
+            rows={2}
             style={{
               flex: 1,
               background: 'transparent',

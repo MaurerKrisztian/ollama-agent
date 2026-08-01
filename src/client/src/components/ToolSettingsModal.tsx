@@ -63,6 +63,10 @@ export const TOOL_DESCRIPTIONS: Record<string, { description: string; parameters
     description: 'Read one public HTTP/HTTPS page and return main content as Markdown.',
     parameters: { url: 'string' },
   },
+  deep_research: {
+    description: 'Run several web searches, inspect multiple sources, and follow relevant links within the visited websites. Returns compact evidence for a cited answer.',
+    parameters: { query: 'string (complete research question)' },
+  },
   get_document_symbols: {
     description: 'Developer Tool: Get structural AST outline (classes, functions, interfaces, methods, variables) of a TypeScript/JavaScript file with line numbers.',
     parameters: { relative_path: 'string' },
@@ -670,7 +674,7 @@ export const ToolSettingsModal: React.FC<ToolSettingsModalProps> = ({
                   border: `1px solid ${settings.maxLoops === 0 ? 'rgba(34, 197, 94, 0.3)' : 'rgba(99, 102, 241, 0.3)'}`,
                 }}
               >
-                {settings.maxLoops === 0 ? 'Disabled (Unlimited)' : `${settings.maxLoops ?? 10} iterations`}
+                {settings.maxLoops === 0 ? 'Disabled (Unlimited)' : `${settings.maxLoops ?? 25} iterations`}
               </span>
             </div>
             <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', lineHeight: 1.5, marginBottom: '12px' }}>
@@ -681,7 +685,7 @@ export const ToolSettingsModal: React.FC<ToolSettingsModalProps> = ({
               min="0"
               max="30"
               step="1"
-              value={settings.maxLoops ?? 10}
+              value={settings.maxLoops ?? 25}
               onChange={(e) => onUpdateSettings({ ...settings, maxLoops: Number(e.target.value) })}
               style={{
                 width: '100%',
@@ -695,7 +699,7 @@ export const ToolSettingsModal: React.FC<ToolSettingsModalProps> = ({
                   type="checkbox"
                   checked={settings.maxLoops === 0}
                   onChange={(e) => {
-                    onUpdateSettings({ ...settings, maxLoops: e.target.checked ? 0 : 10 });
+                    onUpdateSettings({ ...settings, maxLoops: e.target.checked ? 0 : 25 });
                   }}
                   style={{ accentColor: 'var(--accent-primary)', cursor: 'pointer' }}
                 />
@@ -791,6 +795,7 @@ export const ToolSettingsModal: React.FC<ToolSettingsModalProps> = ({
                 tools: [
                   'web_search',
                   'read_web_page',
+                  'deep_research',
                 ] as Array<keyof ToolSettings['enabledTools']>,
               },
               {
