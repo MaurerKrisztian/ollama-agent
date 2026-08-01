@@ -9,7 +9,7 @@ import { AgentEngine } from '../core/agent.js';
 import { TOOL_DEFINITIONS } from '../core/tools.js';
 import { BENCHMARK_TEST_CASES } from '../benchmark/cases/index.js';
 import type { BenchmarkTestCase } from '../benchmark/cases/index.js';
-import { runBenchmarkSuite, runSingleBenchmarkTest } from '../benchmark/runtime/runner.js';
+import { runBenchmarkCase, runBenchmarkSuite } from '../benchmark/runtime/runner.js';
 import {
   DEFAULT_BENCHMARK_OUTPUT_DIR,
   BENCHMARK_PROJECT_ROOT,
@@ -978,6 +978,14 @@ const parseBenchmarkAgentConfig = (value: unknown): BenchmarkAgentConfig => {
   return config;
 };
 
+const parseBenchmarkAttempts = (value: unknown): number => {
+  const attempts = typeof value === 'number' ? value : Number(value ?? 3);
+  if (!Number.isInteger(attempts) || attempts < 3 || attempts > 10) {
+    throw new Error('Benchmark attempts per case must be an integer between 3 and 10.');
+  }
+  return attempts;
+};
+
 // POST /api/benchmark/run - Synchronous benchmark run (optional category filter)
 app.post('/api/benchmark/run', async (req, res) => {
   const targetModel = req.body.model || agent.getConfig().model;
@@ -991,7 +999,8 @@ app.post('/api/benchmark/run', async (req, res) => {
     : BENCHMARK_TEST_CASES;
 
   try {
-    const report = await runBenchmarkSuite(targetModel, targetHost, undefined, tests, agent.getOllamaToken(), undefined, undefined, benchmarkAgentConfig);
+    const attemptsPerCase = parseBenchmarkAttempts(req.body.attemptsPerCase);
+    const report = await runBenchmarkSuite(targetModel, targetHost, undefined, tests, agent.getOllamaToken(), undefined, undefined, benchmarkAgentConfig, attemptsPerCase);
     const savedRun = output.save
       ? await saveBenchmarkReport(report, output.directory, { ...benchmarkAgentConfig, model: targetModel, ollamaHost: targetHost }, output.runName)
       : undefined;
@@ -1013,7 +1022,10 @@ app.post('/api/benchmark/run-single', async (req, res) => {
   const benchmarkAgentConfig = parseBenchmarkAgentConfig(req.body.agentConfig);
 
   try {
-    const trace = await runSingleBenchmarkTest(testId, targetModel, targetHost, agent.getOllamaToken(), undefined, benchmarkAgentConfig);
+    const attemptsPerCase = parseBenchmarkAttempts(req.body.attemptsPerCase);
+    const testCase = BENCHMARK_TEST_CASES.find((candidate) => candidate.id === testId);
+    if (!testCase) return res.status(404).json({ success: false, error: `Test case "${testId}" not found.` });
+    const trace = await runBenchmarkCase(testCase, targetModel, targetHost, agent.getOllamaToken(), undefined, benchmarkAgentConfig, attemptsPerCase);
     res.json({ success: true, trace });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
@@ -1047,6 +1059,7 @@ app.post('/api/benchmark/run-stream', async (req, res) => {
   };
 
   try {
+    const attemptsPerCase = parseBenchmarkAttempts(req.body.attemptsPerCase);
     const report = await runBenchmarkSuite(
       targetModel,
       targetHost,
@@ -1064,6 +1077,7 @@ app.post('/api/benchmark/run-stream', async (req, res) => {
       },
       benchmarkController.signal,
       benchmarkAgentConfig,
+      attemptsPerCase,
     );
 
     let savedRun;

@@ -20,6 +20,15 @@ export interface OllamaChatOptions {
   signal?: AbortSignal;
 }
 
+export interface OllamaResponseMetrics {
+  totalDurationNs?: number;
+  loadDurationNs?: number;
+  promptEvalCount?: number;
+  promptEvalDurationNs?: number;
+  evalCount?: number;
+  evalDurationNs?: number;
+}
+
 export class OllamaClient {
   private host: string;
   private authToken?: string;
@@ -251,6 +260,7 @@ export class OllamaClient {
     thinking?: string;
     thinkingTokens?: number;
     tool_calls?: Array<{ id: string; name: string; arguments: Record<string, any> }>;
+    metrics?: OllamaResponseMetrics;
   }> {
     const endpoint = `${options.host || this.host}/api/chat`;
 
@@ -331,7 +341,20 @@ export class OllamaClient {
     let fullContent = '';
     let fullThinking = '';
     let toolCallsResult: Array<{ id: string; name: string; arguments: Record<string, any> }> | undefined;
+    let metrics: OllamaResponseMetrics | undefined;
     let buffer = '';
+
+    const captureMetrics = (parsed: any) => {
+      if (!parsed?.done) return;
+      metrics = {
+        totalDurationNs: parsed.total_duration,
+        loadDurationNs: parsed.load_duration,
+        promptEvalCount: parsed.prompt_eval_count,
+        promptEvalDurationNs: parsed.prompt_eval_duration,
+        evalCount: parsed.eval_count,
+        evalDurationNs: parsed.eval_duration,
+      };
+    };
 
     while (true) {
       const { done, value } = await reader.read();
@@ -346,6 +369,7 @@ export class OllamaClient {
         if (!trimmed) continue;
         try {
           const parsed = JSON.parse(trimmed);
+          captureMetrics(parsed);
           if (parsed.message) {
             const thinkingChunk = parsed.message.thinking || parsed.message.reasoning_content || parsed.message.reasoning;
             if (thinkingChunk) {
@@ -379,6 +403,7 @@ export class OllamaClient {
     if (buffer.trim()) {
       try {
         const parsed = JSON.parse(buffer.trim());
+        captureMetrics(parsed);
         const thinkingChunk = parsed.message?.thinking || parsed.message?.reasoning_content || parsed.message?.reasoning;
         if (thinkingChunk) {
           fullThinking += thinkingChunk;
@@ -416,6 +441,7 @@ export class OllamaClient {
       thinking: fullThinking || undefined,
       thinkingTokens: thinkingTokens || undefined,
       tool_calls: toolCallsResult,
+      metrics,
     };
   }
 }

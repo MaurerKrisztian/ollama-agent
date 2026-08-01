@@ -9,10 +9,12 @@ interface ContainerRequest {
   ollamaHost: string;
   ollamaToken?: string;
   agentConfig?: BenchmarkAgentConfig;
+  containerStartedAt?: number;
 }
 
 async function main() {
   const request = JSON.parse(await fs.readFile('/benchmark-io/request.json', 'utf8')) as ContainerRequest;
+  if (request.containerStartedAt) process.env.BENCHMARK_CONTAINER_STARTED_AT = String(request.containerStartedAt);
   const testCase = BENCHMARK_TEST_CASES.find((candidate) => candidate.id === request.testId);
   if (!testCase) throw new Error(`Unknown benchmark test: ${request.testId}`);
   const result = await runBenchmarkAttemptInContainer(

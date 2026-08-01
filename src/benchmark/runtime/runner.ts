@@ -10,7 +10,7 @@ import { BENCHMARK_TEST_CASES } from '../cases/index.js';
 import type { BenchmarkTestCase } from '../cases/index.js';
 import { evaluateBenchmarkTask } from '../evaluation/evaluators.js';
 import { setupMockEnvironment } from '../fixtures/mockEnvironment.js';
-import type { BenchmarkAgentConfig, BenchmarkReport, TestResultTrace } from '../types.js';
+import type { BenchmarkAgentConfig, BenchmarkReport, BenchmarkTiming, TestResultTrace } from '../types.js';
 
 export type { BenchmarkReport, TestResultTrace };
 
@@ -25,7 +25,29 @@ interface ContainerRequest {
   ollamaHost: string;
   ollamaToken?: string;
   agentConfig?: BenchmarkAgentConfig;
+  containerStartedAt?: number;
 }
+
+const emptyTiming = (): BenchmarkTiming => ({
+  imageSetupMs: 0,
+  containerStartupMs: 0,
+  modelLoadMs: 0,
+  promptEvaluationMs: 0,
+  generationMs: 0,
+  toolExecutionMs: 0,
+  verificationMs: 0,
+  endToEndWallMs: 0,
+  comparisonMs: 0,
+  promptTokens: 0,
+  generatedTokens: 0,
+});
+
+const addTiming = (target: BenchmarkTiming, source: BenchmarkTiming): BenchmarkTiming => {
+  for (const key of Object.keys(target) as Array<keyof BenchmarkTiming>) target[key] += source[key];
+  return target;
+};
+
+const nsToMs = (value?: number) => typeof value === 'number' ? value / 1_000_000 : 0;
 
 async function ensureBenchmarkImage(): Promise<void> {
   if (!imageBuildPromise) {
@@ -65,6 +87,7 @@ async function runDockerContainer(
     BENCHMARK_DOCKER_IMAGE,
   ];
 
+  request.containerStartedAt = Date.now();
   await fs.writeFile(path.join(ioDir, 'request.json'), JSON.stringify(request), { mode: 0o600 });
 
   await new Promise<void>((resolve, reject) => {
@@ -109,11 +132,13 @@ export async function runSingleBenchmarkTest(
   signal?: AbortSignal,
   agentConfig?: BenchmarkAgentConfig,
 ): Promise<TestResultTrace> {
+  const endToEndStartedAt = performance.now();
   signal?.throwIfAborted();
   if (!BENCHMARK_TEST_CASES.some((testCase) => testCase.id === testId)) {
     throw new Error(`Test case "${testId}" not found.`);
   }
 
+  const imageSetupStartedAt = performance.now();
   await ensureBenchmarkImage();
   signal?.throwIfAborted();
   const attemptDir = await fs.mkdtemp(path.join(os.tmpdir(), 'local-model-chat-benchmark-'));
@@ -121,6 +146,7 @@ export async function runSingleBenchmarkTest(
   const workspaceDir = path.join(attemptDir, 'workspace');
   await fs.mkdir(ioDir);
   await fs.mkdir(workspaceDir);
+  const hostImageSetupMs = performance.now() - imageSetupStartedAt;
 
   try {
     await runDockerContainer({
@@ -131,6 +157,9 @@ export async function runSingleBenchmarkTest(
       agentConfig,
     }, ioDir, workspaceDir, signal);
     const result = JSON.parse(await fs.readFile(path.join(ioDir, 'result.json'), 'utf8')) as TestResultTrace;
+    result.timing.imageSetupMs += hostImageSetupMs;
+    result.timing.endToEndWallMs = performance.now() - endToEndStartedAt;
+    result.durationMs = result.timing.comparisonMs;
     return result;
   } finally {
     await fs.rm(attemptDir, { recursive: true, force: true });
@@ -147,8 +176,11 @@ export async function runBenchmarkAttemptInContainer(
   if (process.env.BENCHMARK_CONTAINER !== '1') {
     throw new Error('Refusing to execute a benchmark attempt outside its Docker container.');
   }
+  const timing = emptyTiming();
+  timing.containerStartupMs = Math.max(0, Date.now() - (Number(process.env.BENCHMARK_CONTAINER_STARTED_AT) || Date.now()));
+  const setupStartedAt = performance.now();
   const workspace = await setupMockEnvironment('/workspace');
-  const startedAt = Date.now();
+  timing.imageSetupMs = performance.now() - setupStartedAt;
   const agent = new AgentEngine({
     model: modelName,
     ollamaHost,
@@ -167,43 +199,48 @@ export async function runBenchmarkAttemptInContainer(
   const executor = agent.getToolExecutor();
   const originalExecuteTool = executor.executeTool.bind(executor);
   executor.executeTool = async (name: string, args: Record<string, any>) => {
-    if (name === 'web_search') {
-      const query = String(args.query || '');
-      if (query.toLowerCase().includes('node')) {
+    const toolStartedAt = performance.now();
+    try {
+      if (name === 'web_search') {
+        const query = String(args.query || '');
+        if (query.toLowerCase().includes('node')) {
+          return { query, result_count: 2, results: [
+            { title: 'Node.js releases', url: 'https://benchmark.example/node-release-schedule', snippet: 'Official release schedule and support status for Node.js versions.' },
+            { title: 'Node.js 22 release announcement', url: 'https://benchmark.example/node-22-announcement', snippet: 'Highlights from the original Node.js 22 release.' },
+          ] };
+        }
+        if (query.toLowerCase().includes('lighthouse')) {
+          return { query, result_count: 2, results: [
+            { title: 'Project Lighthouse release notes', url: 'https://benchmark.example/lighthouse-release', snippet: 'Official release announcement and launch details for Project Lighthouse.' },
+            { title: 'Lighthouse project archive', url: 'https://benchmark.example/lighthouse-archive', snippet: 'Older Project Lighthouse planning documents.' },
+          ] };
+        }
         return { query, result_count: 2, results: [
-          { title: 'Node.js releases', url: 'https://benchmark.example/node-release-schedule', snippet: 'Official release schedule and support status for Node.js versions.' },
-          { title: 'Node.js 22 release announcement', url: 'https://benchmark.example/node-22-announcement', snippet: 'Highlights from the original Node.js 22 release.' },
+          { title: 'Ollama documentation', url: 'https://docs.ollama.com/', snippet: 'Official documentation for running and building with Ollama.' },
+          { title: 'Ollama on GitHub', url: 'https://github.com/ollama/ollama', snippet: 'Source code and project information.' },
         ] };
       }
-      if (query.toLowerCase().includes('lighthouse')) {
-        return { query, result_count: 2, results: [
-          { title: 'Project Lighthouse release notes', url: 'https://benchmark.example/lighthouse-release', snippet: 'Official release announcement and launch details for Project Lighthouse.' },
-          { title: 'Lighthouse project archive', url: 'https://benchmark.example/lighthouse-archive', snippet: 'Older Project Lighthouse planning documents.' },
-        ] };
-      }
-      return { query, result_count: 2, results: [
-        { title: 'Ollama documentation', url: 'https://docs.ollama.com/', snippet: 'Official documentation for running and building with Ollama.' },
-        { title: 'Ollama on GitHub', url: 'https://github.com/ollama/ollama', snippet: 'Source code and project information.' },
-      ] };
-    }
-    if (name === 'read_web_page') {
-      const url = String(args.url || '');
-      if (url.includes('node-release-schedule')) {
+      if (name === 'read_web_page') {
+        const url = String(args.url || '');
+        if (url.includes('node-release-schedule')) {
+          return {
+            title: 'Node.js releases', url, byline: 'Node.js Release Working Group',
+            excerpt: 'Release schedule and support status for Node.js versions.',
+            markdown: '# Node.js releases\n\n| Version | Status | End of security support |\n| --- | --- | --- |\n| Node.js 22 | Maintenance LTS | **30 April 2027** |\n',
+            truncated: false,
+          };
+        }
         return {
-          title: 'Node.js releases', url, byline: 'Node.js Release Working Group',
-          excerpt: 'Release schedule and support status for Node.js versions.',
-          markdown: '# Node.js releases\n\n| Version | Status | End of security support |\n| --- | --- | --- |\n| Node.js 22 | Maintenance LTS | **30 April 2027** |\n',
+          title: 'Project Lighthouse release notes', url, byline: 'Lighthouse Release Team',
+          excerpt: 'Official Project Lighthouse release announcement.',
+          markdown: '# Project Lighthouse release notes\n\nThe exact release codename is **NEBULA-FERN-204**.\n\nThe public release date is **17 October 2026**.',
           truncated: false,
         };
       }
-      return {
-        title: 'Project Lighthouse release notes', url, byline: 'Lighthouse Release Team',
-        excerpt: 'Official Project Lighthouse release announcement.',
-        markdown: '# Project Lighthouse release notes\n\nThe exact release codename is **NEBULA-FERN-204**.\n\nThe public release date is **17 October 2026**.',
-        truncated: false,
-      };
+      return await originalExecuteTool(name, args);
+    } finally {
+      timing.toolExecutionMs += performance.now() - toolStartedAt;
     }
-    return originalExecuteTool(name, args);
   };
 
   const actualToolsCalled: Array<{ name: string; args: Record<string, any> }> = [];
@@ -233,15 +270,25 @@ export async function runBenchmarkAttemptInContainer(
           record({ type: 'assistant_message', content: message.content, thinking: message.thinking });
         }
       },
+      onModelResponse: (metrics) => {
+        timing.modelLoadMs += nsToMs(metrics.loadDurationNs);
+        timing.promptEvaluationMs += nsToMs(metrics.promptEvalDurationNs);
+        timing.generationMs += nsToMs(metrics.evalDurationNs);
+        timing.promptTokens += metrics.promptEvalCount ?? 0;
+        timing.generatedTokens += metrics.evalCount ?? 0;
+      },
     });
     responseContent = lastAssistantContent || aggregateResponse;
   } catch (err: any) {
     testError = err.message;
   }
 
+  const verificationStartedAt = performance.now();
   const evaluation = testError
     ? { passed: false, reason: `Agent execution failed: ${testError}` }
     : await evaluateBenchmarkTask(testCase, workspace, actualToolsCalled, responseContent, toolResults);
+  timing.verificationMs = performance.now() - verificationStartedAt;
+  timing.comparisonMs = timing.promptEvaluationMs + timing.generationMs + timing.toolExecutionMs;
 
   return {
     testId: testCase.id,
@@ -255,7 +302,13 @@ export async function runBenchmarkAttemptInContainer(
     executionTrace,
     passed: evaluation.passed,
     reason: evaluation.reason,
-    durationMs: Date.now() - startedAt,
+    durationMs: timing.comparisonMs,
+    timing,
+    attemptNumber: 1,
+    attemptCount: 1,
+    successfulAttempts: evaluation.passed ? 1 : 0,
+    failedAttempts: evaluation.passed ? 0 : 1,
+    successRatePercentage: evaluation.passed ? 100 : 0,
     responseContent,
     objective: testCase.objective,
     requiredOutput: testCase.requiredOutput,
@@ -277,6 +330,45 @@ export async function runBenchmarkAttemptInContainer(
   };
 }
 
+export async function runBenchmarkCase(
+  testCase: BenchmarkTestCase,
+  modelName: string,
+  ollamaHost: string,
+  ollamaToken: string | undefined,
+  signal: AbortSignal | undefined,
+  agentConfig: BenchmarkAgentConfig | undefined,
+  attemptsPerCase: number,
+  onAttemptStart?: (attempt: number, total: number) => void,
+): Promise<TestResultTrace> {
+  if (!Number.isInteger(attemptsPerCase) || attemptsPerCase < 3 || attemptsPerCase > 10) {
+    throw new Error('Benchmark attempts per case must be an integer between 3 and 10.');
+  }
+  const attempts: TestResultTrace[] = [];
+  for (let attempt = 1; attempt <= attemptsPerCase; attempt++) {
+    signal?.throwIfAborted();
+    onAttemptStart?.(attempt, attemptsPerCase);
+    const trace = await runSingleBenchmarkTest(testCase.id, modelName, ollamaHost, ollamaToken, signal, agentConfig);
+    trace.attemptNumber = attempt;
+    attempts.push(trace);
+  }
+  const successfulAttempts = attempts.filter((attempt) => attempt.passed).length;
+  const timing = attempts.reduce((total, attempt) => addTiming(total, attempt.timing), emptyTiming());
+  const representative = attempts[attempts.length - 1];
+  return {
+    ...representative,
+    passed: successfulAttempts === attemptsPerCase,
+    reason: `${successfulAttempts}/${attemptsPerCase} attempts passed (${Math.round((successfulAttempts / attemptsPerCase) * 100)}% success rate).`,
+    durationMs: timing.comparisonMs / attemptsPerCase,
+    timing,
+    attemptNumber: attemptsPerCase,
+    attemptCount: attemptsPerCase,
+    successfulAttempts,
+    failedAttempts: attemptsPerCase - successfulAttempts,
+    successRatePercentage: Math.round((successfulAttempts / attemptsPerCase) * 100),
+    attempts,
+  };
+}
+
 export async function runBenchmarkSuite(
   modelName: string,
   ollamaHost: string = 'http://127.0.0.1:11434',
@@ -286,23 +378,43 @@ export async function runBenchmarkSuite(
   onTestStart?: (current: number, total: number, testCase: BenchmarkTestCase) => void,
   signal?: AbortSignal,
   agentConfig?: BenchmarkAgentConfig,
+  attemptsPerCase: number = 3,
 ): Promise<BenchmarkReport> {
   const startTime = Date.now();
   const results: TestResultTrace[] = [];
   for (let index = 0; index < testCases.length; index++) {
     signal?.throwIfAborted();
     const testCase = testCases[index];
-    onTestStart?.(index + 1, testCases.length, testCase);
-    const result = await runSingleBenchmarkTest(testCase.id, modelName, ollamaHost, ollamaToken, signal, agentConfig);
+    const result = await runBenchmarkCase(
+      testCase,
+      modelName,
+      ollamaHost,
+      ollamaToken,
+      signal,
+      agentConfig,
+      attemptsPerCase,
+      (attempt) => onTestStart?.(index + 1, testCases.length, { ...testCase, name: `${testCase.name} (attempt ${attempt}/${attemptsPerCase})` }),
+    );
     results.push(result);
     onProgress?.(index + 1, testCases.length, result);
   }
   const passCount = results.filter((result) => result.passed).length;
+  const successfulAttempts = results.reduce((sum, result) => sum + result.successfulAttempts, 0);
+  const totalAttempts = results.reduce((sum, result) => sum + result.attemptCount, 0);
+  const timing = results.reduce((total, result) => addTiming(total, result.timing), emptyTiming());
   const completedAt = Date.now();
   return {
     timestamp: completedAt, runDate: new Date(completedAt).toISOString(), model: modelName, mockWorkingDir: 'ephemeral Docker workspace (/workspace)',
     totalTests: results.length, passCount, failCount: results.length - passCount,
-    accuracyPercentage: results.length ? Math.round((passCount / results.length) * 100) : 0,
-    totalDurationMs: Date.now() - startTime, results,
+    accuracyPercentage: totalAttempts ? Math.round((successfulAttempts / totalAttempts) * 100) : 0,
+    totalDurationMs: Date.now() - startTime,
+    attemptsPerCase,
+    totalAttempts,
+    successfulAttempts,
+    failedAttempts: totalAttempts - successfulAttempts,
+    successRatePercentage: totalAttempts ? Math.round((successfulAttempts / totalAttempts) * 100) : 0,
+    comparisonDurationMs: totalAttempts ? timing.comparisonMs / totalAttempts : 0,
+    timing,
+    results,
   };
 }

@@ -48,6 +48,18 @@ define at least one observable verifier, such as `expectedResponseSubstrings`,
 
 IDs must be unique across all registered suites. The registry checks this at startup.
 
+## Reliability and timing
+
+Suite and individual-case runs execute each selected case 3–10 times in independent
+containers (default: 3). The success rate is successful attempts divided by total
+attempts. A case is marked fully reliable only when every configured attempt passes.
+
+Reports retain image/setup, container startup, model load, prompt evaluation,
+generation, tool execution, verification, and end-to-end wall time. Rankings use
+only the average per-attempt comparison time: prompt evaluation + generation + tool execution. Ollama's
+native response metrics provide model load, prompt evaluation, generation, and token
+counts; the remaining phases use wall-clock measurements.
+
 ## Saved runs
 
 Completed suite runs are saved by default under `benchmark_runs/` in the detected
@@ -63,7 +75,7 @@ benchmark_runs/
     └── index.html    # Self-contained report; no server or external assets required
 ```
 
-`report.json` uses the `BenchmarkRunBundle` schema from `benchmark/types.ts` and
+`report.json` uses the version 2 `BenchmarkRunBundle` schema from `benchmark/types.ts` and
 includes `schemaVersion`, `runId`, the optional friendly `runName`, an ISO `runDate`, the effective `modelConfig`,
 and the complete benchmark report and traces. The runner's **Compare & top list**
 tab discovers these bundles from the selected output directory.

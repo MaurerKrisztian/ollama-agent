@@ -55,6 +55,20 @@ export interface EvaluationResult {
   details?: Record<string, any>;
 }
 
+export interface BenchmarkTiming {
+  imageSetupMs: number;
+  containerStartupMs: number;
+  modelLoadMs: number;
+  promptEvaluationMs: number;
+  generationMs: number;
+  toolExecutionMs: number;
+  verificationMs: number;
+  endToEndWallMs: number;
+  comparisonMs: number;
+  promptTokens: number;
+  generatedTokens: number;
+}
+
 export interface TestResultTrace {
   testId: string;
   testName: string;
@@ -77,6 +91,13 @@ export interface TestResultTrace {
   passed: boolean;
   reason: string;
   durationMs: number;
+  timing: BenchmarkTiming;
+  attemptNumber: number;
+  attemptCount: number;
+  successfulAttempts: number;
+  failedAttempts: number;
+  successRatePercentage: number;
+  attempts?: TestResultTrace[];
   responseContent: string;
   objective: string;
   requiredOutput: string;
@@ -103,11 +124,18 @@ export interface BenchmarkReport {
   failCount: number;
   accuracyPercentage: number;
   totalDurationMs: number;
+  attemptsPerCase: number;
+  totalAttempts: number;
+  successfulAttempts: number;
+  failedAttempts: number;
+  successRatePercentage: number;
+  comparisonDurationMs: number;
+  timing: BenchmarkTiming;
   results: TestResultTrace[];
 }
 
 export interface BenchmarkRunBundle {
-  schemaVersion: 1;
+  schemaVersion: 2;
   runId: string;
   runName?: string;
   runDate: string;
@@ -130,5 +158,12 @@ export interface SavedBenchmarkRun {
   failCount: number;
   accuracyPercentage: number;
   totalDurationMs: number;
-  results: Array<Pick<TestResultTrace, 'testId' | 'testName' | 'category' | 'passed' | 'reason' | 'durationMs'>>;
+  attemptsPerCase: number;
+  totalAttempts: number;
+  successfulAttempts: number;
+  failedAttempts: number;
+  successRatePercentage: number;
+  comparisonDurationMs: number;
+  timing: BenchmarkTiming;
+  results: Array<Pick<TestResultTrace, 'testId' | 'testName' | 'category' | 'passed' | 'reason' | 'durationMs' | 'attemptCount' | 'successfulAttempts' | 'failedAttempts' | 'successRatePercentage' | 'timing'>>;
 }

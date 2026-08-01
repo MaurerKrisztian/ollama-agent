@@ -4,7 +4,7 @@ import { Command, Option } from 'commander';
 import { AgentEngine } from '../core/agent.js';
 import { BENCHMARK_TEST_CASES } from '../benchmark/cases/index.js';
 import type { BenchmarkTestCase } from '../benchmark/cases/index.js';
-import { runSingleBenchmarkTest } from '../benchmark/runtime/runner.js';
+import { runBenchmarkCase } from '../benchmark/runtime/runner.js';
 import { categorizeError } from '../core/types.js';
 import { isCommandWhitelisted, DEFAULT_COMMAND_WHITELIST } from '../core/commandWhitelist.js';
 import type { BenchmarkAgentConfig } from '../benchmark/types.js';
@@ -35,6 +35,7 @@ program
   .option('-b, --benchmark', 'Run the benchmark suite instead of chat mode')
   .option('-c, --category <name>', 'Filter benchmark to a specific category (use with --benchmark)')
   .option('--test <id-or-number>', 'Run one benchmark scenario by test ID or 1-based number')
+  .option('--attempts <count>', 'Reliability attempts per benchmark case (3-10)', '3')
   .parse(process.argv);
 
 const options = program.opts();
@@ -56,6 +57,10 @@ async function startCli() {
     terminalOutputTTLTurns: parseTtl(options.terminalTtl, '--terminal-ttl'),
     webOutputTTLTurns: parseTtl(options.webTtl, '--web-ttl'),
   };
+  const benchmarkAttempts = Number(options.attempts);
+  if (!Number.isInteger(benchmarkAttempts) || benchmarkAttempts < 3 || benchmarkAttempts > 10) {
+    program.error('--attempts must be an integer between 3 and 10.');
+  }
   const agent = new AgentEngine({
     model: options.model,
     ollamaHost: options.host,
@@ -172,7 +177,7 @@ async function startCli() {
     const validCategories = [
       'directory_reading', 'file_reading', 'file_creation', 'file_editing',
       'code_editing', 'code_search', 'discrimination', 'multi_step_workflow', 'terminal_execution', 'information_retrieval',
-      'project_context', 'web_search',
+      'project_context', 'web_search', 'ast_lsp_navigation',
     ];
 
     if (category && !validCategories.includes(category)) {
@@ -217,31 +222,29 @@ async function startCli() {
     ));
     console.log(chalk.dim(`Model: ${options.model} | Tests: ${filteredTests.length}\n`));
 
-    let pass = 0;
-    let fail = 0;
+    let successfulAttempts = 0;
+    let totalAttempts = 0;
 
     for (let i = 0; i < filteredTests.length; i++) {
       const test = filteredTests[i];
       process.stdout.write(chalk.dim(`[${i + 1}/${filteredTests.length}] ${test.name} ... `));
       try {
-        const result = await runSingleBenchmarkTest(test.id, options.model, options.host, options.token, undefined, getBenchmarkAgentConfig());
-        if (result.passed) {
-          pass++;
-          console.log(chalk.green(`PASS`) + chalk.dim(` (${result.durationMs}ms)`));
-        } else {
-          fail++;
-          console.log(chalk.red(`FAIL`) + chalk.dim(` — ${result.reason}`));
-        }
+        const result = await runBenchmarkCase(test, options.model, options.host, options.token, undefined, getBenchmarkAgentConfig(), benchmarkAttempts);
+        successfulAttempts += result.successfulAttempts;
+        totalAttempts += result.attemptCount;
+        const label = result.successRatePercentage === 100 ? chalk.green('RELIABLE') : chalk.yellow(`${result.successRatePercentage}%`);
+        console.log(label + chalk.dim(` — ${result.successfulAttempts}/${result.attemptCount} attempts, ${Math.round(result.durationMs)}ms average comparison time`));
       } catch (err: any) {
-        fail++;
+        totalAttempts += benchmarkAttempts;
         console.log(chalk.red(`ERROR — ${err.message}`));
       }
     }
 
-    console.log(chalk.bold(`\n📊 Results: ${chalk.green(`${pass} passed`)} / ${chalk.red(`${fail} failed`)} / ${filteredTests.length} total`));
-    const pct = Math.round((pass / filteredTests.length) * 100);
-    console.log(chalk.bold(`Accuracy: ${pct >= 80 ? chalk.green(pct + '%') : pct >= 50 ? chalk.yellow(pct + '%') : chalk.red(pct + '%')}\n`));
-    process.exit(fail > 0 ? 1 : 0);
+    const failedAttempts = totalAttempts - successfulAttempts;
+    const pct = totalAttempts ? Math.round((successfulAttempts / totalAttempts) * 100) : 0;
+    console.log(chalk.bold(`\n📊 Reliability: ${chalk.green(`${successfulAttempts} successful`)} / ${chalk.red(`${failedAttempts} failed`)} / ${totalAttempts} attempts`));
+    console.log(chalk.bold(`Success rate: ${pct >= 80 ? chalk.green(pct + '%') : pct >= 50 ? chalk.yellow(pct + '%') : chalk.red(pct + '%')}\n`));
+    process.exit(failedAttempts > 0 ? 1 : 0);
   }
 
   // Single-shot execution if positional prompt is passed
@@ -442,7 +445,7 @@ async function startCli() {
           const validCats = [
             'directory_reading', 'file_reading', 'file_creation', 'file_editing',
             'code_editing', 'code_search', 'discrimination', 'multi_step_workflow', 'terminal_execution', 'information_retrieval',
-            'project_context', 'web_search',
+            'project_context', 'web_search', 'ast_lsp_navigation',
           ];
           if (catFilter && !validCats.includes(catFilter)) {
             console.log(chalk.red(`\n❌ Unknown category: "${catFilter}"\n`));
@@ -456,27 +459,25 @@ async function startCli() {
           const currentModel = agent.getConfig().model;
           const currentHost = agent.getConfig().ollamaHost;
           console.log(chalk.bold.cyan(`\n🧪 Benchmark${catFilter ? ` — ${chalk.yellow(catFilter)}` : ''} | Model: ${currentModel} | Tests: ${testsToRun.length}`));
-          let bPass = 0;
-          let bFail = 0;
+          let bSuccessfulAttempts = 0;
+          let bTotalAttempts = 0;
           for (let bi = 0; bi < testsToRun.length; bi++) {
             const bt = testsToRun[bi];
             process.stdout.write(chalk.dim(`  [${bi + 1}/${testsToRun.length}] ${bt.name} ... `));
             try {
-              const res = await runSingleBenchmarkTest(bt.id, currentModel, currentHost, options.token, undefined, getBenchmarkAgentConfig());
-              if (res.passed) {
-                bPass++;
-                console.log(chalk.green('PASS') + chalk.dim(` (${res.durationMs}ms)`));
-              } else {
-                bFail++;
-                console.log(chalk.red('FAIL') + chalk.dim(` — ${res.reason}`));
-              }
+              const res = await runBenchmarkCase(bt, currentModel, currentHost, options.token, undefined, getBenchmarkAgentConfig(), benchmarkAttempts);
+              bSuccessfulAttempts += res.successfulAttempts;
+              bTotalAttempts += res.attemptCount;
+              const label = res.successRatePercentage === 100 ? chalk.green('RELIABLE') : chalk.yellow(`${res.successRatePercentage}%`);
+              console.log(label + chalk.dim(` — ${res.successfulAttempts}/${res.attemptCount} attempts, ${Math.round(res.durationMs)}ms average comparison time`));
             } catch (err: any) {
-              bFail++;
+              bTotalAttempts += benchmarkAttempts;
               console.log(chalk.red(`ERROR — ${err.message}`));
             }
           }
-          const bPct = Math.round((bPass / testsToRun.length) * 100);
-          console.log(chalk.bold(`\n  📊 ${chalk.green(`${bPass} passed`)} / ${chalk.red(`${bFail} failed`)} — Accuracy: ${
+          const bFailedAttempts = bTotalAttempts - bSuccessfulAttempts;
+          const bPct = bTotalAttempts ? Math.round((bSuccessfulAttempts / bTotalAttempts) * 100) : 0;
+          console.log(chalk.bold(`\n  📊 ${chalk.green(`${bSuccessfulAttempts} successful`)} / ${chalk.red(`${bFailedAttempts} failed`)} attempts — Success rate: ${
             bPct >= 80 ? chalk.green(bPct + '%') : bPct >= 50 ? chalk.yellow(bPct + '%') : chalk.red(bPct + '%')
           }\n`));
           break;

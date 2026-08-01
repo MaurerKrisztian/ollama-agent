@@ -1,5 +1,6 @@
 import { ContextManager } from './context.js';
 import { OllamaClient } from './ollama.js';
+import type { OllamaResponseMetrics } from './ollama.js';
 import { getToolDefinitions, ToolExecutor } from './tools.js';
 import { AgentConfig, ChatMessage, OllamaModelInfo, OllamaRunningModelInfo } from './types.js';
 import { buildWorkingDirectoryContext } from './workdir-context.js';
@@ -10,6 +11,7 @@ export interface AgentSendMessageOptions {
   onToolStart?: (name: string, args: Record<string, any>) => void;
   onToolEnd?: (name: string, result: any) => void;
   onMessageAdded?: (message: ChatMessage) => void;
+  onModelResponse?: (metrics: OllamaResponseMetrics) => void;
   onMaxLoopsReached?: (limit: number) => void;
   signal?: AbortSignal;
   userDisplayContent?: string;
@@ -370,6 +372,7 @@ ${conversationText}`;
         onThinkingChunk: callbacks?.onThinkingChunk,
         signal: callbacks?.signal,
       });
+      if (res.metrics) callbacks?.onModelResponse?.(res.metrics);
 
       // Add Assistant response message to Context if it has content, thinking, or tool calls
       const hasContentOrTools = !!(res.content?.trim() || res.thinking?.trim() || (res.tool_calls && res.tool_calls.length > 0));

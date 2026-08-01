@@ -208,6 +208,7 @@ Options:
   -b, --benchmark          Run benchmark mode
   -c, --category <name>    Run one benchmark category
   --test <id-or-number>    Run one benchmark scenario
+  --attempts <count>       Reliability attempts per case, 3–10 (default: 3)
   --help                   Show help
 ```
 
@@ -247,7 +248,7 @@ Run from the Web UI → **Benchmark** tab, or via CLI:
 
 ```bash
 # Run one scenario by its number within a category
-npm run cli -- --benchmark --category web_search --test 4
+npm run cli -- --benchmark --category web_search --test 4 --attempts 5
 
 # Run AST/LSP code navigation test
 npm run cli -- --benchmark --test test_ast_document_symbols
@@ -257,9 +258,11 @@ curl -X POST http://localhost:3001/api/benchmark/run
 ```
 
 - **47 outcome-based test cases** across 13 categories including AST/LSP navigation, information retrieval, terminal execution, project context, and web research.
+- Every case uses a configurable reliability profile of 3–10 fresh attempts (default: 3). Reports show per-case and overall success rates and retain every attempt trace.
+- Timing is split into image/setup, container startup, model load, prompt evaluation, generation, tool execution, verification, and end-to-end wall time. Model rankings compare only the average per-attempt prompt evaluation + generation + tool execution time.
 - Pass/fail is determined from final answers, command results, or final workspace state—not from matching a prescribed tool call.
 - Results retain assistant thinking, tool arguments, tool results, and their ordered execution trace for diagnosis.
-- The Benchmark tab starts with the current agent configuration and supports run-only overrides for model, Ollama URL, temperature, context size, tool-loop limit, thinking, project context, tool-schema profile, and system prompt.
+- The Benchmark tab starts with the current agent configuration and supports run-only overrides for attempts per case, model, Ollama URL, temperature, context size, tool-loop limit, thinking, project context, tool-schema profile, and system prompt.
 - The benchmark image is built automatically once per server/CLI process and reused. Build it manually with `npm run benchmark:image` if desired.
 - On Linux, benchmark containers use host networking so the configured Ollama endpoint `http://127.0.0.1:11434` remains reachable unchanged.
 - See [`src/benchmark/README.md`](src/benchmark/README.md) for the short guide and template for adding a benchmark suite.

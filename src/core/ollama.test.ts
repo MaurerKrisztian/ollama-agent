@@ -29,3 +29,40 @@ test('fallback parser does not treat ordinary named JSON data as a tool call', (
   assert.equal(parsed.calls.length, 0);
   assert.equal(parsed.cleanedText, text);
 });
+
+test('chatStream retains native Ollama timing and token metrics', async () => {
+  const originalFetch = global.fetch;
+  global.fetch = async () => new Response([
+    JSON.stringify({ message: { role: 'assistant', content: 'done' }, done: false }),
+    JSON.stringify({
+      message: { role: 'assistant', content: '' },
+      done: true,
+      total_duration: 500_000_000,
+      load_duration: 100_000_000,
+      prompt_eval_count: 42,
+      prompt_eval_duration: 150_000_000,
+      eval_count: 12,
+      eval_duration: 250_000_000,
+    }),
+    '',
+  ].join('\n'), { status: 200 });
+
+  try {
+    const result = await new OllamaClient().chatStream({
+      host: 'http://benchmark.invalid',
+      model: 'fixture',
+      messages: [{ role: 'user', content: 'hello' }],
+    });
+    assert.equal(result.content, 'done');
+    assert.deepEqual(result.metrics, {
+      totalDurationNs: 500_000_000,
+      loadDurationNs: 100_000_000,
+      promptEvalCount: 42,
+      promptEvalDurationNs: 150_000_000,
+      evalCount: 12,
+      evalDurationNs: 250_000_000,
+    });
+  } finally {
+    global.fetch = originalFetch;
+  }
+});

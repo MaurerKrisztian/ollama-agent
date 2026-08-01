@@ -6,6 +6,20 @@ import test from 'node:test';
 import { deleteSavedBenchmarkRun, listSavedBenchmarkRuns, saveBenchmarkReport } from '../runtime/results.js';
 import type { BenchmarkReport, TestResultTrace } from '../types.js';
 
+const timing = {
+  imageSetupMs: 10,
+  containerStartupMs: 20,
+  modelLoadMs: 30,
+  promptEvaluationMs: 40,
+  generationMs: 50,
+  toolExecutionMs: 60,
+  verificationMs: 5,
+  endToEndWallMs: 250,
+  comparisonMs: 150,
+  promptTokens: 100,
+  generatedTokens: 20,
+};
+
 const trace: TestResultTrace = {
   testId: 'portable-result',
   testName: 'Portable result',
@@ -18,6 +32,12 @@ const trace: TestResultTrace = {
   passed: true,
   reason: 'Expected result found.',
   durationMs: 125,
+  timing,
+  attemptNumber: 1,
+  attemptCount: 1,
+  successfulAttempts: 1,
+  failedAttempts: 0,
+  successRatePercentage: 100,
   responseContent: 'done',
   objective: 'Verify persistence.',
   requiredOutput: 'A saved run.',
@@ -41,6 +61,13 @@ const report: BenchmarkReport = {
   failCount: 0,
   accuracyPercentage: 100,
   totalDurationMs: 125,
+  attemptsPerCase: 1,
+  totalAttempts: 1,
+  successfulAttempts: 1,
+  failedAttempts: 0,
+  successRatePercentage: 100,
+  comparisonDurationMs: 150,
+  timing,
   results: [trace],
 };
 
@@ -57,11 +84,14 @@ test('benchmark reports save as unique, discoverable JSON and standalone HTML bu
     assert.equal(first.runDate, report.runDate);
 
     const bundle = JSON.parse(await fs.readFile(first.reportPath, 'utf8'));
-    assert.equal(bundle.schemaVersion, 1);
+    assert.equal(bundle.schemaVersion, 2);
     assert.equal(bundle.runName, 'My comparison run');
     assert.equal(bundle.modelConfig.temperature, 0.25);
     assert.equal(bundle.modelConfig.systemPrompt, trace.agentConfig.systemPrompt);
     assert.equal(bundle.report.results[0].testId, trace.testId);
+    assert.equal(bundle.report.successRatePercentage, 100);
+    assert.equal(bundle.report.comparisonDurationMs, 150);
+    assert.deepEqual(bundle.report.timing, timing);
 
     const html = await fs.readFile(first.htmlPath, 'utf8');
     assert.match(html, /<!doctype html>/i);
@@ -72,6 +102,8 @@ test('benchmark reports save as unique, discoverable JSON and standalone HTML bu
     const discovered = await listSavedBenchmarkRuns(outputDirectory);
     assert.equal(discovered.length, 2);
     assert.equal(discovered[0].accuracyPercentage, 100);
+    assert.equal(discovered[0].successRatePercentage, 100);
+    assert.equal(discovered[0].comparisonDurationMs, 150);
     assert.deepEqual(discovered[0].results.map((result) => result.testId), [trace.testId]);
 
     assert.equal(await deleteSavedBenchmarkRun(first.runId, outputDirectory), first.directory);

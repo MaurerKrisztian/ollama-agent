@@ -65,6 +65,13 @@ export interface TestResultTrace {
   passed: boolean;
   reason: string;
   durationMs: number;
+  timing: BenchmarkTiming;
+  attemptNumber: number;
+  attemptCount: number;
+  successfulAttempts: number;
+  failedAttempts: number;
+  successRatePercentage: number;
+  attempts?: TestResultTrace[];
   responseContent: string;
   objective: string;
   requiredOutput: string;
@@ -83,6 +90,20 @@ export interface TestResultTrace {
     complexityProfile?: ToolComplexityProfile;
     pruningConfig?: AgentConfig['pruningConfig'];
   };
+}
+
+interface BenchmarkTiming {
+  imageSetupMs: number;
+  containerStartupMs: number;
+  modelLoadMs: number;
+  promptEvaluationMs: number;
+  generationMs: number;
+  toolExecutionMs: number;
+  verificationMs: number;
+  endToEndWallMs: number;
+  comparisonMs: number;
+  promptTokens: number;
+  generatedTokens: number;
 }
 
 export interface BenchmarkTestCaseInfo {
@@ -113,6 +134,13 @@ export interface BenchmarkReport {
   failCount: number;
   accuracyPercentage: number;
   totalDurationMs: number;
+  attemptsPerCase: number;
+  totalAttempts: number;
+  successfulAttempts: number;
+  failedAttempts: number;
+  successRatePercentage: number;
+  comparisonDurationMs: number;
+  timing: BenchmarkTiming;
   results: TestResultTrace[];
 }
 
@@ -131,7 +159,14 @@ interface SavedBenchmarkRun {
   failCount: number;
   accuracyPercentage: number;
   totalDurationMs: number;
-  results: Array<Pick<TestResultTrace, 'testId' | 'testName' | 'category' | 'passed' | 'reason' | 'durationMs'>>;
+  attemptsPerCase: number;
+  totalAttempts: number;
+  successfulAttempts: number;
+  failedAttempts: number;
+  successRatePercentage: number;
+  comparisonDurationMs: number;
+  timing: BenchmarkTiming;
+  results: Array<Pick<TestResultTrace, 'testId' | 'testName' | 'category' | 'passed' | 'reason' | 'durationMs' | 'attemptCount' | 'successfulAttempts' | 'failedAttempts' | 'successRatePercentage' | 'timing'>>;
 }
 
 interface BenchmarkViewProps {
@@ -190,6 +225,26 @@ const formatConfigValue = (value: unknown): string => {
   return JSON.stringify(value);
 };
 
+const formatMs = (value: number): string => value >= 1000 ? `${(value / 1000).toFixed(2)}s` : `${Math.round(value)}ms`;
+
+const sumTimings = (results: TestResultTrace[]): BenchmarkTiming => results.reduce<BenchmarkTiming>((total, result) => ({
+  imageSetupMs: total.imageSetupMs + result.timing.imageSetupMs,
+  containerStartupMs: total.containerStartupMs + result.timing.containerStartupMs,
+  modelLoadMs: total.modelLoadMs + result.timing.modelLoadMs,
+  promptEvaluationMs: total.promptEvaluationMs + result.timing.promptEvaluationMs,
+  generationMs: total.generationMs + result.timing.generationMs,
+  toolExecutionMs: total.toolExecutionMs + result.timing.toolExecutionMs,
+  verificationMs: total.verificationMs + result.timing.verificationMs,
+  endToEndWallMs: total.endToEndWallMs + result.timing.endToEndWallMs,
+  comparisonMs: total.comparisonMs + result.timing.comparisonMs,
+  promptTokens: total.promptTokens + result.timing.promptTokens,
+  generatedTokens: total.generatedTokens + result.timing.generatedTokens,
+}), {
+  imageSetupMs: 0, containerStartupMs: 0, modelLoadMs: 0, promptEvaluationMs: 0,
+  generationMs: 0, toolExecutionMs: 0, verificationMs: 0, endToEndWallMs: 0,
+  comparisonMs: 0, promptTokens: 0, generatedTokens: 0,
+});
+
 const CONFIG_FIELD_ORDER = [
   'model',
   'ollamaHost',
@@ -209,6 +264,7 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
 }) => {
   const [benchmarkConfig, setBenchmarkConfig] = useState<BenchmarkFormConfig>(() => getBenchmarkDefaults(currentConfig, toolSettings));
   const [configDirty, setConfigDirty] = useState(false);
+  const [attemptsPerCase, setAttemptsPerCase] = useState(3);
   const [report, setReport] = useState<BenchmarkReport | null>(null);
   const [liveResults, setLiveResults] = useState<TestResultTrace[]>([]);
   const [testCasesInfo, setTestCasesInfo] = useState<BenchmarkTestCaseInfo[]>([]);
@@ -291,6 +347,7 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
   const benchmarkRequestConfig = () => ({
     model: benchmarkConfig.model,
     host: benchmarkConfig.ollamaHost,
+    attemptsPerCase,
     agentConfig: {
       temperature: benchmarkConfig.temperature,
       contextWindow: benchmarkConfig.contextWindow,
@@ -314,6 +371,7 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
     if (!Number.isFinite(benchmarkConfig.temperature) || benchmarkConfig.temperature < 0 || benchmarkConfig.temperature > 1) return 'Temperature must be between 0 and 1.';
     if (!Number.isInteger(benchmarkConfig.contextWindow) || benchmarkConfig.contextWindow < 1024) return 'Context window must be an integer of at least 1024.';
     if (!Number.isInteger(benchmarkConfig.maxLoops) || benchmarkConfig.maxLoops < 0 || benchmarkConfig.maxLoops > 50) return 'Maximum tool loops must be an integer between 0 and 50.';
+    if (!Number.isInteger(attemptsPerCase) || attemptsPerCase < 3 || attemptsPerCase > 10) return 'Attempts per case must be an integer between 3 and 10.';
     if (!benchmarkConfig.systemPrompt.trim()) return 'System prompt cannot be empty.';
     if (!Number.isInteger(benchmarkConfig.pruningConfig.terminalOutputTTLTurns) || benchmarkConfig.pruningConfig.terminalOutputTTLTurns < 0) return 'Terminal output TTL must be a non-negative integer.';
     if (!Number.isInteger(benchmarkConfig.pruningConfig.webOutputTTLTurns) || benchmarkConfig.pruningConfig.webOutputTTLTurns < 0) return 'Web output TTL must be a non-negative integer.';
@@ -479,13 +537,15 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
     setExpandedTestId((prev) => (prev === testId ? null : testId));
   };
 
-  const passCount = liveResults.filter((r) => r.passed).length;
-  const failCount = liveResults.filter((r) => !r.passed).length;
-  const accuracyPercentage = liveResults.length > 0 ? Math.round((passCount / liveResults.length) * 100) : 0;
-  const totalDurationMs = liveResults.reduce((sum, r) => sum + r.durationMs, 0);
+  const passCount = liveResults.reduce((sum, result) => sum + result.successfulAttempts, 0);
+  const failCount = liveResults.reduce((sum, result) => sum + result.failedAttempts, 0);
+  const completedAttempts = passCount + failCount;
+  const accuracyPercentage = completedAttempts > 0 ? Math.round((passCount / completedAttempts) * 100) : 0;
+  const liveTiming = sumTimings(liveResults);
+  const totalDurationMs = completedAttempts ? liveTiming.comparisonMs / completedAttempts : 0;
   const configLocked = isRunning || runningSingleId !== null;
   const performanceRankById = new Map([...savedRuns]
-    .sort((a, b) => b.accuracyPercentage - a.accuracyPercentage || a.totalDurationMs - b.totalDurationMs || b.runDate.localeCompare(a.runDate))
+    .sort((a, b) => b.successRatePercentage - a.successRatePercentage || a.comparisonDurationMs - b.comparisonDurationMs || b.runDate.localeCompare(a.runDate))
     .map((run, index) => [run.runId, index + 1]));
   const rankedRuns = [...savedRuns].sort((a, b) => {
     if (runSort.key === 'model') {
@@ -493,10 +553,10 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
       return runSort.direction === 'asc' ? comparison : -comparison;
     }
     if (runSort.key === 'duration') {
-      const comparison = a.totalDurationMs - b.totalDurationMs;
+      const comparison = a.comparisonDurationMs - b.comparisonDurationMs;
       return runSort.direction === 'asc' ? comparison : -comparison;
     }
-    return b.accuracyPercentage - a.accuracyPercentage || a.totalDurationMs - b.totalDurationMs || b.runDate.localeCompare(a.runDate);
+    return b.successRatePercentage - a.successRatePercentage || a.comparisonDurationMs - b.comparisonDurationMs || b.runDate.localeCompare(a.runDate);
   });
   const comparedRuns = rankedRuns.filter((run) => selectedRunIds.includes(run.runId));
   const comparedTestIds = Array.from(new Set(comparedRuns.flatMap((run) => run.results.map((result) => result.testId))));
@@ -576,25 +636,25 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
           ) : (
             <>
               <div className="glass-panel benchmark-ranking">
-                <div className="benchmark-ranking-header"><Trophy size={19} color="var(--accent-amber)" /><h3>Leaderboard</h3><span>{runSort.key === 'rank' ? 'Accuracy first, then fastest duration' : `Sorted by ${runSort.key} (${runSort.direction === 'asc' ? 'ascending' : 'descending'})`}</span></div>
+                <div className="benchmark-ranking-header"><Trophy size={19} color="var(--accent-amber)" /><h3>Leaderboard</h3><span>{runSort.key === 'rank' ? 'Success rate first, then comparison time' : `Sorted by ${runSort.key} (${runSort.direction === 'asc' ? 'ascending' : 'descending'})`}</span></div>
                 <div className="benchmark-table-scroll"><table><thead><tr><th>Compare</th><th>Rank</th><th>Name</th><th><button className={runSort.key === 'model' ? 'benchmark-sort-active' : ''} onClick={() => toggleRunSort('model')}>Model <span>{sortIndicator('model')}</span></button></th><th>Run date</th><th>Score</th><th>Passed</th><th><button className={runSort.key === 'duration' ? 'benchmark-sort-active' : ''} onClick={() => toggleRunSort('duration')}>Duration <span>{sortIndicator('duration')}</span></button></th><th>Actions</th></tr></thead>
                   <tbody>{rankedRuns.map((run) => <tr key={run.runId}>
                     <td><input type="checkbox" checked={selectedRunIds.includes(run.runId)} onChange={() => toggleComparedRun(run.runId)} /></td>
                     <td className="benchmark-rank">#{performanceRankById.get(run.runId)}</td><td><strong>{run.runName || 'Unnamed'}</strong></td><td><strong>{run.model}</strong><small>{run.runId}</small></td>
-                    <td>{new Date(run.runDate).toLocaleString()}</td><td><strong className={run.accuracyPercentage === 100 ? 'benchmark-pass' : ''}>{run.accuracyPercentage}%</strong></td>
-                    <td>{run.passCount}/{run.totalTests}</td><td>{(run.totalDurationMs / 1000).toFixed(2)}s</td>
+                    <td>{new Date(run.runDate).toLocaleString()}</td><td><strong className={run.successRatePercentage === 100 ? 'benchmark-pass' : ''}>{run.successRatePercentage}%</strong></td>
+                    <td>{run.successfulAttempts}/{run.totalAttempts}</td><td>{formatMs(run.comparisonDurationMs)}</td>
                     <td><div className="benchmark-run-actions"><a href={`/api/benchmark/report?directory=${encodeURIComponent(run.outputDirectory)}&runId=${encodeURIComponent(run.runId)}`} target="_blank" rel="noreferrer">Open HTML</a><button onClick={() => void handleDeleteRun(run)} disabled={deletingRunId === run.runId} title="Delete this saved benchmark">{deletingRunId === run.runId ? <Loader2 size={13} className="spin" /> : <Trash2 size={13} />} Delete</button></div></td>
                   </tr>)}</tbody></table></div>
               </div>
 
               {comparedRuns.length > 0 && <div className="glass-panel benchmark-matrix">
                 <div className="benchmark-ranking-header"><BarChart3 size={19} color="var(--accent-primary)" /><h3>Per-test comparison</h3><span>{comparedRuns.length} selected run{comparedRuns.length === 1 ? '' : 's'}</span></div>
-                <div className="benchmark-table-scroll"><table><thead><tr><th>Test</th>{comparedRuns.map((run) => <th key={run.runId}>{run.runName || run.model}<small>{run.runName ? run.model : 'Unnamed run'}</small><small>{run.accuracyPercentage}% passed · {(run.totalDurationMs / 1000).toFixed(2)}s total</small><small>{new Date(run.runDate).toLocaleDateString()}</small></th>)}</tr></thead>
+                <div className="benchmark-table-scroll"><table><thead><tr><th>Test</th>{comparedRuns.map((run) => <th key={run.runId}>{run.runName || run.model}<small>{run.runName ? run.model : 'Unnamed run'}</small><small>{run.successRatePercentage}% success · {formatMs(run.comparisonDurationMs)} compare</small><small>{new Date(run.runDate).toLocaleDateString()}</small></th>)}</tr></thead>
                   <tbody>{comparedTestIds.map((testId) => {
                     const label = comparedRuns.flatMap((run) => run.results).find((result) => result.testId === testId)?.testName || testId;
                     return <tr key={testId}><td><strong>{label}</strong><small>{testId}</small></td>{comparedRuns.map((run) => {
                       const result = run.results.find((item) => item.testId === testId);
-                      return <td key={run.runId}>{result ? <><span className={result.passed ? 'benchmark-pass' : 'benchmark-fail'}>{result.passed ? 'PASS' : 'FAIL'}</span><small>{result.durationMs}ms</small></> : <span className="muted">—</span>}</td>;
+                      return <td key={run.runId}>{result ? <><span className={result.successRatePercentage === 100 ? 'benchmark-pass' : 'benchmark-fail'}>{result.successRatePercentage}%</span><small>{result.successfulAttempts}/{result.attemptCount} · {formatMs(result.durationMs)} avg</small></> : <span className="muted">—</span>}</td>;
                     })}</tr>;
                   })}</tbody></table></div>
               </div>}
@@ -633,7 +693,7 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
             </h2>
           </div>
           <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)', maxWidth: '560px', lineHeight: 1.5 }}>
-            Run each task in a fresh container, score the observable outcome, and inspect the complete model and tool trace.
+            Run each task repeatedly in fresh containers, compare model reliability, and inspect complete timing and execution traces.
           </p>
         </div>
 
@@ -729,6 +789,11 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
           <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', color: 'var(--text-muted)', fontSize: '0.78rem' }}>
             Temperature (0–1)
             <input type="number" min="0" max="1" step="0.05" value={benchmarkConfig.temperature} disabled={configLocked} onChange={(event) => updateBenchmarkConfig('temperature', Number(event.target.value))} style={{ padding: '9px 10px', borderRadius: '7px', border: '1px solid var(--border-color)', background: '#111827', color: 'var(--text-main)' }} />
+          </label>
+
+          <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', color: 'var(--text-muted)', fontSize: '0.78rem' }}>
+            Reliability attempts per case (3–10)
+            <input type="number" min="3" max="10" value={attemptsPerCase} disabled={configLocked} onChange={(event) => setAttemptsPerCase(Number(event.target.value))} style={{ padding: '9px 10px', borderRadius: '7px', border: '1px solid var(--border-color)', background: '#111827', color: 'var(--text-main)' }} />
           </label>
 
           <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', color: 'var(--text-muted)', fontSize: '0.78rem' }}>
@@ -867,17 +932,17 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
       {liveResults.length > 0 && (
         <div className="animate-fade-in benchmark-scorecards" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px' }}>
           <div className="glass-panel" style={{ padding: '20px', borderRadius: '14px', borderLeft: `4px solid ${accuracyPercentage === 100 ? '#10b981' : accuracyPercentage >= 75 ? '#f59e0b' : '#ef4444'}` }}>
-            <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase' }}>Accuracy Score</span>
+            <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase' }}>Success Rate</span>
             <div style={{ fontSize: '2rem', fontWeight: 800, color: accuracyPercentage === 100 ? '#10b981' : accuracyPercentage >= 75 ? '#f59e0b' : '#ef4444', marginTop: '4px' }}>
               {accuracyPercentage}%
             </div>
             <span style={{ fontSize: '0.8rem', color: 'var(--text-dim)' }}>
-              {passCount} of {liveResults.length} tasks passed
+              {passCount} of {completedAttempts} attempts passed
             </span>
           </div>
 
           <div className="glass-panel" style={{ padding: '20px', borderRadius: '14px' }}>
-            <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase' }}>Passed Tests</span>
+            <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase' }}>Successful Attempts</span>
             <div style={{ fontSize: '2rem', fontWeight: 800, color: '#10b981', marginTop: '4px' }}>
               {passCount}
             </div>
@@ -885,7 +950,7 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
           </div>
 
           <div className="glass-panel" style={{ padding: '20px', borderRadius: '14px' }}>
-            <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase' }}>Failed Tests</span>
+            <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase' }}>Failed Attempts</span>
             <div style={{ fontSize: '2rem', fontWeight: 800, color: failCount > 0 ? '#ef4444' : 'var(--text-dim)', marginTop: '4px' }}>
               {failCount}
             </div>
@@ -893,13 +958,40 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
           </div>
 
           <div className="glass-panel" style={{ padding: '20px', borderRadius: '14px' }}>
-            <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase' }}>Total Duration</span>
+            <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase' }}>Avg Comparison Time</span>
             <div style={{ fontSize: '2rem', fontWeight: 800, color: '#38bdf8', marginTop: '4px' }}>
               {(totalDurationMs / 1000).toFixed(2)}s
             </div>
             <span style={{ fontSize: '0.8rem', color: 'var(--text-dim)' }}>
-              Avg ~{Math.round(totalDurationMs / liveResults.length)}ms / task
+              Prompt evaluation + generation + tools
             </span>
+          </div>
+        </div>
+      )}
+
+      {liveResults.length > 0 && (
+        <div className="glass-panel animate-fade-in" style={{ padding: '18px 20px', borderRadius: '14px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap', marginBottom: '12px' }}>
+            <strong>Detailed duration totals</strong>
+            <span style={{ color: 'var(--text-muted)', fontSize: '0.78rem' }}>Ranking uses only prompt evaluation + generation + tool execution.</span>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '10px' }}>
+            {[
+              ['Image/setup', liveTiming.imageSetupMs],
+              ['Container startup', liveTiming.containerStartupMs],
+              ['Model load', liveTiming.modelLoadMs],
+              ['Prompt evaluation', liveTiming.promptEvaluationMs],
+              ['Generation', liveTiming.generationMs],
+              ['Tool execution', liveTiming.toolExecutionMs],
+              ['Verification', liveTiming.verificationMs],
+              ['End-to-end wall', liveTiming.endToEndWallMs],
+              ['Comparison', liveTiming.comparisonMs],
+            ].map(([label, value]) => (
+              <div key={String(label)} style={{ padding: '10px 12px', borderRadius: '8px', background: 'rgba(15,23,42,.7)' }}>
+                <span style={{ display: 'block', color: 'var(--text-muted)', fontSize: '0.72rem' }}>{label}</span>
+                <strong style={{ color: label === 'Comparison' ? '#38bdf8' : 'var(--text-main)' }}>{formatMs(Number(value))}</strong>
+              </div>
+            ))}
           </div>
         </div>
       )}
@@ -927,14 +1019,12 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
               { id: 'information_retrieval', label: '🔎 Information Retrieval' },
               { id: 'project_context', label: '🧭 Project Context' },
               { id: 'web_search', label: '🌐 Web Search' },
+              { id: 'ast_lsp_navigation', label: '🌳 AST/LSP' },
             ].map((cat) => {
               const catTotal = cat.id === 'all' ? testCasesInfo.length : testCasesInfo.filter((t) => t.category === cat.id).length;
-              const catPassed = cat.id === 'all'
-                ? liveResults.filter((r) => r.passed).length
-                : liveResults.filter((r) => r.category === cat.id && r.passed).length;
-              const catRan = cat.id === 'all'
-                ? liveResults.length
-                : liveResults.filter((r) => r.category === cat.id).length;
+              const categoryResults = cat.id === 'all' ? liveResults : liveResults.filter((r) => r.category === cat.id);
+              const catPassed = categoryResults.reduce((sum, result) => sum + result.successfulAttempts, 0);
+              const catRan = categoryResults.reduce((sum, result) => sum + result.attemptCount, 0);
               const showScore = catRan > 0;
               return (
               <button
@@ -1045,7 +1135,7 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
                   {resultTrace && (
                     <div style={{ textAlign: 'right', fontSize: '0.8rem' }}>
                       <div style={{ color: 'var(--text-muted)' }}>
-                        Outcome: <strong style={{ color: '#fff' }}>{resultTrace.passed ? 'verified' : 'not met'}</strong>
+                        Success: <strong style={{ color: '#fff' }}>{resultTrace.successfulAttempts}/{resultTrace.attemptCount} ({resultTrace.successRatePercentage}%)</strong>
                       </div>
                       <div style={{ color: resultTrace.passed ? '#10b981' : '#ef4444' }}>
                         Called: <strong>{resultTrace.actualToolsCalled.map((t) => t.name).join(' -> ') || 'None'}</strong>
@@ -1056,7 +1146,7 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
                   {resultTrace && (
                     <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.8rem', color: 'var(--text-dim)' }}>
                       <Clock size={14} />
-                      <span>{resultTrace.durationMs}ms</span>
+                      <span>{formatMs(resultTrace.durationMs)} avg compare</span>
                     </div>
                   )}
 
@@ -1114,6 +1204,22 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
 
                   <div className="benchmark-trace-grid" style={{ display: 'grid', gap: '16px' }}>
                     <div>
+                      <strong style={{ color: '#38bdf8', display: 'block', marginBottom: '4px' }}>Timing totals ({resultTrace.attemptCount} attempts):</strong>
+                      <HighlightedJson value={{
+                        imageSetup: formatMs(resultTrace.timing.imageSetupMs),
+                        containerStartup: formatMs(resultTrace.timing.containerStartupMs),
+                        modelLoad: formatMs(resultTrace.timing.modelLoadMs),
+                        promptEvaluation: formatMs(resultTrace.timing.promptEvaluationMs),
+                        generation: formatMs(resultTrace.timing.generationMs),
+                        toolExecution: formatMs(resultTrace.timing.toolExecutionMs),
+                        verification: formatMs(resultTrace.timing.verificationMs),
+                        endToEndWall: formatMs(resultTrace.timing.endToEndWallMs),
+                        comparison: formatMs(resultTrace.timing.comparisonMs),
+                        promptTokens: resultTrace.timing.promptTokens,
+                        generatedTokens: resultTrace.timing.generatedTokens,
+                      }} />
+                    </div>
+                    <div>
                       <strong style={{ color: 'var(--accent-primary)', display: 'block', marginBottom: '4px' }}>Tools Invoked ({resultTrace.actualToolsCalled.length}):</strong>
                       <HighlightedJson
                         value={resultTrace.actualToolsCalled.length > 0 ? resultTrace.actualToolsCalled : undefined}
@@ -1141,7 +1247,7 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
 
                   <div style={{ marginTop: '16px' }}>
                     <strong style={{ color: '#c084fc', display: 'block', marginBottom: '4px' }}>Complete Execution Trace:</strong>
-                    <HighlightedJson value={resultTrace.executionTrace} style={{ whiteSpace: 'pre-wrap', maxHeight: '420px', overflow: 'auto' }} />
+                    <HighlightedJson value={resultTrace.attempts ?? [resultTrace]} style={{ whiteSpace: 'pre-wrap', maxHeight: '420px', overflow: 'auto' }} />
                   </div>
                 </div>
               )}
