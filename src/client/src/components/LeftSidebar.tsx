@@ -14,8 +14,10 @@ import {
   Layers,
   Terminal,
   Brain,
+  Pencil,
+  Trash2,
 } from 'lucide-react';
-import { AgentConfig, SystemMetrics } from '../types';
+import { AgentConfig, ChatSessionSummary, SystemMetrics } from '../types';
 
 interface LeftSidebarProps {
   isOpen: boolean;
@@ -24,6 +26,12 @@ interface LeftSidebarProps {
   activeView: 'chat' | 'benchmark';
   onSelectView: (view: 'chat' | 'benchmark') => void;
   onNewChat: () => void;
+  chatSessions: ChatSessionSummary[];
+  activeSessionId: string;
+  isGenerating: boolean;
+  onSelectChatSession: (sessionId: string) => void;
+  onRenameChatSession: (sessionId: string, title: string) => void;
+  onDeleteChatSession: (sessionId: string) => void;
   onOpenSystemPrompt: () => void;
   onOpenToolSettings: () => void;
   onOpenConnectionSettings: () => void;
@@ -44,6 +52,12 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
   activeView,
   onSelectView,
   onNewChat,
+  chatSessions,
+  activeSessionId,
+  isGenerating,
+  onSelectChatSession,
+  onRenameChatSession,
+  onDeleteChatSession,
   onOpenSystemPrompt,
   onOpenToolSettings,
   onOpenConnectionSettings,
@@ -131,6 +145,7 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
             onNewChat();
             onClose();
           }}
+          disabled={isGenerating}
           style={{
             width: '100%',
             display: 'flex',
@@ -144,7 +159,8 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
             borderRadius: '10px',
             fontSize: '0.875rem',
             fontWeight: 600,
-            cursor: 'pointer',
+            cursor: isGenerating ? 'not-allowed' : 'pointer',
+            opacity: isGenerating ? 0.55 : 1,
             boxShadow: '0 4px 14px rgba(99, 102, 241, 0.35)',
             transition: 'transform 0.15s ease',
           }}
@@ -152,6 +168,65 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
           <PlusCircle size={17} />
           <span>New Chat Session</span>
         </button>
+
+        <div>
+          <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: '8px' }}>
+            Chat Sessions
+          </span>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+            {chatSessions.map((session) => (
+              <div
+                key={session.id}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  padding: '4px',
+                  borderRadius: '8px',
+                  background: session.id === activeSessionId ? 'rgba(99, 102, 241, 0.2)' : 'rgba(30, 41, 59, 0.45)',
+                  border: session.id === activeSessionId ? '1px solid rgba(99, 102, 241, 0.4)' : '1px solid transparent',
+                }}
+              >
+                <button
+                  onClick={() => {
+                    onSelectChatSession(session.id);
+                    if (session.id !== activeSessionId) onClose();
+                  }}
+                  disabled={isGenerating}
+                  title={`${session.messageCount} messages`}
+                  style={{ flex: 1, minWidth: 0, border: 0, background: 'none', color: session.id === activeSessionId ? 'var(--text-main)' : 'var(--text-muted)', textAlign: 'left', padding: '6px', cursor: isGenerating ? 'not-allowed' : 'pointer' }}
+                >
+                  <span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '0.8rem', fontWeight: session.id === activeSessionId ? 650 : 500 }}>
+                    {session.title}
+                  </span>
+                  <span style={{ display: 'block', fontSize: '0.65rem', color: 'var(--text-dim)', marginTop: '2px' }}>
+                    {new Date(session.updatedAt).toLocaleDateString()} · {session.messageCount} messages
+                  </span>
+                </button>
+                <button
+                  onClick={() => {
+                    const title = window.prompt('Rename chat session', session.title);
+                    if (title?.trim()) onRenameChatSession(session.id, title);
+                  }}
+                  title="Rename chat"
+                  style={{ border: 0, background: 'none', color: 'var(--text-dim)', padding: '5px', cursor: 'pointer' }}
+                >
+                  <Pencil size={13} />
+                </button>
+                <button
+                  onClick={() => {
+                    if (window.confirm(`Delete “${session.title}”?`)) onDeleteChatSession(session.id);
+                  }}
+                  disabled={isGenerating}
+                  title="Delete chat"
+                  style={{ border: 0, background: 'none', color: '#f87171', padding: '5px', cursor: isGenerating ? 'not-allowed' : 'pointer', opacity: isGenerating ? 0.4 : 0.8 }}
+                >
+                  <Trash2 size={13} />
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
 
         {/* Views Switcher */}
         <div>

@@ -10,6 +10,8 @@ No cloud, no API keys, no data leaving your machine.
 
 ### 🖥️ Web UI (React + Vite)
 - **Live streaming chat** with glassmorphism dark UI
+- **Persistent multi-session chat** — create, switch, rename, and delete conversations; Docker Compose stores them in the existing `app_data` volume
+- **Parallel session generation** — separate chat runtimes can generate concurrently when Ollama's `OLLAMA_NUM_PARALLEL` is greater than one
 - **Drag-and-drop text attachments** — send up to 10 text files with a prompt and ask the model about their contents
 - **Quick prompt chips** — 1-click: List Directory, Read File, Run Terminal Cmd, Edit File, Search Code, Create File
 - **Welcome starter grid** — 6 interactive template cards on empty chat sessions

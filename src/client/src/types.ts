@@ -132,6 +132,14 @@ export interface ChatMessage {
   thinkingTokens?: number;
 }
 
+export interface ChatSessionSummary {
+  id: string;
+  title: string;
+  createdAt: number;
+  updatedAt: number;
+  messageCount: number;
+}
+
 export interface TextAttachment {
   name: string;
   content: string;

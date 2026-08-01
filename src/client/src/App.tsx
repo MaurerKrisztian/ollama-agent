@@ -13,7 +13,7 @@ import { ModelDetailsModal } from './components/ModelDetailsModal';
 import { ModelSettingsModal } from './components/ModelSettingsModal';
 import { TerminalSessionsModal } from './components/TerminalSessionsModal';
 import { RightTerminalSidebar } from './components/RightTerminalSidebar';
-import { AgentConfig, ChatMessage, ContextInfo, OllamaModelInfo, OllamaRunningModelInfo, PendingApprovalCall, SystemMetrics, TerminalSessionInfo, TextAttachment, ToolSettings } from './types';
+import { AgentConfig, ChatMessage, ChatSessionSummary, ContextInfo, OllamaModelInfo, OllamaRunningModelInfo, PendingApprovalCall, SystemMetrics, TerminalSessionInfo, TextAttachment, ToolSettings } from './types';
 
 export const App: React.FC = () => {
   const [activeView, setActiveView] = useState<'chat' | 'benchmark'>('chat');
@@ -47,6 +47,8 @@ export const App: React.FC = () => {
   const [models, setModels] = useState<OllamaModelInfo[]>([]);
   const [runningModels, setRunningModels] = useState<OllamaRunningModelInfo[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [chatSessions, setChatSessions] = useState<ChatSessionSummary[]>([]);
+  const [activeSessionId, setActiveSessionId] = useState('');
   const [contextInfo, setContextInfo] = useState<ContextInfo | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [leftSidebarOpen, setLeftSidebarOpen] = useState(false);
@@ -96,15 +98,15 @@ export const App: React.FC = () => {
     socket.on('system:metrics:error', () => setSystemMetrics(null));
     socket.on('terminal:sessions', (sessions: TerminalSessionInfo[]) => setTerminalSessions(sessions));
     socket.on('models:running', (activeModels: OllamaRunningModelInfo[]) => setRunningModels(activeModels));
+    socket.on('chat:sessions', (data: { sessions?: ChatSessionSummary[]; activeSessionId?: string }) => {
+      if (Array.isArray(data.sessions)) setChatSessions(data.sessions);
+    });
     socket.on('config:state', (data: { config?: AgentConfig; context?: ContextInfo }) => {
       if (data.config) {
         setConfig((prev) => ({ ...prev, ...data.config }));
         if (data.config.workingDir) {
           localStorage.setItem('local-model-chat.workingDir', data.config.workingDir);
         }
-      }
-      if (data.context) {
-        setContextInfo(data.context);
       }
     });
     return () => {
@@ -168,16 +170,25 @@ export const App: React.FC = () => {
         }
       }
 
-      const contextRes = await fetch('/api/context');
-      if (contextRes.ok) {
-        const data = await contextRes.json();
-        setContextInfo(data);
-      }
-
-      const messagesRes = await fetch('/api/messages');
-      if (messagesRes.ok) {
-        const data = await messagesRes.json();
-        setMessages(Array.isArray(data.messages) ? data.messages : []);
+      const sessionsRes = await fetch('/api/chat/sessions');
+      if (sessionsRes.ok) {
+        const data = await sessionsRes.json();
+        const sessions: ChatSessionSummary[] = Array.isArray(data.sessions) ? data.sessions : [];
+        const savedSessionId = sessionStorage.getItem('local-model-chat.activeSessionId');
+        const initialSessionId = sessions.some((session) => session.id === savedSessionId)
+          ? savedSessionId!
+          : (sessions[0]?.id || data.activeSessionId || '');
+        setChatSessions(sessions);
+        if (initialSessionId) {
+          const activeRes = await fetch(`/api/chat/sessions/${encodeURIComponent(initialSessionId)}/activate`, { method: 'POST' });
+          if (activeRes.ok) {
+            const activeData = await activeRes.json();
+            setMessages(activeData.messages || []);
+            setContextInfo(activeData.context);
+            setActiveSessionId(initialSessionId);
+            sessionStorage.setItem('local-model-chat.activeSessionId', initialSessionId);
+          }
+        }
       }
 
       await requestRunningModels();
@@ -313,16 +324,68 @@ export const App: React.FC = () => {
   };
 
   const handleNewChat = async () => {
-    setMessages([]);
-    setStreamingText('');
-    setGenerationStatus('idle');
-    setTerminalSessions([]);
-    setTerminalSidebarOpen(false);
-    setTerminalSessionsModalOpen(false);
-    const res = await fetch('/api/clear', { method: 'POST' });
+    if (isGenerating) return;
+    const res = await fetch('/api/chat/sessions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
     if (res.ok) {
       const data = await res.json();
+      setMessages([]);
+      setStreamingText('');
+      setStreamingThinking('');
+      setGenerationStatus('idle');
       setContextInfo(data.context);
+      setChatSessions(data.sessions || []);
+      setActiveSessionId(data.activeSessionId || '');
+      sessionStorage.setItem('local-model-chat.activeSessionId', data.activeSessionId || '');
+    }
+  };
+
+  const handleSelectChatSession = async (sessionId: string) => {
+    if (isGenerating || sessionId === activeSessionId) return;
+    const res = await fetch(`/api/chat/sessions/${encodeURIComponent(sessionId)}/activate`, { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) {
+      alert(data.error || 'Could not switch chat sessions.');
+      return;
+    }
+    setMessages(data.messages || []);
+    setContextInfo(data.context);
+    setChatSessions(data.sessions || []);
+    setActiveSessionId(data.activeSessionId || sessionId);
+    sessionStorage.setItem('local-model-chat.activeSessionId', data.activeSessionId || sessionId);
+    setStreamingText('');
+    setStreamingThinking('');
+    setGenerationStatus('idle');
+  };
+
+  const handleRenameChatSession = async (sessionId: string, title: string) => {
+    const res = await fetch(`/api/chat/sessions/${encodeURIComponent(sessionId)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title }),
+    });
+    const data = await res.json();
+    if (res.ok) setChatSessions(data.sessions || []);
+  };
+
+  const handleDeleteChatSession = async (sessionId: string) => {
+    if (isGenerating) return;
+    const res = await fetch(`/api/chat/sessions/${encodeURIComponent(sessionId)}`, { method: 'DELETE' });
+    const data = await res.json();
+    if (!res.ok) {
+      alert(data.error || 'Could not delete the chat session.');
+      return;
+    }
+    const sessions: ChatSessionSummary[] = data.sessions || [];
+    setChatSessions(sessions);
+    if (sessionId === activeSessionId) {
+      const nextSessionId = sessions[0]?.id || '';
+      setActiveSessionId('');
+      sessionStorage.removeItem('local-model-chat.activeSessionId');
+      if (nextSessionId) await handleSelectChatSession(nextSessionId);
     }
   };
 
@@ -331,7 +394,7 @@ export const App: React.FC = () => {
       const res = await fetch('/api/chat/rewind', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messageId }),
+        body: JSON.stringify({ messageId, sessionId: activeSessionId }),
       });
       if (res.ok) {
         const data = await res.json();
@@ -348,7 +411,11 @@ export const App: React.FC = () => {
 
   const handleCompactContext = async () => {
     try {
-      const res = await fetch('/api/chat/compact', { method: 'POST' });
+      const res = await fetch('/api/chat/compact', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId: activeSessionId }),
+      });
       if (res.ok) {
         const data = await res.json();
         if (data.success) {
@@ -400,7 +467,7 @@ export const App: React.FC = () => {
       const response = await fetch('/api/chat/tool-approval', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ decision: 'approve' }),
+        body: JSON.stringify({ decision: 'approve', sessionId: activeSessionId }),
       });
       if (!response.ok) {
         const data = await response.json().catch(() => null);
@@ -421,7 +488,7 @@ export const App: React.FC = () => {
       const response = await fetch('/api/chat/tool-approval', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ decision: 'reject', reason }),
+        body: JSON.stringify({ decision: 'reject', reason, sessionId: activeSessionId }),
       });
       if (!response.ok) {
         const data = await response.json().catch(() => null);
@@ -449,7 +516,7 @@ export const App: React.FC = () => {
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: userPrompt, attachments, imageAttachments }),
+        body: JSON.stringify({ message: userPrompt, sessionId: activeSessionId, attachments, imageAttachments }),
       });
 
       if (!response.ok || !response.body) {
@@ -528,7 +595,7 @@ export const App: React.FC = () => {
       setStreamingText('');
       setStreamingThinking('');
       setActiveToolCall(null);
-      const ctxRes = await fetch('/api/context');
+      const ctxRes = await fetch(`/api/context?sessionId=${encodeURIComponent(activeSessionId)}`);
       if (ctxRes.ok) {
         const data = await ctxRes.json();
         setContextInfo(data);
@@ -538,7 +605,11 @@ export const App: React.FC = () => {
 
   const handleCancelGeneration = async () => {
     try {
-      const response = await fetch('/api/chat/cancel', { method: 'POST' });
+      const response = await fetch('/api/chat/cancel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId: activeSessionId }),
+      });
       if (!response.ok && response.status !== 409) {
         throw new Error(`Server response error ${response.status}`);
       }
@@ -602,6 +673,12 @@ export const App: React.FC = () => {
           activeView={activeView}
           onSelectView={setActiveView}
           onNewChat={handleNewChat}
+          chatSessions={chatSessions}
+          activeSessionId={activeSessionId}
+          isGenerating={isGenerating}
+          onSelectChatSession={handleSelectChatSession}
+          onRenameChatSession={handleRenameChatSession}
+          onDeleteChatSession={handleDeleteChatSession}
           onOpenSystemPrompt={() => setSystemPromptModalOpen(true)}
           onOpenToolSettings={() => setToolSettingsModalOpen(true)}
           onOpenConnectionSettings={() => setConnectionSettingsModalOpen(true)}

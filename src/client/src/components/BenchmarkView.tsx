@@ -325,6 +325,8 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
   const [activeTab, setActiveTab] = useState<'runner' | 'compare'>('runner');
   const [saveResults, setSaveResults] = useState(true);
   const [runName, setRunName] = useState('');
+  const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
+  const [showOutputSettings, setShowOutputSettings] = useState(false);
   const [outputDirectory, setOutputDirectory] = useState('');
   const [defaultOutputDirectory, setDefaultOutputDirectory] = useState('');
   const [projectRoot, setProjectRoot] = useState('');
@@ -335,7 +337,7 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
   const [savedRun, setSavedRun] = useState<SavedBenchmarkRun | null>(null);
   const [showMatchingConfigs, setShowMatchingConfigs] = useState(false);
   const [deletingRunId, setDeletingRunId] = useState<string | null>(null);
-  const [runSort, setRunSort] = useState<{ key: 'rank' | 'model' | 'date' | 'total' | 'average'; direction: 'asc' | 'desc' }>({ key: 'rank', direction: 'asc' });
+  const [runSort, setRunSort] = useState<{ key: 'rank' | 'model' | 'date' | 'elapsed' | 'total' | 'average'; direction: 'asc' | 'desc' }>({ key: 'rank', direction: 'asc' });
 
   const loadSavedRuns = async (directory?: string) => {
     setRunsLoading(true);
@@ -683,6 +685,10 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
       const comparison = a.timing.comparisonMs - b.timing.comparisonMs;
       return runSort.direction === 'asc' ? comparison : -comparison;
     }
+    if (runSort.key === 'elapsed') {
+      const comparison = a.totalDurationMs - b.totalDurationMs;
+      return runSort.direction === 'asc' ? comparison : -comparison;
+    }
     if (runSort.key === 'average') {
       const comparison = a.comparisonDurationMs - b.comparisonDurationMs;
       return runSort.direction === 'asc' ? comparison : -comparison;
@@ -725,13 +731,13 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
       : [...previous, runId]);
   };
 
-  const toggleRunSort = (key: 'model' | 'date' | 'total' | 'average') => {
+  const toggleRunSort = (key: 'model' | 'date' | 'elapsed' | 'total' | 'average') => {
     setRunSort((previous) => previous.key === key
       ? { key, direction: previous.direction === 'asc' ? 'desc' : 'asc' }
       : { key, direction: key === 'date' ? 'desc' : 'asc' });
   };
 
-  const sortIndicator = (key: 'model' | 'date' | 'total' | 'average') =>
+  const sortIndicator = (key: 'model' | 'date' | 'elapsed' | 'total' | 'average') =>
     runSort.key === key ? (runSort.direction === 'asc' ? '▲' : '▼') : '↕';
 
   const handleDeleteRun = async (run: SavedBenchmarkRun) => {
@@ -778,12 +784,12 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
             <>
               <div className="glass-panel benchmark-ranking">
                 <div className="benchmark-ranking-header"><Trophy size={19} color="var(--accent-amber)" /><h3>Leaderboard</h3><span>{runSort.key === 'rank' ? 'Success rate first, then comparison time' : `Sorted by ${runSort.key} (${runSort.direction === 'asc' ? 'ascending' : 'descending'})`}</span></div>
-                <div className="benchmark-table-scroll"><table><thead><tr><th>Compare</th><th>Suite rank</th><th>Run label</th><th>Benchmark</th><th><button className={runSort.key === 'model' ? 'benchmark-sort-active' : ''} onClick={() => toggleRunSort('model')}>Model <span>{sortIndicator('model')}</span></button></th><th><button className={runSort.key === 'date' ? 'benchmark-sort-active' : ''} onClick={() => toggleRunSort('date')}>Generated <span>{sortIndicator('date')}</span></button></th><th>Score</th><th>Passed</th><th><button className={runSort.key === 'total' ? 'benchmark-sort-active' : ''} onClick={() => toggleRunSort('total')}>Total compare <span>{sortIndicator('total')}</span></button></th><th><button className={runSort.key === 'average' ? 'benchmark-sort-active' : ''} onClick={() => toggleRunSort('average')}>Avg compare <span>{sortIndicator('average')}</span></button></th><th>Actions</th></tr></thead>
+                <div className="benchmark-table-scroll"><table><thead><tr><th>Compare</th><th>Suite rank</th><th>Run label</th><th>Benchmark</th><th><button className={runSort.key === 'model' ? 'benchmark-sort-active' : ''} onClick={() => toggleRunSort('model')}>Model <span>{sortIndicator('model')}</span></button></th><th><button className={runSort.key === 'date' ? 'benchmark-sort-active' : ''} onClick={() => toggleRunSort('date')}>Generated <span>{sortIndicator('date')}</span></button></th><th>Score</th><th>Passed</th><th><button className={runSort.key === 'elapsed' ? 'benchmark-sort-active' : ''} onClick={() => toggleRunSort('elapsed')} title="Actual start-to-finish benchmark duration">Wall time <span>{sortIndicator('elapsed')}</span></button></th><th><button className={runSort.key === 'total' ? 'benchmark-sort-active' : ''} onClick={() => toggleRunSort('total')}>Total compare <span>{sortIndicator('total')}</span></button></th><th><button className={runSort.key === 'average' ? 'benchmark-sort-active' : ''} onClick={() => toggleRunSort('average')}>Avg compare <span>{sortIndicator('average')}</span></button></th><th>Actions</th></tr></thead>
                   <tbody>{rankedRuns.map((run) => <tr key={run.runId}>
                     <td><input type="checkbox" checked={selectedRunIds.includes(run.runId)} onChange={() => toggleComparedRun(run.runId)} /></td>
                     <td className="benchmark-rank">#{performanceRankById.get(run.runId)}</td><td><strong>{run.runName || 'Unlabeled'}</strong></td><td><strong>{run.benchmark.definitionName}</strong><small>{run.benchmark.testIds.length} tests · {run.attemptsPerCase} attempts · parallelism {run.parallelism ?? 1} · v{run.benchmark.definitionVersion}</small></td><td><strong>{run.model}</strong><small>{run.runId}</small></td>
                     <td>{formatRunDate(run.runDate)}</td><td><strong className={run.successRatePercentage === 100 ? 'benchmark-pass' : ''}>{run.successRatePercentage}%</strong></td>
-                    <td>{run.successfulAttempts}/{run.totalAttempts}</td><td>{formatMs(run.timing.comparisonMs)}</td><td>{formatMs(run.comparisonDurationMs)}</td>
+                    <td>{run.successfulAttempts}/{run.totalAttempts}</td><td>{formatMs(run.totalDurationMs)}</td><td>{formatMs(run.timing.comparisonMs)}</td><td>{formatMs(run.comparisonDurationMs)}</td>
                     <td><div className="benchmark-run-actions"><a href={`/api/benchmark/report?directory=${encodeURIComponent(run.outputDirectory)}&runId=${encodeURIComponent(run.runId)}`} target="_blank" rel="noreferrer">Open HTML</a><button onClick={() => void handleDeleteRun(run)} disabled={deletingRunId === run.runId} title="Delete this saved benchmark">{deletingRunId === run.runId ? <Loader2 size={13} className="spin" /> : <Trash2 size={13} />} Delete</button></div></td>
                   </tr>)}</tbody></table></div>
               </div>
@@ -838,32 +844,8 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
           </p>
         </div>
 
-        {/* Model Picker & Trigger Button */}
+        {/* Primary benchmark action */}
         <div className="benchmark-actions" style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-          <div className="benchmark-model-picker" style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'rgba(15, 23, 42, 0.8)', padding: '8px 14px', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
-            <Cpu size={16} color="var(--accent-primary)" />
-            <select
-              value={benchmarkConfig.model}
-              onChange={(e) => updateBenchmarkConfig('model', e.target.value)}
-              disabled={configLocked}
-              style={{
-                background: 'transparent',
-                color: 'var(--text-main)',
-                border: 'none',
-                fontSize: '0.9rem',
-                fontWeight: 500,
-                outline: 'none',
-                cursor: configLocked ? 'not-allowed' : 'pointer',
-              }}
-            >
-              {models.map((m) => (
-                <option key={m.name} value={m.name} style={{ background: '#1e293b' }}>
-                  {m.name}
-                </option>
-              ))}
-            </select>
-          </div>
-
           <button
             onClick={isRunning ? handleStopBenchmarks : handleRunAllBenchmarks}
             disabled={isStopping || (!isRunning && (runningSingleId !== null || editingBenchmarkId !== null || !selectedBenchmark))}
@@ -896,13 +878,41 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
       </div>
 
       <div className="glass-panel" style={{ padding: '20px', borderRadius: '14px', border: '1px solid rgba(56, 189, 248, 0.28)' }}>
-        <div style={{ display: 'flex', gap: '12px', alignItems: 'end', flexWrap: 'wrap' }}>
-          <label style={{ flex: '1 1 300px', display: 'flex', flexDirection: 'column', gap: '6px', color: 'var(--text-muted)', fontSize: '0.78rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '9px', marginBottom: '6px' }}>
+          <Target size={18} color="#38bdf8" />
+          <h3 style={{ margin: 0, color: 'var(--text-main)', fontSize: '1rem' }}>Benchmark Run Setup</h3>
+        </div>
+        <p style={{ margin: '0 0 16px', color: 'var(--text-muted)', fontSize: '0.8rem' }}>
+          Choose what to test, which model to test, and how reliability attempts should be scheduled.
+        </p>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: '14px', alignItems: 'end' }}>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', color: 'var(--text-muted)', fontSize: '0.78rem' }}>
+            Model
+            <select value={benchmarkConfig.model} disabled={configLocked} onChange={(event) => updateBenchmarkConfig('model', event.target.value)} style={{ padding: '10px', borderRadius: '8px', border: '1px solid var(--border-color)', background: '#111827', color: 'var(--text-main)' }}>
+              {models.map((model) => <option key={model.name} value={model.name}>{model.name}</option>)}
+            </select>
+          </label>
+
+          <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', color: 'var(--text-muted)', fontSize: '0.78rem' }}>
             Benchmark
             <select value={selectedBenchmarkId} disabled={configLocked || editingBenchmarkId !== null} onChange={(event) => { setSelectedBenchmarkId(event.target.value); setShowSelectedBenchmarkTests(false); }} style={{ padding: '10px', borderRadius: '8px', border: '1px solid var(--border-color)', background: '#111827', color: 'var(--text-main)' }}>
               {benchmarkDefinitions.map((definition) => <option key={definition.id} value={definition.id}>{definition.name} ({definition.testIds.length} tests)</option>)}
             </select>
           </label>
+
+          <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', color: 'var(--text-muted)', fontSize: '0.78rem' }}>
+            Reliability attempts per case (3–10)
+            <input type="number" min="3" max="10" value={attemptsPerCase} disabled={configLocked} onChange={(event) => setAttemptsPerCase(Number(event.target.value))} style={{ padding: '10px', borderRadius: '8px', border: '1px solid var(--border-color)', background: '#111827', color: 'var(--text-main)' }} />
+          </label>
+
+          <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', color: 'var(--text-muted)', fontSize: '0.78rem' }}>
+            Concurrent attempts (1–10)
+            <input type="number" min="1" max="10" value={parallelism} disabled={configLocked} onChange={(event) => setParallelism(Number(event.target.value))} title="1 runs attempts sequentially; higher values start this many isolated containers at once." style={{ padding: '10px', borderRadius: '8px', border: '1px solid var(--border-color)', background: '#111827', color: 'var(--text-main)' }} />
+          </label>
+        </div>
+
+        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap', marginTop: '14px', paddingTop: '14px', borderTop: '1px solid var(--border-color)' }}>
           <button className="benchmark-secondary-button" disabled={!selectedBenchmark || editingBenchmarkId !== null} onClick={() => setShowSelectedBenchmarkTests((visible) => !visible)}>
             <FileCode2 size={14} /> {showSelectedBenchmarkTests ? 'Hide test cases' : `View test cases (${selectedBenchmark?.testIds.length || 0})`}
           </button>
@@ -912,7 +922,7 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
             <button className="benchmark-secondary-button" disabled={configLocked || editingBenchmarkId !== null} onClick={() => void removeBenchmarkDefinition(selectedBenchmark)}><Trash2 size={14} /> Delete</button>
           </>}
         </div>
-        {selectedBenchmark && editingBenchmarkId === null && <p style={{ margin: '10px 0 0', color: 'var(--text-muted)', fontSize: '0.82rem' }}>{selectedBenchmark.description} · Version {selectedBenchmark.version}</p>}
+        {selectedBenchmark && editingBenchmarkId === null && <p style={{ margin: '12px 0 0', color: 'var(--text-muted)', fontSize: '0.82rem' }}>{selectedBenchmark.description} · Version {selectedBenchmark.version}</p>}
 
         {selectedBenchmark && showSelectedBenchmarkTests && editingBenchmarkId === null && <div style={{ marginTop: '14px', borderTop: '1px solid var(--border-color)', paddingTop: '12px' }}>
           <div style={{ marginBottom: '9px', color: 'var(--text-muted)', fontSize: '0.78rem' }}>
@@ -962,14 +972,22 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
         </div>}
       </div>
 
-      <div className="glass-panel" style={{ padding: '20px', borderRadius: '14px', border: '1px solid rgba(99, 102, 241, 0.28)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '16px', marginBottom: '16px', flexWrap: 'wrap' }}>
+      <div className="glass-panel benchmark-collapsible-panel" style={{ borderColor: 'rgba(99, 102, 241, 0.28)' }}>
+        <button className="benchmark-collapsible-toggle benchmark-collapsible-toggle-agent" type="button" onClick={() => setShowAdvancedSettings((visible) => !visible)} aria-expanded={showAdvancedSettings}>
           <div>
-            <h3 style={{ margin: 0, color: 'var(--text-main)', fontSize: '1rem' }}>Benchmark Agent Configuration</h3>
+            <h3 style={{ margin: 0, color: 'var(--text-main)', fontSize: '1rem' }}>Advanced Agent Configuration</h3>
             <p style={{ margin: '4px 0 0', color: 'var(--text-muted)', fontSize: '0.8rem' }}>
-              Initialized from the current agent. Changes here apply only to benchmark runs.
+              Direct agent behavior initialized from the current agent. Changes here apply only to benchmark runs.
             </p>
           </div>
+          <span style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-muted)', fontSize: '0.75rem', whiteSpace: 'nowrap' }}>
+            {showAdvancedSettings ? 'Hide settings' : 'Show settings'}
+            <ChevronDown size={16} style={{ transform: showAdvancedSettings ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s ease' }} />
+          </span>
+        </button>
+
+        {showAdvancedSettings && <div style={{ padding: '16px 20px 20px', borderTop: '1px solid var(--border-color)' }}>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '14px', paddingTop: '4px' }}>
           <button
             onClick={resetBenchmarkConfig}
             disabled={configLocked || !configDirty}
@@ -977,16 +995,9 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
           >
             Reset to current agent
           </button>
-        </div>
+          </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: '14px' }}>
-          <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', color: 'var(--text-muted)', fontSize: '0.78rem' }}>
-            Model
-            <select value={benchmarkConfig.model} disabled={configLocked} onChange={(event) => updateBenchmarkConfig('model', event.target.value)} style={{ padding: '9px 10px', borderRadius: '7px', border: '1px solid var(--border-color)', background: '#111827', color: 'var(--text-main)' }}>
-              {models.map((model) => <option key={model.name} value={model.name}>{model.name}</option>)}
-            </select>
-          </label>
-
           <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', color: 'var(--text-muted)', fontSize: '0.78rem' }}>
             Ollama API URL
             <input value={benchmarkConfig.ollamaHost} disabled={configLocked} onChange={(event) => updateBenchmarkConfig('ollamaHost', event.target.value)} style={{ padding: '9px 10px', borderRadius: '7px', border: '1px solid var(--border-color)', background: '#111827', color: 'var(--text-main)' }} />
@@ -995,16 +1006,6 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
           <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', color: 'var(--text-muted)', fontSize: '0.78rem' }}>
             Temperature (0–1)
             <input type="number" min="0" max="1" step="0.05" value={benchmarkConfig.temperature} disabled={configLocked} onChange={(event) => updateBenchmarkConfig('temperature', Number(event.target.value))} style={{ padding: '9px 10px', borderRadius: '7px', border: '1px solid var(--border-color)', background: '#111827', color: 'var(--text-main)' }} />
-          </label>
-
-          <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', color: 'var(--text-muted)', fontSize: '0.78rem' }}>
-            Reliability attempts per case (3–10)
-            <input type="number" min="3" max="10" value={attemptsPerCase} disabled={configLocked} onChange={(event) => setAttemptsPerCase(Number(event.target.value))} style={{ padding: '9px 10px', borderRadius: '7px', border: '1px solid var(--border-color)', background: '#111827', color: 'var(--text-main)' }} />
-          </label>
-
-          <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', color: 'var(--text-muted)', fontSize: '0.78rem' }}>
-            Concurrent attempts (1–10)
-            <input type="number" min="1" max="10" value={parallelism} disabled={configLocked} onChange={(event) => setParallelism(Number(event.target.value))} title="1 runs attempts sequentially; higher values start this many isolated containers at once." style={{ padding: '9px 10px', borderRadius: '7px', border: '1px solid var(--border-color)', background: '#111827', color: 'var(--text-main)' }} />
           </label>
 
           <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', color: 'var(--text-muted)', fontSize: '0.78rem' }}>
@@ -1071,13 +1072,21 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
             </div>
           </div>
         </div>
+        </div>}
       </div>
 
-      <div className="glass-panel benchmark-output-panel" style={{ padding: '18px 20px', borderRadius: '14px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '9px', marginBottom: '12px' }}>
+      <div className="glass-panel benchmark-output-panel benchmark-collapsible-panel">
+        <button className="benchmark-collapsible-toggle benchmark-collapsible-toggle-output" type="button" onClick={() => setShowOutputSettings((visible) => !visible)} aria-expanded={showOutputSettings}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '9px' }}>
           <Save size={18} color="var(--accent-teal)" />
           <div><h3 style={{ margin: 0, fontSize: '0.95rem' }}>Portable result bundle</h3><span style={{ color: 'var(--text-muted)', fontSize: '0.78rem' }}>Each suite run gets a unique folder containing report.json and a standalone index.html.</span></div>
-        </div>
+          </div>
+          <span style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-muted)', fontSize: '0.75rem', whiteSpace: 'nowrap' }}>
+            {saveResults ? 'Saving enabled' : 'Saving disabled'} · {showOutputSettings ? 'Hide' : 'Show'}
+            <ChevronDown size={16} style={{ transform: showOutputSettings ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s ease' }} />
+          </span>
+        </button>
+        {showOutputSettings && <div style={{ padding: '16px 20px 20px', borderTop: '1px solid var(--border-color)' }}>
         <div style={{ display: 'flex', gap: '14px', alignItems: 'end', flexWrap: 'wrap' }}>
           <label style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-main)', fontSize: '0.82rem', paddingBottom: '9px' }}>
             <input type="checkbox" checked={saveResults} disabled={configLocked} onChange={(event) => setSaveResults(event.target.checked)} /> Save completed suite runs
@@ -1099,6 +1108,7 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
             {outputLocationMode === 'project' && <span style={{ color: 'var(--text-dim)', fontSize: '0.7rem' }}>Detected from this installation{projectRoot ? `: ${projectRoot}` : ''}</span>}
           </label>
         </div>
+        </div>}
       </div>
 
       {savedRun && (

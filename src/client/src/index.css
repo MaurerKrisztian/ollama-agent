@@ -283,6 +283,45 @@ code {
 .benchmark-config-table tr.benchmark-config-diff td:first-child strong { color: #fbbf24; }
 .benchmark-config-value-0 { background: rgba(56, 189, 248, 0.10); box-shadow: inset 3px 0 #38bdf8; }
 .benchmark-config-value-0 code { color: #bae6fd; }
+
+/* Explicit benchmark disclosure controls. Keep these visible even when a
+   browser or inherited button rule applies unusual native control sizing. */
+.benchmark-collapsible-panel {
+  display: block !important;
+  flex: 0 0 auto !important;
+  min-height: 72px !important;
+  height: auto !important;
+  overflow: hidden;
+  border-radius: 14px;
+}
+
+.benchmark-collapsible-toggle {
+  position: relative;
+  z-index: 1;
+  display: flex !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  width: 100% !important;
+  min-height: 70px !important;
+  height: auto !important;
+  padding: 16px 20px !important;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border: 0;
+  border-radius: 0;
+  color: var(--text-main) !important;
+  appearance: none;
+  cursor: pointer !important;
+  text-align: left;
+}
+
+.benchmark-collapsible-toggle-agent { background: rgba(99, 102, 241, 0.09) !important; }
+.benchmark-collapsible-toggle-output { background: rgba(20, 184, 166, 0.08) !important; }
+.benchmark-collapsible-toggle:hover { filter: brightness(1.16); }
+.benchmark-collapsible-toggle h3,
+.benchmark-collapsible-toggle p,
+.benchmark-collapsible-toggle span { visibility: visible !important; opacity: 1 !important; }
 .benchmark-config-value-1 { background: rgba(244, 114, 182, 0.10); box-shadow: inset 3px 0 #f472b6; }
 .benchmark-config-value-1 code { color: #fbcfe8; }
 .benchmark-config-value-2 { background: rgba(52, 211, 153, 0.10); box-shadow: inset 3px 0 #34d399; }

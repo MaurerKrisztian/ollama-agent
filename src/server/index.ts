@@ -8,6 +8,7 @@ import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
 import { Server as SocketIOServer } from 'socket.io';
 import { AgentEngine } from '../core/agent.js';
+import { ContextManager } from '../core/context.js';
 import { TOOL_DEFINITIONS } from '../core/tools.js';
 import { BENCHMARK_TEST_CASES } from '../benchmark/cases/index.js';
 import { createBenchmarkSuiteHash } from '../benchmark/cases/benchmarks.js';
@@ -31,6 +32,7 @@ import {
 import type { BenchmarkAgentConfig, BenchmarkSnapshot } from '../benchmark/types.js';
 import { isCommandWhitelisted, DEFAULT_COMMAND_WHITELIST } from '../core/commandWhitelist.js';
 import { handleOpenAiChatCompletions, handleOpenAiModels } from './openaiAdapter.js';
+import { ChatSessionStore } from './chatSessions.js';
 
 import fsSync from 'node:fs';
 
@@ -42,6 +44,7 @@ const io = new SocketIOServer(httpServer, {
 const PORT = process.env.PORT || 3001;
 
 const CONFIG_FILE_PATH = path.join(os.homedir(), '.local-model-chat-config.json');
+const CHAT_SESSIONS_FILE_PATH = path.join(os.homedir(), '.local-model-chat-sessions.json');
 
 function getInitialPersistedConfig(): {
   workingDir: string;
@@ -133,8 +136,31 @@ const agent = new AgentEngine({
   complexityProfile: initialConfig.complexityProfile,
 });
 
-// Auto-load MCP configuration if available
-agent.loadMcpConfig().catch(() => {});
+const chatSessions = new ChatSessionStore(CHAT_SESSIONS_FILE_PATH);
+agent.getContextManager().setMessages(chatSessions.getActive().messages);
+
+type ChatRuntime = { engine: AgentEngine; ready: Promise<void> };
+const chatRuntimes = new Map<string, ChatRuntime>();
+
+function createChatRuntime(sessionId: string, existingEngine?: AgentEngine): ChatRuntime {
+  const session = chatSessions.getSession(sessionId);
+  if (!session) throw new Error('Chat session not found.');
+  const engine = existingEngine || new AgentEngine({
+    ...agent.getConfig(),
+    ollamaToken: agent.getOllamaToken(),
+  });
+  engine.getContextManager().setMessages(session.messages);
+  const ready = engine.loadMcpConfig().then(() => undefined).catch(() => undefined);
+  const runtime = { engine, ready };
+  chatRuntimes.set(sessionId, runtime);
+  return runtime;
+}
+
+function getChatRuntime(sessionId: string): ChatRuntime {
+  return chatRuntimes.get(sessionId) || createChatRuntime(sessionId);
+}
+
+createChatRuntime(chatSessions.getActiveId(), agent);
 
 let terminalRequireConfirm = initialConfig.terminalMode === 'confirm';
 let fileEditRequireConfirm = initialConfig.fileEditMode === 'confirm';
@@ -148,10 +174,23 @@ const getPublicConfig = () => ({
   allowedCommands: allowedCommandsState,
 });
 
-// Per-session tool approval state
 type ApprovalDecisionPayload = { decision: 'approve' | 'reject'; reason?: string };
-let pendingApprovalResolve: ((payload: ApprovalDecisionPayload) => void) | null = null;
-let activeGenerationController: AbortController | null = null;
+const pendingApprovalResolves = new Map<string, (payload: ApprovalDecisionPayload) => void>();
+const activeGenerationControllers = new Map<string, AbortController>();
+
+const saveChatSession = (sessionId: string, engine: AgentEngine = getChatRuntime(sessionId).engine) =>
+  chatSessions.save(sessionId, engine.getContextManager().getMessages());
+const getSessionContext = (sessionId: string) => {
+  const session = chatSessions.getSession(sessionId);
+  if (!session) return undefined;
+  const context = new ContextManager(agent.getConfig().systemPrompt, agent.getContextManager().getTools(), { enabled: false });
+  context.setMessages(session.messages);
+  return context.getContextInfo();
+};
+const getChatSessionsState = () => ({
+  sessions: chatSessions.list(),
+  activeSessionId: chatSessions.getActiveId(),
+});
 
 // GET /api/models - Fetch models from current or specified Ollama host
 app.get('/api/models', async (req, res) => {
@@ -305,8 +344,19 @@ const getConfigState = () => ({
 });
 
 function broadcastTerminalSessions() {
-  const terminalManager = agent.getToolExecutor().getTerminalManager();
-  io.emit('terminal:sessions', terminalManager.listSessions());
+  io.emit('terminal:sessions', listAllTerminalSessions());
+}
+
+function getTerminalManagers() {
+  return [...new Set([...chatRuntimes.values()].map(({ engine }) => engine.getToolExecutor().getTerminalManager()))];
+}
+
+function listAllTerminalSessions() {
+  return getTerminalManagers().flatMap((manager) => manager.listSessions());
+}
+
+function findTerminalManager(sessionId: string) {
+  return getTerminalManagers().find((manager) => manager.listSessions().some((session) => session.sessionId === sessionId));
 }
 
 async function broadcastRunningModels() {
@@ -335,7 +385,7 @@ async function broadcastSystemMetrics() {
 
 io.on('connection', (socket) => {
   socket.emit('config:state', getConfigState());
-  socket.emit('terminal:sessions', agent.getToolExecutor().getTerminalManager().listSessions());
+  socket.emit('terminal:sessions', listAllTerminalSessions());
   void broadcastSystemMetrics();
   void broadcastRunningModels();
   if (!liveStateInterval) {
@@ -347,7 +397,7 @@ io.on('connection', (socket) => {
   }
 
   socket.on('terminal:sessions:request', () => {
-    socket.emit('terminal:sessions', agent.getToolExecutor().getTerminalManager().listSessions());
+    socket.emit('terminal:sessions', listAllTerminalSessions());
   });
 
   socket.on('models:running:request', () => {
@@ -434,7 +484,8 @@ app.post('/api/config', (req, res) => {
     }
   }
 
-  agent.updateConfig({ model, systemPrompt, workingDir, showWorkingDirInfo, ollamaHost, ollamaToken, temperature, contextWindow, maxLoops });
+  const configUpdate = { model, systemPrompt, workingDir, showWorkingDirInfo, ollamaHost, ollamaToken, temperature, contextWindow, maxLoops };
+  for (const { engine } of chatRuntimes.values()) engine.updateConfig(configUpdate);
 
   const currentConfig = agent.getConfig();
   savePersistedConfig({
@@ -455,7 +506,10 @@ app.post('/api/config', (req, res) => {
 
 // GET /api/context - Get detailed context info (raw JSON & converted text)
 app.get('/api/context', (req, res) => {
-  res.json(agent.getContextManager().getContextInfo());
+  const sessionId = typeof req.query.sessionId === 'string' ? req.query.sessionId : '';
+  const context = sessionId ? getSessionContext(sessionId) : agent.getContextManager().getContextInfo();
+  if (!context) return res.status(404).json({ error: 'Chat session not found.' });
+  res.json(context);
 });
 
 // GET /api/context/workdir - Preview the exact dynamic text appended to the system prompt
@@ -473,7 +527,79 @@ app.get('/api/context/workdir', async (_req, res) => {
 
 // GET /api/messages - Restore the visible chat after a browser reload
 app.get('/api/messages', (_req, res) => {
-  res.json({ messages: agent.getContextManager().getMessages() });
+  const sessionId = typeof _req.query.sessionId === 'string' ? _req.query.sessionId : chatSessions.getActiveId();
+  const session = chatSessions.getSession(sessionId);
+  if (!session) return res.status(404).json({ error: 'Chat session not found.' });
+  res.json({
+    messages: session.messages,
+    activeSessionId: session.id,
+  });
+});
+
+// GET /api/chat/sessions - List persisted conversations without their message payloads
+app.get('/api/chat/sessions', (_req, res) => {
+  res.json({ success: true, ...getChatSessionsState() });
+});
+
+// POST /api/chat/sessions - Save the current conversation and start a new one
+app.post('/api/chat/sessions', (req, res) => {
+  const session = chatSessions.create(req.body?.title, false);
+  io.emit('chat:sessions', { sessions: chatSessions.list() });
+  res.status(201).json({
+    success: true,
+    session,
+    messages: [],
+    context: getSessionContext(session.id),
+    sessions: chatSessions.list(),
+    activeSessionId: session.id,
+  });
+});
+
+// POST /api/chat/sessions/:id/activate - Switch the agent context to a saved conversation
+app.post('/api/chat/sessions/:id/activate', (req, res) => {
+  const session = chatSessions.getSession(req.params.id);
+  if (!session) {
+    return res.status(404).json({ success: false, error: 'Chat session not found.' });
+  }
+  res.json({
+    success: true,
+    session,
+    messages: session.messages,
+    context: getSessionContext(session.id),
+    sessions: chatSessions.list(),
+    activeSessionId: session.id,
+  });
+});
+
+// PATCH /api/chat/sessions/:id - Rename a conversation
+app.patch('/api/chat/sessions/:id', (req, res) => {
+  if (typeof req.body?.title !== 'string' || !req.body.title.trim()) {
+    return res.status(400).json({ success: false, error: 'A non-empty title is required.' });
+  }
+  const session = chatSessions.rename(req.params.id, req.body.title);
+  if (!session) {
+    return res.status(404).json({ success: false, error: 'Chat session not found.' });
+  }
+  io.emit('chat:sessions', { sessions: chatSessions.list() });
+  res.json({ success: true, session, ...getChatSessionsState() });
+});
+
+// DELETE /api/chat/sessions/:id - Delete a conversation and activate the newest remaining one
+app.delete('/api/chat/sessions/:id', (req, res) => {
+  if (activeGenerationControllers.has(req.params.id)) {
+    return res.status(409).json({ success: false, error: 'Cancel this chat generation before deleting it.' });
+  }
+  const activeSession = chatSessions.delete(req.params.id);
+  if (!activeSession) {
+    return res.status(404).json({ success: false, error: 'Chat session not found.' });
+  }
+  chatRuntimes.delete(req.params.id);
+  io.emit('chat:sessions', { sessions: chatSessions.list() });
+  res.json({
+    success: true,
+    deletedSessionId: req.params.id,
+    ...getChatSessionsState(),
+  });
 });
 
 // GET /api/tools - List available agent tools
@@ -486,13 +612,13 @@ app.get('/api/tools', (req, res) => {
 
 // GET /api/terminal/sessions - List active & background terminal sessions
 app.get('/api/terminal/sessions', (_req, res) => {
-  const terminalManager = agent.getToolExecutor().getTerminalManager();
-  res.json({ success: true, sessions: terminalManager.listSessions() });
+  res.json({ success: true, sessions: listAllTerminalSessions() });
 });
 
 // GET /api/terminal/sessions/:id/output - Fetch log output for terminal session
 app.get('/api/terminal/sessions/:id/output', (req, res) => {
-  const terminalManager = agent.getToolExecutor().getTerminalManager();
+  const terminalManager = findTerminalManager(req.params.id);
+  if (!terminalManager) return res.status(404).json({ success: false, error: 'Terminal session not found.' });
   const tailLines = req.query.tail_lines ? parseInt(req.query.tail_lines as string, 10) : 100;
   const result = terminalManager.readOutput(req.params.id, tailLines);
   if (!result.success) {
@@ -522,7 +648,8 @@ app.post('/api/terminal/sessions/:id/input', (req, res) => {
   if (input === undefined || typeof input !== 'string') {
     return res.status(400).json({ success: false, error: 'input (string) is required.' });
   }
-  const terminalManager = agent.getToolExecutor().getTerminalManager();
+  const terminalManager = findTerminalManager(req.params.id);
+  if (!terminalManager) return res.status(404).json({ success: false, error: 'Terminal session not found.' });
   const result = terminalManager.sendInput(req.params.id, input);
   if (!result.success) {
     return res.status(400).json({ success: false, error: result.error });
@@ -532,7 +659,8 @@ app.post('/api/terminal/sessions/:id/input', (req, res) => {
 
 // DELETE /api/terminal/sessions/:id - Terminate session
 app.delete('/api/terminal/sessions/:id', (req, res) => {
-  const terminalManager = agent.getToolExecutor().getTerminalManager();
+  const terminalManager = findTerminalManager(req.params.id);
+  if (!terminalManager) return res.status(404).json({ success: false, error: 'Terminal session not found.' });
   const result = terminalManager.terminateSession(req.params.id);
   if (!result.success) {
     return res.status(404).json({ success: false, error: result.error });
@@ -563,7 +691,9 @@ app.post('/api/mcp/toggle-global', (req, res) => {
     return res.status(400).json({ success: false, error: 'enabled (boolean) is required.' });
   }
   const mcpManager = agent.getToolExecutor().getMcpManager();
-  mcpManager.setGlobalEnabled(enabled);
+  for (const { engine } of chatRuntimes.values()) {
+    engine.getToolExecutor().getMcpManager().setGlobalEnabled(enabled);
+  }
   res.json({
     success: true,
     mcpEnabled: mcpManager.isGlobalEnabled(),
@@ -582,6 +712,9 @@ app.post('/api/mcp/toggle-server', async (req, res) => {
 
     const mcpManager = agent.getToolExecutor().getMcpManager();
     const toggleRes = await mcpManager.toggleServer(name, enabled);
+    await Promise.all([...chatRuntimes.values()]
+      .filter(({ engine }) => engine !== agent)
+      .map(({ engine }) => engine.loadMcpConfig().catch(() => undefined)));
     const updatedRaw = await mcpManager.getRawConfigContent();
 
     res.json({
@@ -602,7 +735,8 @@ app.post('/api/mcp/toggle-server', async (req, res) => {
 app.post('/api/mcp/reload', async (req, res) => {
   try {
     const { configPath } = req.body || {};
-    const result = await agent.loadMcpConfig(configPath);
+    const reloadResults = await Promise.all([...chatRuntimes.values()].map(({ engine }) => engine.loadMcpConfig(configPath)));
+    const result = reloadResults.find((entry) => !entry.success) || reloadResults[0];
     const mcpManager = agent.getToolExecutor().getMcpManager();
     const rawConfig = await mcpManager.getRawConfigContent();
     res.json({
@@ -628,6 +762,9 @@ app.post('/api/mcp/config', async (req, res) => {
     }
     const mcpManager = agent.getToolExecutor().getMcpManager();
     const saveRes = await mcpManager.saveRawConfig(rawConfig);
+    await Promise.all([...chatRuntimes.values()]
+      .filter(({ engine }) => engine !== agent)
+      .map(({ engine }) => engine.loadMcpConfig().catch(() => undefined)));
     const updatedRaw = await mcpManager.getRawConfigContent();
     res.json({
       success: saveRes.success,
@@ -650,7 +787,9 @@ app.post('/api/mcp/toggle-tool', (req, res) => {
     return res.status(400).json({ success: false, error: 'name (string) and enabled (boolean) are required.' });
   }
   const mcpManager = agent.getToolExecutor().getMcpManager();
-  mcpManager.toggleTool(name, enabled);
+  for (const { engine } of chatRuntimes.values()) {
+    engine.getToolExecutor().getMcpManager().toggleTool(name, enabled);
+  }
   res.json({
     success: true,
     allToolDetails: mcpManager.getAllToolDetails(),
@@ -660,49 +799,77 @@ app.post('/api/mcp/toggle-tool', (req, res) => {
 
 // POST /api/clear - Clear chat history context & terminal sessions
 app.post('/api/clear', (req, res) => {
-  agent.resetChat();
-  const terminalManager = agent.getToolExecutor().getTerminalManager();
+  const sessionId = typeof req.body?.sessionId === 'string' ? req.body.sessionId : chatSessions.getActiveId();
+  const session = chatSessions.getSession(sessionId);
+  if (!session) return res.status(404).json({ success: false, error: 'Chat session not found.' });
+  if (activeGenerationControllers.has(sessionId)) return res.status(409).json({ success: false, error: 'Cancel this chat generation first.' });
+  const sessionAgent = getChatRuntime(sessionId).engine;
+  sessionAgent.resetChat();
+  saveChatSession(sessionId, sessionAgent);
+  const terminalManager = sessionAgent.getToolExecutor().getTerminalManager();
   terminalManager.clearAllSessions();
   broadcastTerminalSessions();
   res.json({
     success: true,
-    context: agent.getContextManager().getContextInfo(),
+    context: sessionAgent.getContextManager().getContextInfo(),
   });
 });
 
 // POST /api/chat/rewind - Rewind context to a specific prompt message ID
 app.post('/api/chat/rewind', (req, res) => {
-  const { messageId } = req.body || {};
+  const { messageId, sessionId } = req.body || {};
   if (typeof messageId !== 'string') {
     return res.status(400).json({ success: false, error: 'messageId string is required.' });
   }
-  const result = agent.rewindToMessage(messageId);
+  const session = typeof sessionId === 'string' ? chatSessions.getSession(sessionId) : undefined;
+  if (!session) return res.status(404).json({ success: false, error: 'Chat session not found.' });
+  if (activeGenerationControllers.has(sessionId)) return res.status(409).json({ success: false, error: 'Cancel this chat generation first.' });
+  const sessionAgent = getChatRuntime(sessionId).engine;
+  const result = sessionAgent.rewindToMessage(messageId);
   if (!result.success) {
     return res.status(404).json({ success: false, error: 'Message not found in context.' });
   }
+  saveChatSession(sessionId, sessionAgent);
   res.json({
     success: true,
     rewoundMessage: result.rewoundMessage,
-    context: agent.getContextManager().getContextInfo(),
+    context: sessionAgent.getContextManager().getContextInfo(),
   });
 });
 
 // POST /api/chat/compact - Compact conversation history into a structured summary
-app.post('/api/chat/compact', async (_req, res) => {
+app.post('/api/chat/compact', async (req, res) => {
+  let compactController: AbortController | null = null;
+  let compactSessionId = '';
   try {
-    const result = await agent.compactContext();
+    const sessionId = typeof req.body?.sessionId === 'string' ? req.body.sessionId : '';
+    const session = chatSessions.getSession(sessionId);
+    if (!session) return res.status(404).json({ success: false, error: 'Chat session not found.' });
+    if (activeGenerationControllers.has(sessionId)) return res.status(409).json({ success: false, error: 'This chat is currently generating.' });
+    compactController = new AbortController();
+    compactSessionId = sessionId;
+    activeGenerationControllers.set(sessionId, compactController);
+    const sessionRuntime = getChatRuntime(sessionId);
+    await sessionRuntime.ready;
+    const sessionAgent = sessionRuntime.engine;
+    const result = await sessionAgent.compactContext();
     if (!result.success) {
       return res.status(400).json({ success: false, error: result.reason || 'Context cannot be compacted.' });
     }
+    saveChatSession(sessionId, sessionAgent);
     res.json({
       success: true,
       summary: result.summary,
       message: result.message,
       context: result.context,
-      messages: agent.getContextManager().getMessages(),
+      messages: sessionAgent.getContextManager().getMessages(),
     });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
+  } finally {
+    if (compactController && activeGenerationControllers.get(compactSessionId) === compactController) {
+      activeGenerationControllers.delete(compactSessionId);
+    }
   }
 });
 
@@ -727,10 +894,11 @@ app.post('/api/context/pruning', (req, res) => {
 
 // POST /api/chat/tool-approval - Approve or reject a pending tool execution
 app.post('/api/chat/tool-approval', (req, res) => {
-  const { decision, reason } = req.body as { decision: 'approve' | 'reject'; reason?: string };
-  if (pendingApprovalResolve) {
+  const { decision, reason, sessionId } = req.body as { decision: 'approve' | 'reject'; reason?: string; sessionId?: string };
+  const pendingApprovalResolve = typeof sessionId === 'string' ? pendingApprovalResolves.get(sessionId) : undefined;
+  if (pendingApprovalResolve && sessionId) {
     pendingApprovalResolve({ decision, reason });
-    pendingApprovalResolve = null;
+    pendingApprovalResolves.delete(sessionId);
     res.json({ success: true });
   } else {
     res.status(400).json({ success: false, error: 'No pending approval.' });
@@ -750,13 +918,13 @@ app.post('/api/chat/tool-settings', (req, res) => {
     allowedCommandsState = allowedCommands.map((c) => String(c).trim()).filter(Boolean);
   }
   if (typeof maxLoops === 'number' && maxLoops >= 0 && maxLoops <= 50) {
-    agent.updateConfig({ maxLoops });
+    for (const { engine } of chatRuntimes.values()) engine.updateConfig({ maxLoops });
   }
   if (typeof enableThinking === 'boolean') {
-    agent.updateConfig({ enableThinking });
+    for (const { engine } of chatRuntimes.values()) engine.updateConfig({ enableThinking });
   }
   if (complexityProfile === 'simple' || complexityProfile === 'medium' || complexityProfile === 'advanced') {
-    agent.updateConfig({ complexityProfile });
+    for (const { engine } of chatRuntimes.values()) engine.updateConfig({ complexityProfile });
   }
 
   savePersistedConfig({
@@ -779,22 +947,32 @@ app.post('/api/chat/tool-settings', (req, res) => {
 });
 
 // POST /api/chat/cancel - Abort the active Ollama generation
-app.post('/api/chat/cancel', (_req, res) => {
+app.post('/api/chat/cancel', (req, res) => {
+  const sessionId = typeof req.body?.sessionId === 'string' ? req.body.sessionId : '';
+  const activeGenerationController = activeGenerationControllers.get(sessionId);
   if (!activeGenerationController) {
     return res.status(409).json({ success: false, error: 'No active generation.' });
   }
 
   activeGenerationController.abort();
+  const pendingApprovalResolve = pendingApprovalResolves.get(sessionId);
   if (pendingApprovalResolve) {
     pendingApprovalResolve({ decision: 'reject', reason: 'Generation cancelled by user' });
-    pendingApprovalResolve = null;
+    pendingApprovalResolves.delete(sessionId);
   }
   res.json({ success: true });
 });
 
 // POST /api/chat - Stream chat completion via Server-Sent Events (SSE)
 app.post('/api/chat', async (req, res) => {
-  const { message, attachments = [], imageAttachments = [] } = req.body;
+  const { message, sessionId, attachments = [], imageAttachments = [] } = req.body;
+
+  if (typeof sessionId !== 'string' || !chatSessions.getSession(sessionId)) {
+    return res.status(404).json({ error: 'A valid chat session is required.' });
+  }
+  if (activeGenerationControllers.has(sessionId)) {
+    return res.status(409).json({ error: 'This chat is already generating.' });
+  }
 
   if (!message || typeof message !== 'string') {
     return res.status(400).json({ error: 'Field "message" is required.' });
@@ -828,6 +1006,17 @@ app.post('/api/chat', async (req, res) => {
     return res.status(400).json({ error: 'Invalid attachment or attachment size limit exceeded (512 KB each, 1 MB total).' });
   }
 
+  const generationController = new AbortController();
+  activeGenerationControllers.set(sessionId, generationController);
+  const sessionRuntime = getChatRuntime(sessionId);
+  try {
+    await sessionRuntime.ready;
+  } catch (err: any) {
+    activeGenerationControllers.delete(sessionId);
+    return res.status(500).json({ error: err.message });
+  }
+  const sessionAgent = sessionRuntime.engine;
+
   const modelMessage = attachments.length
     ? `${message}\n\nThe user attached the following text files. Use their contents to answer the request.\n\n${attachments
         .map((file: any) => `<attached_file name=${JSON.stringify(file.name)}>\n${file.content}\n</attached_file>`)
@@ -847,8 +1036,9 @@ app.post('/api/chat', async (req, res) => {
   if (message.trim().toLowerCase() === '/compact') {
     try {
       sendEvent('chunk', { chunk: '⚡ Compacting conversation context with Ollama...' });
-      const compactRes = await agent.compactContext();
+      const compactRes = await sessionAgent.compactContext();
       if (compactRes.success && compactRes.message) {
+        saveChatSession(sessionId, sessionAgent);
         sendEvent('message_added', compactRes.message);
         sendEvent('context_update', compactRes.context);
         sendEvent('done', {
@@ -860,23 +1050,24 @@ app.post('/api/chat', async (req, res) => {
       }
     } catch (err: any) {
       sendEvent('error', { error: err.message });
+    } finally {
+      if (activeGenerationControllers.get(sessionId) === generationController) activeGenerationControllers.delete(sessionId);
     }
     res.end();
     return;
   }
-  const generationController = new AbortController();
-  activeGenerationController = generationController;
   res.on('close', () => {
-    if (res.writableEnded || activeGenerationController !== generationController) return;
+    if (res.writableEnded || activeGenerationControllers.get(sessionId) !== generationController) return;
     generationController.abort();
+    const pendingApprovalResolve = pendingApprovalResolves.get(sessionId);
     if (pendingApprovalResolve) {
       pendingApprovalResolve({ decision: 'reject', reason: 'Client disconnected' });
-      pendingApprovalResolve = null;
+      pendingApprovalResolves.delete(sessionId);
     }
   });
 
   // Intercept mutating tools to pause & ask for approval when required
-  const executor = agent.getToolExecutor();
+  const executor = sessionAgent.getToolExecutor();
   const originalExecuteCommand = executor.executeCommand.bind(executor);
   const originalExecuteTool = executor.executeTool.bind(executor);
 
@@ -888,7 +1079,7 @@ app.post('/api/chat', async (req, res) => {
     ) {
       sendEvent('tool_approval_required', { name, args });
       const { decision, reason } = await new Promise<ApprovalDecisionPayload>((resolve) => {
-        pendingApprovalResolve = resolve;
+        pendingApprovalResolves.set(sessionId, resolve);
       });
       if (decision === 'reject') {
         const msg = reason ? `Terminal session rejected by user: "${reason}"` : 'Terminal session execution rejected by user in Web UI.';
@@ -909,7 +1100,7 @@ app.post('/api/chat', async (req, res) => {
       }
       sendEvent('tool_approval_required', { name, args, diff });
       const { decision, reason } = await new Promise<ApprovalDecisionPayload>((resolve) => {
-        pendingApprovalResolve = resolve;
+        pendingApprovalResolves.set(sessionId, resolve);
       });
       if (decision === 'reject') {
         const msg = reason ? `File edit rejected by user: "${reason}"` : 'File edit rejected by user in Web UI.';
@@ -929,7 +1120,7 @@ app.post('/api/chat', async (req, res) => {
       sendEvent('tool_approval_required', { name: 'execute_command', args: { command } });
       // Wait for UI approval
       const { decision, reason } = await new Promise<ApprovalDecisionPayload>((resolve) => {
-        pendingApprovalResolve = resolve;
+        pendingApprovalResolves.set(sessionId, resolve);
       });
       if (decision === 'reject') {
         const msg = reason ? `Execution rejected by user: "${reason}"` : 'Execution cancelled by user in Web UI.';
@@ -947,7 +1138,7 @@ app.post('/api/chat', async (req, res) => {
   };
 
   try {
-    const finalContent = await agent.sendMessage(modelMessage, {
+    const finalContent = await sessionAgent.sendMessage(modelMessage, {
       userDisplayContent: message,
       userAttachments: attachments,
       userImages: rawImagesBase64,
@@ -973,7 +1164,7 @@ app.post('/api/chat', async (req, res) => {
       signal: generationController.signal,
     });
 
-    sendEvent('context_update', agent.getContextManager().getContextInfo());
+    sendEvent('context_update', sessionAgent.getContextManager().getContextInfo());
     sendEvent('done', { content: finalContent });
   } catch (err: any) {
     if (err?.name === 'AbortError' || generationController.signal.aborted) {
@@ -985,10 +1176,10 @@ app.post('/api/chat', async (req, res) => {
     // Restore original executor
     executor.executeTool = originalExecuteTool;
     executor.executeCommand = originalExecuteCommand;
-    pendingApprovalResolve = null;
-    if (activeGenerationController === generationController) {
-      activeGenerationController = null;
-    }
+    pendingApprovalResolves.delete(sessionId);
+    if (activeGenerationControllers.get(sessionId) === generationController) activeGenerationControllers.delete(sessionId);
+    saveChatSession(sessionId, sessionAgent);
+    io.emit('chat:sessions', { sessions: chatSessions.list() });
     res.end();
   }
 });
