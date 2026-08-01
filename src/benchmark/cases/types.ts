@@ -49,7 +49,20 @@ export interface BenchmarkTestCase extends BenchmarkTestCaseDefinition {
   evaluationCriteria: string;
 }
 
-export function defineBenchmarkSuite(
+export type BenchmarkDefinitionType = 'preset' | 'custom';
+
+export interface BenchmarkDefinition {
+  id: string;
+  name: string;
+  description: string;
+  type: BenchmarkDefinitionType;
+  version: number;
+  testIds: string[];
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export function defineBenchmarkCases(
   definitions: readonly BenchmarkTestCaseDefinition[],
 ): readonly BenchmarkTestCaseDefinition[] {
   return definitions;

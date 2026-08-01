@@ -1,4 +1,5 @@
 import type { ContextPruningConfig } from '../core/types.js';
+import type { BenchmarkDefinitionType } from './cases/types.js';
 
 export type VerificationStrategy =
   | 'script'
@@ -115,6 +116,7 @@ export interface TestResultTrace {
 }
 
 export interface BenchmarkReport {
+  benchmark: BenchmarkSnapshot;
   timestamp: number;
   runDate: string;
   model: string;
@@ -134,8 +136,17 @@ export interface BenchmarkReport {
   results: TestResultTrace[];
 }
 
+export interface BenchmarkSnapshot {
+  definitionId: string;
+  definitionName: string;
+  definitionType: BenchmarkDefinitionType | 'ad_hoc';
+  definitionVersion: number;
+  testIds: string[];
+  suiteHash: string;
+}
+
 export interface BenchmarkRunBundle {
-  schemaVersion: 2;
+  schemaVersion: 1;
   runId: string;
   runName?: string;
   runDate: string;
@@ -153,6 +164,7 @@ export interface SavedBenchmarkRun {
   htmlPath: string;
   model: string;
   modelConfig: BenchmarkRunBundle['modelConfig'];
+  benchmark: BenchmarkSnapshot;
   totalTests: number;
   passCount: number;
   failCount: number;

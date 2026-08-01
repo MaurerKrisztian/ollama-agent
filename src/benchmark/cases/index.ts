@@ -1,10 +1,10 @@
 import { describeBenchmarkOutcome } from './describeOutcome.js';
-import { DEFAULT_BENCHMARK_SUITE } from './suites/default.js';
+import { DEFAULT_BENCHMARK_CASES } from './suites/default.js';
 import type { BenchmarkTestCase, BenchmarkTestCaseDefinition } from './types.js';
 
 // Register new suites here. Keeping registration explicit makes test ordering stable.
-const BENCHMARK_SUITES: readonly (readonly BenchmarkTestCaseDefinition[])[] = [
-  DEFAULT_BENCHMARK_SUITE,
+const BENCHMARK_CASE_GROUPS: readonly (readonly BenchmarkTestCaseDefinition[])[] = [
+  DEFAULT_BENCHMARK_CASES,
 ];
 
 function buildBenchmarkCatalog(
@@ -24,8 +24,8 @@ function buildBenchmarkCatalog(
   });
 }
 
-export const BENCHMARK_TEST_CASES = buildBenchmarkCatalog(BENCHMARK_SUITES);
+export const BENCHMARK_TEST_CASES = buildBenchmarkCatalog(BENCHMARK_CASE_GROUPS);
 
 export { describeBenchmarkOutcome } from './describeOutcome.js';
-export { defineBenchmarkSuite } from './types.js';
-export type { BenchmarkCategory, BenchmarkTestCase, BenchmarkTestCaseDefinition } from './types.js';
+export { defineBenchmarkCases } from './types.js';
+export type { BenchmarkCategory, BenchmarkDefinition, BenchmarkDefinitionType, BenchmarkTestCase, BenchmarkTestCaseDefinition } from './types.js';

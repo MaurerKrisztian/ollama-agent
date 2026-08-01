@@ -7,8 +7,9 @@ benchmark/
 ├── cases/                   # Scenario definitions and the suite registry
 │   ├── suites/              # One module per benchmark suite
 │   ├── describeOutcome.ts   # Generates user-facing pass criteria
-│   ├── index.ts             # Registers suites and builds the catalog
-│   └── types.ts             # Case schema and defineBenchmarkSuite helper
+│   ├── benchmarks.ts        # Quick/comprehensive preset definitions
+│   ├── index.ts             # Registers case groups and builds the catalog
+│   └── types.ts             # Test-case and benchmark-definition schemas
 ├── evaluation/              # Outcome verifiers
 ├── fixtures/                # Disposable workspace setup
 ├── runtime/                 # Docker runner and container entry point
@@ -26,9 +27,9 @@ benchmark/
 Minimal suite module:
 
 ```ts
-import { defineBenchmarkSuite } from '../types.js';
+import { defineBenchmarkCases } from '../types.js';
 
-export const MY_BENCHMARK_SUITE = defineBenchmarkSuite([
+export const MY_BENCHMARK_CASES = defineBenchmarkCases([
   {
     id: 'test_read_service_version',
     name: 'Read service version',
@@ -47,6 +48,19 @@ define at least one observable verifier, such as `expectedResponseSubstrings`,
 `expectedFileJson`, or `verificationScript`.
 
 IDs must be unique across all registered suites. The registry checks this at startup.
+
+## Benchmark definitions
+
+A benchmark definition is a named, ordered selection of existing test IDs. The Web UI
+ships with two immutable definitions: **Quick Benchmark**, which contains one
+representative case for every category, and **Comprehensive Benchmark**, which contains
+the complete catalog. Custom definitions can be created, edited, and deleted in the
+runner. They are persisted in `benchmark_runs/definitions.json` and are independent of
+saved run reports.
+
+Each completed report contains a snapshot of the definition name, version, test IDs,
+and suite hash. Rankings are scoped to a matching suite hash, and the UI prevents
+per-test comparisons across different test selections.
 
 ## Reliability and timing
 
@@ -75,7 +89,7 @@ benchmark_runs/
     └── index.html    # Self-contained report; no server or external assets required
 ```
 
-`report.json` uses the version 2 `BenchmarkRunBundle` schema from `benchmark/types.ts` and
+`report.json` uses the current `BenchmarkRunBundle` schema from `benchmark/types.ts` and
 includes `schemaVersion`, `runId`, the optional friendly `runName`, an ISO `runDate`, the effective `modelConfig`,
 and the complete benchmark report and traces. The runner's **Compare & top list**
 tab discovers these bundles from the selected output directory.

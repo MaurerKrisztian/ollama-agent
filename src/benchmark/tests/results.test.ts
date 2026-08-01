@@ -52,6 +52,14 @@ const trace: TestResultTrace = {
 };
 
 const report: BenchmarkReport = {
+  benchmark: {
+    definitionId: 'portable',
+    definitionName: 'Portable benchmark',
+    definitionType: 'custom',
+    definitionVersion: 1,
+    testIds: [trace.testId],
+    suiteHash: 'fnv1a-test',
+  },
   timestamp: Date.parse('2026-08-01T12:34:56.000Z'),
   runDate: '2026-08-01T12:34:56.000Z',
   model: 'test/model:1',
@@ -84,11 +92,12 @@ test('benchmark reports save as unique, discoverable JSON and standalone HTML bu
     assert.equal(first.runDate, report.runDate);
 
     const bundle = JSON.parse(await fs.readFile(first.reportPath, 'utf8'));
-    assert.equal(bundle.schemaVersion, 2);
+    assert.equal(bundle.schemaVersion, 1);
     assert.equal(bundle.runName, 'My comparison run');
     assert.equal(bundle.modelConfig.temperature, 0.25);
     assert.equal(bundle.modelConfig.systemPrompt, trace.agentConfig.systemPrompt);
     assert.equal(bundle.report.results[0].testId, trace.testId);
+    assert.equal(bundle.report.benchmark.definitionName, 'Portable benchmark');
     assert.equal(bundle.report.successRatePercentage, 100);
     assert.equal(bundle.report.comparisonDurationMs, 150);
     assert.deepEqual(bundle.report.timing, timing);
@@ -104,6 +113,7 @@ test('benchmark reports save as unique, discoverable JSON and standalone HTML bu
     assert.equal(discovered[0].accuracyPercentage, 100);
     assert.equal(discovered[0].successRatePercentage, 100);
     assert.equal(discovered[0].comparisonDurationMs, 150);
+    assert.equal(discovered[0].benchmark.suiteHash, 'fnv1a-test');
     assert.deepEqual(discovered[0].results.map((result) => result.testId), [trace.testId]);
 
     assert.equal(await deleteSavedBenchmarkRun(first.runId, outputDirectory), first.directory);

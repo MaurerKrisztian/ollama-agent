@@ -124,7 +124,28 @@ export interface BenchmarkTestCaseInfo {
   evaluationCriteria: string;
 }
 
+interface BenchmarkDefinition {
+  id: string;
+  name: string;
+  description: string;
+  type: 'preset' | 'custom';
+  version: number;
+  testIds: string[];
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+interface BenchmarkSnapshot {
+  definitionId: string;
+  definitionName: string;
+  definitionType: 'preset' | 'custom' | 'ad_hoc';
+  definitionVersion: number;
+  testIds: string[];
+  suiteHash: string;
+}
+
 export interface BenchmarkReport {
+  benchmark: BenchmarkSnapshot;
   timestamp: number;
   runDate: string;
   model: string;
@@ -154,6 +175,7 @@ interface SavedBenchmarkRun {
   htmlPath: string;
   model: string;
   modelConfig: TestResultTrace['agentConfig'];
+  benchmark: BenchmarkSnapshot;
   totalTests: number;
   passCount: number;
   failCount: number;
@@ -268,6 +290,14 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
   const [report, setReport] = useState<BenchmarkReport | null>(null);
   const [liveResults, setLiveResults] = useState<TestResultTrace[]>([]);
   const [testCasesInfo, setTestCasesInfo] = useState<BenchmarkTestCaseInfo[]>([]);
+  const [benchmarkDefinitions, setBenchmarkDefinitions] = useState<BenchmarkDefinition[]>([]);
+  const [selectedBenchmarkId, setSelectedBenchmarkId] = useState('quick');
+  const [editingBenchmarkId, setEditingBenchmarkId] = useState<string | null>(null);
+  const [definitionName, setDefinitionName] = useState('');
+  const [definitionDescription, setDefinitionDescription] = useState('');
+  const [definitionTestIds, setDefinitionTestIds] = useState<string[]>([]);
+  const [definitionSaving, setDefinitionSaving] = useState(false);
+  const [showSelectedBenchmarkTests, setShowSelectedBenchmarkTests] = useState(false);
   const [isRunning, setIsRunning] = useState(false);
   const [isStopping, setIsStopping] = useState(false);
   const [wasStopped, setWasStopped] = useState(false);
@@ -310,7 +340,9 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
       setSelectedRunIds((previous) => {
         const available = new Set<string>((data.runs || []).map((run: SavedBenchmarkRun) => run.runId));
         const retained = previous.filter((id) => available.has(id));
-        return retained.length ? retained : (data.runs || []).slice(0, 2).map((run: SavedBenchmarkRun) => run.runId);
+        if (!retained.length) return (data.runs || []).slice(0, 1).map((run: SavedBenchmarkRun) => run.runId);
+        const firstSuite = (data.runs || []).find((run: SavedBenchmarkRun) => run.runId === retained[0])?.benchmark.suiteHash;
+        return retained.filter((id) => (data.runs || []).find((run: SavedBenchmarkRun) => run.runId === id)?.benchmark.suiteHash === firstSuite);
       });
     } catch (err: any) {
       alert(`Could not load saved benchmarks: ${err.message}`);
@@ -386,6 +418,9 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
       fetch('/api/benchmark/testcases').then((res) => res.json()).then((data) => {
         if (data.testCases) setTestCasesInfo(data.testCases);
       }),
+      fetch('/api/benchmark/definitions').then((res) => res.json()).then((data) => {
+        if (data.definitions) setBenchmarkDefinitions(data.definitions);
+      }),
       loadSavedRuns(),
     ]).catch((err) => console.error('Error initializing benchmark view:', err));
   }, []);
@@ -398,6 +433,11 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
       alert(configError);
       return;
     }
+    const selectedDefinition = benchmarkDefinitions.find((definition) => definition.id === selectedBenchmarkId);
+    if (!selectedDefinition) {
+      alert('Select a benchmark.');
+      return;
+    }
     const controller = new AbortController();
     benchmarkAbortController.current = controller;
     setIsRunning(true);
@@ -405,10 +445,7 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
     setWasStopped(false);
     setReport(null);
     setLiveResults([]);
-    const filteredCount = selectedCategory === 'all'
-      ? testCasesInfo.length
-      : testCasesInfo.filter((t) => t.category === selectedCategory).length;
-    setProgress({ current: 0, completed: 0, total: filteredCount || 1 });
+    setProgress({ current: 0, completed: 0, total: selectedDefinition.testIds.length });
 
     try {
       const response = await fetch('/api/benchmark/run-stream', {
@@ -418,8 +455,8 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
           ...benchmarkRequestConfig(),
           saveResults,
           runName,
+          benchmarkId: selectedDefinition.id,
           ...(outputLocationMode === 'custom' && outputDirectory.trim() ? { outputDirectory: outputDirectory.trim() } : {}),
-          ...(selectedCategory !== 'all' ? { category: selectedCategory } : {}),
         }),
         signal: controller.signal,
       });
@@ -533,6 +570,79 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
     }
   };
 
+  const reloadBenchmarkDefinitions = async (selectId?: string) => {
+    const response = await fetch('/api/benchmark/definitions');
+    const data = await response.json();
+    if (!response.ok || !data.success) throw new Error(data.error || 'Could not load benchmarks.');
+    setBenchmarkDefinitions(data.definitions);
+    if (selectId) setSelectedBenchmarkId(selectId);
+  };
+
+  const beginCreateBenchmark = () => {
+    setShowSelectedBenchmarkTests(false);
+    setEditingBenchmarkId('new');
+    setDefinitionName('');
+    setDefinitionDescription('');
+    setDefinitionTestIds([]);
+  };
+
+  const beginEditBenchmark = (definition: BenchmarkDefinition) => {
+    if (definition.type !== 'custom') return;
+    setShowSelectedBenchmarkTests(false);
+    setEditingBenchmarkId(definition.id);
+    setDefinitionName(definition.name);
+    setDefinitionDescription(definition.description);
+    setDefinitionTestIds([...definition.testIds]);
+  };
+
+  const toggleDefinitionTest = (testId: string) => {
+    setDefinitionTestIds((previous) => previous.includes(testId)
+      ? previous.filter((id) => id !== testId)
+      : [...previous, testId]);
+  };
+
+  const saveBenchmarkDefinition = async () => {
+    if (!definitionName.trim()) return alert('Benchmark name is required.');
+    if (!definitionTestIds.length) return alert('Select at least one test.');
+    setDefinitionSaving(true);
+    try {
+      const creating = editingBenchmarkId === 'new';
+      const response = await fetch(
+        creating ? '/api/benchmark/definitions' : `/api/benchmark/definitions/${encodeURIComponent(editingBenchmarkId || '')}`,
+        {
+          method: creating ? 'POST' : 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: definitionName,
+            description: definitionDescription,
+            testIds: definitionTestIds,
+          }),
+        },
+      );
+      const data = await response.json();
+      if (!response.ok || !data.success) throw new Error(data.error || 'Could not save benchmark.');
+      await reloadBenchmarkDefinitions(data.definition.id);
+      setEditingBenchmarkId(null);
+    } catch (err: any) {
+      alert(`Could not save benchmark: ${err.message}`);
+    } finally {
+      setDefinitionSaving(false);
+    }
+  };
+
+  const removeBenchmarkDefinition = async (definition: BenchmarkDefinition) => {
+    if (definition.type !== 'custom' || !window.confirm(`Delete benchmark "${definition.name}"? Saved run reports will not be deleted.`)) return;
+    try {
+      const response = await fetch(`/api/benchmark/definitions/${encodeURIComponent(definition.id)}`, { method: 'DELETE' });
+      const data = await response.json();
+      if (!response.ok || !data.success) throw new Error(data.error || 'Could not delete benchmark.');
+      await reloadBenchmarkDefinitions('quick');
+      setEditingBenchmarkId(null);
+    } catch (err: any) {
+      alert(`Could not delete benchmark: ${err.message}`);
+    }
+  };
+
   const toggleExpand = (testId: string) => {
     setExpandedTestId((prev) => (prev === testId ? null : testId));
   };
@@ -544,9 +654,13 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
   const liveTiming = sumTimings(liveResults);
   const totalDurationMs = completedAttempts ? liveTiming.comparisonMs / completedAttempts : 0;
   const configLocked = isRunning || runningSingleId !== null;
-  const performanceRankById = new Map([...savedRuns]
+  const selectedBenchmark = benchmarkDefinitions.find((definition) => definition.id === selectedBenchmarkId);
+  const runsBySuite = new Map<string, SavedBenchmarkRun[]>();
+  savedRuns.forEach((run) => runsBySuite.set(run.benchmark.suiteHash, [...(runsBySuite.get(run.benchmark.suiteHash) || []), run]));
+  const performanceRankById = new Map<string, number>();
+  runsBySuite.forEach((runs) => runs
     .sort((a, b) => b.successRatePercentage - a.successRatePercentage || a.comparisonDurationMs - b.comparisonDurationMs || b.runDate.localeCompare(a.runDate))
-    .map((run, index) => [run.runId, index + 1]));
+    .forEach((run, index) => performanceRankById.set(run.runId, index + 1)));
   const rankedRuns = [...savedRuns].sort((a, b) => {
     if (runSort.key === 'model') {
       const comparison = a.model.localeCompare(b.model, undefined, { numeric: true, sensitivity: 'base' });
@@ -579,6 +693,12 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
   const configDifferenceCount = comparedConfigRows.filter((row) => row.differs).length;
 
   const toggleComparedRun = (runId: string) => {
+    const run = savedRuns.find((candidate) => candidate.runId === runId);
+    const selectedSuiteHash = savedRuns.find((candidate) => selectedRunIds.includes(candidate.runId))?.benchmark.suiteHash;
+    if (run && selectedSuiteHash && run.benchmark.suiteHash !== selectedSuiteHash) {
+      alert('Only runs of the same benchmark test set can be compared. Clear the current selection first.');
+      return;
+    }
     setSelectedRunIds((previous) => previous.includes(runId)
       ? previous.filter((id) => id !== runId)
       : [...previous, runId]);
@@ -637,10 +757,10 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
             <>
               <div className="glass-panel benchmark-ranking">
                 <div className="benchmark-ranking-header"><Trophy size={19} color="var(--accent-amber)" /><h3>Leaderboard</h3><span>{runSort.key === 'rank' ? 'Success rate first, then comparison time' : `Sorted by ${runSort.key} (${runSort.direction === 'asc' ? 'ascending' : 'descending'})`}</span></div>
-                <div className="benchmark-table-scroll"><table><thead><tr><th>Compare</th><th>Rank</th><th>Name</th><th><button className={runSort.key === 'model' ? 'benchmark-sort-active' : ''} onClick={() => toggleRunSort('model')}>Model <span>{sortIndicator('model')}</span></button></th><th>Run date</th><th>Score</th><th>Passed</th><th><button className={runSort.key === 'duration' ? 'benchmark-sort-active' : ''} onClick={() => toggleRunSort('duration')}>Duration <span>{sortIndicator('duration')}</span></button></th><th>Actions</th></tr></thead>
+                <div className="benchmark-table-scroll"><table><thead><tr><th>Compare</th><th>Suite rank</th><th>Run label</th><th>Benchmark</th><th><button className={runSort.key === 'model' ? 'benchmark-sort-active' : ''} onClick={() => toggleRunSort('model')}>Model <span>{sortIndicator('model')}</span></button></th><th>Run date</th><th>Score</th><th>Passed</th><th><button className={runSort.key === 'duration' ? 'benchmark-sort-active' : ''} onClick={() => toggleRunSort('duration')}>Duration <span>{sortIndicator('duration')}</span></button></th><th>Actions</th></tr></thead>
                   <tbody>{rankedRuns.map((run) => <tr key={run.runId}>
                     <td><input type="checkbox" checked={selectedRunIds.includes(run.runId)} onChange={() => toggleComparedRun(run.runId)} /></td>
-                    <td className="benchmark-rank">#{performanceRankById.get(run.runId)}</td><td><strong>{run.runName || 'Unnamed'}</strong></td><td><strong>{run.model}</strong><small>{run.runId}</small></td>
+                    <td className="benchmark-rank">#{performanceRankById.get(run.runId)}</td><td><strong>{run.runName || 'Unlabeled'}</strong></td><td><strong>{run.benchmark.definitionName}</strong><small>{run.benchmark.testIds.length} tests · v{run.benchmark.definitionVersion}</small></td><td><strong>{run.model}</strong><small>{run.runId}</small></td>
                     <td>{new Date(run.runDate).toLocaleString()}</td><td><strong className={run.successRatePercentage === 100 ? 'benchmark-pass' : ''}>{run.successRatePercentage}%</strong></td>
                     <td>{run.successfulAttempts}/{run.totalAttempts}</td><td>{formatMs(run.comparisonDurationMs)}</td>
                     <td><div className="benchmark-run-actions"><a href={`/api/benchmark/report?directory=${encodeURIComponent(run.outputDirectory)}&runId=${encodeURIComponent(run.runId)}`} target="_blank" rel="noreferrer">Open HTML</a><button onClick={() => void handleDeleteRun(run)} disabled={deletingRunId === run.runId} title="Delete this saved benchmark">{deletingRunId === run.runId ? <Loader2 size={13} className="spin" /> : <Trash2 size={13} />} Delete</button></div></td>
@@ -725,7 +845,7 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
 
           <button
             onClick={isRunning ? handleStopBenchmarks : handleRunAllBenchmarks}
-            disabled={isStopping || (!isRunning && runningSingleId !== null)}
+            disabled={isStopping || (!isRunning && (runningSingleId !== null || editingBenchmarkId !== null || !selectedBenchmark))}
             style={{
               display: 'flex',
               alignItems: 'center',
@@ -737,7 +857,7 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
               borderRadius: '8px',
               fontSize: '0.9rem',
               fontWeight: 600,
-              cursor: isStopping || (!isRunning && runningSingleId !== null) ? 'not-allowed' : 'pointer',
+              cursor: isStopping || (!isRunning && (runningSingleId !== null || editingBenchmarkId !== null || !selectedBenchmark)) ? 'not-allowed' : 'pointer',
               boxShadow: isRunning ? '0 4px 14px rgba(239, 68, 68, 0.2)' : '0 4px 14px rgba(99, 102, 241, 0.35)',
               transition: 'all 0.2s',
             }}
@@ -748,12 +868,77 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
                 ? isStopping
                   ? 'Stopping…'
                   : `Stop Benchmark (${progress ? `${progress.current}/${progress.total}` : ''})`
-                : selectedCategory === 'all'
-                  ? `Run All Benchmarks (${testCasesInfo.length})`
-                  : `Run Category (${testCasesInfo.filter((t) => t.category === selectedCategory).length})`}
+                : `Run ${selectedBenchmark?.name || 'Benchmark'} (${selectedBenchmark?.testIds.length || 0})`}
             </span>
           </button>
         </div>
+      </div>
+
+      <div className="glass-panel" style={{ padding: '20px', borderRadius: '14px', border: '1px solid rgba(56, 189, 248, 0.28)' }}>
+        <div style={{ display: 'flex', gap: '12px', alignItems: 'end', flexWrap: 'wrap' }}>
+          <label style={{ flex: '1 1 300px', display: 'flex', flexDirection: 'column', gap: '6px', color: 'var(--text-muted)', fontSize: '0.78rem' }}>
+            Benchmark
+            <select value={selectedBenchmarkId} disabled={configLocked || editingBenchmarkId !== null} onChange={(event) => { setSelectedBenchmarkId(event.target.value); setShowSelectedBenchmarkTests(false); }} style={{ padding: '10px', borderRadius: '8px', border: '1px solid var(--border-color)', background: '#111827', color: 'var(--text-main)' }}>
+              {benchmarkDefinitions.map((definition) => <option key={definition.id} value={definition.id}>{definition.name} ({definition.testIds.length} tests)</option>)}
+            </select>
+          </label>
+          <button className="benchmark-secondary-button" disabled={!selectedBenchmark || editingBenchmarkId !== null} onClick={() => setShowSelectedBenchmarkTests((visible) => !visible)}>
+            <FileCode2 size={14} /> {showSelectedBenchmarkTests ? 'Hide test cases' : `View test cases (${selectedBenchmark?.testIds.length || 0})`}
+          </button>
+          <button className="benchmark-secondary-button" disabled={configLocked || editingBenchmarkId !== null} onClick={beginCreateBenchmark}>Create custom</button>
+          {selectedBenchmark?.type === 'custom' && <>
+            <button className="benchmark-secondary-button" disabled={configLocked || editingBenchmarkId !== null} onClick={() => beginEditBenchmark(selectedBenchmark)}>Edit</button>
+            <button className="benchmark-secondary-button" disabled={configLocked || editingBenchmarkId !== null} onClick={() => void removeBenchmarkDefinition(selectedBenchmark)}><Trash2 size={14} /> Delete</button>
+          </>}
+        </div>
+        {selectedBenchmark && editingBenchmarkId === null && <p style={{ margin: '10px 0 0', color: 'var(--text-muted)', fontSize: '0.82rem' }}>{selectedBenchmark.description} · Version {selectedBenchmark.version}</p>}
+
+        {selectedBenchmark && showSelectedBenchmarkTests && editingBenchmarkId === null && <div style={{ marginTop: '14px', borderTop: '1px solid var(--border-color)', paddingTop: '12px' }}>
+          <div style={{ marginBottom: '9px', color: 'var(--text-muted)', fontSize: '0.78rem' }}>
+            These tests run in the order shown.
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '7px', maxHeight: '360px', overflowY: 'auto' }}>
+            {selectedBenchmark.testIds.map((testId, index) => {
+              const testCase = testCasesInfo.find((candidate) => candidate.id === testId);
+              return <div key={testId} style={{ display: 'flex', alignItems: 'center', gap: '9px', padding: '9px 10px', border: '1px solid var(--border-color)', borderRadius: '8px', background: 'rgba(15,23,42,.55)' }}>
+                <span style={{ minWidth: '22px', color: 'var(--text-dim)', fontSize: '0.72rem', textAlign: 'right' }}>{index + 1}.</span>
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <strong style={{ display: 'block', color: 'var(--text-main)', fontSize: '0.8rem' }}>{testCase?.name || testId}</strong>
+                  <small style={{ color: 'var(--text-dim)' }}>{testCase?.category || 'Missing test'} · {testId}</small>
+                </div>
+                {testCase && <button className="benchmark-secondary-button" onClick={() => setSelectedInfoTest(testCase)} title="View test specification"><Info size={13} /> Info</button>}
+              </div>;
+            })}
+          </div>
+        </div>}
+
+        {editingBenchmarkId !== null && <div style={{ marginTop: '18px', borderTop: '1px solid var(--border-color)', paddingTop: '16px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(220px, 1fr) minmax(280px, 2fr)', gap: '12px' }}>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', color: 'var(--text-muted)', fontSize: '0.78rem' }}>Name
+              <input value={definitionName} maxLength={100} onChange={(event) => setDefinitionName(event.target.value)} placeholder="My benchmark" style={{ padding: '9px 10px', borderRadius: '7px', border: '1px solid var(--border-color)', background: '#111827', color: 'var(--text-main)' }} />
+            </label>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', color: 'var(--text-muted)', fontSize: '0.78rem' }}>Description
+              <input value={definitionDescription} maxLength={500} onChange={(event) => setDefinitionDescription(event.target.value)} placeholder="What this benchmark measures" style={{ padding: '9px 10px', borderRadius: '7px', border: '1px solid var(--border-color)', background: '#111827', color: 'var(--text-main)' }} />
+            </label>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '16px 0 8px' }}>
+            <strong style={{ fontSize: '0.88rem' }}>Selected tests ({definitionTestIds.length}/{testCasesInfo.length})</strong>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button className="benchmark-secondary-button" onClick={() => setDefinitionTestIds(testCasesInfo.map((testCase) => testCase.id))}>Select all</button>
+              <button className="benchmark-secondary-button" onClick={() => setDefinitionTestIds([])}>Clear</button>
+            </div>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '7px', maxHeight: '340px', overflowY: 'auto', padding: '10px', border: '1px solid var(--border-color)', borderRadius: '9px', background: 'rgba(15,23,42,.55)' }}>
+            {testCasesInfo.map((testCase) => <label key={testCase.id} style={{ display: 'flex', alignItems: 'start', gap: '8px', padding: '6px', color: 'var(--text-main)', fontSize: '0.78rem' }}>
+              <input type="checkbox" checked={definitionTestIds.includes(testCase.id)} onChange={() => toggleDefinitionTest(testCase.id)} />
+              <span><strong style={{ display: 'block' }}>{testCase.name}</strong><small style={{ color: 'var(--text-dim)' }}>{testCase.category}</small></span>
+            </label>)}
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'end', gap: '9px', marginTop: '12px' }}>
+            <button className="benchmark-secondary-button" disabled={definitionSaving} onClick={() => setEditingBenchmarkId(null)}>Cancel</button>
+            <button className="benchmark-secondary-button" disabled={definitionSaving} onClick={() => void saveBenchmarkDefinition()}>{definitionSaving ? <Loader2 size={14} className="spin" /> : <Save size={14} />} Save benchmark</button>
+          </div>
+        </div>}
       </div>
 
       <div className="glass-panel" style={{ padding: '20px', borderRadius: '14px', border: '1px solid rgba(99, 102, 241, 0.28)' }}>
@@ -872,7 +1057,7 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
             <input type="checkbox" checked={saveResults} disabled={configLocked} onChange={(event) => setSaveResults(event.target.checked)} /> Save completed suite runs
           </label>
           <label style={{ flex: '1 1 220px', display: 'flex', flexDirection: 'column', gap: '6px', color: 'var(--text-muted)', fontSize: '0.78rem' }}>
-            Benchmark name (optional)
+            Run label (optional)
             <input value={runName} maxLength={100} disabled={configLocked || !saveResults} onChange={(event) => setRunName(event.target.value)} placeholder="e.g. Context pruning experiment" style={{ padding: '9px 10px', borderRadius: '7px', border: '1px solid var(--border-color)', background: '#111827', color: 'var(--text-main)' }} />
           </label>
           <label style={{ flex: '0 1 210px', display: 'flex', flexDirection: 'column', gap: '6px', color: 'var(--text-muted)', fontSize: '0.78rem' }}>

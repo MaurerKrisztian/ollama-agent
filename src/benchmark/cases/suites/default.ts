@@ -1,6 +1,6 @@
-import { defineBenchmarkSuite } from '../types.js';
+import { defineBenchmarkCases } from '../types.js';
 
-export const DEFAULT_BENCHMARK_SUITE = defineBenchmarkSuite([
+export const DEFAULT_BENCHMARK_CASES = defineBenchmarkCases([
   // --- CATEGORY 1: DIRECTORY LISTING ---
   {
     id: 'test_list_root_directory',

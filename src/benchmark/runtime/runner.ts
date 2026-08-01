@@ -7,10 +7,11 @@ import { promisify } from 'util';
 import { AgentEngine } from '../../core/agent.js';
 import type { ChatMessage } from '../../core/types.js';
 import { BENCHMARK_TEST_CASES } from '../cases/index.js';
+import { createBenchmarkSuiteHash } from '../cases/benchmarks.js';
 import type { BenchmarkTestCase } from '../cases/index.js';
 import { evaluateBenchmarkTask } from '../evaluation/evaluators.js';
 import { setupMockEnvironment } from '../fixtures/mockEnvironment.js';
-import type { BenchmarkAgentConfig, BenchmarkReport, BenchmarkTiming, TestResultTrace } from '../types.js';
+import type { BenchmarkAgentConfig, BenchmarkReport, BenchmarkSnapshot, BenchmarkTiming, TestResultTrace } from '../types.js';
 
 export type { BenchmarkReport, TestResultTrace };
 
@@ -379,6 +380,7 @@ export async function runBenchmarkSuite(
   signal?: AbortSignal,
   agentConfig?: BenchmarkAgentConfig,
   attemptsPerCase: number = 3,
+  benchmark?: BenchmarkSnapshot,
 ): Promise<BenchmarkReport> {
   const startTime = Date.now();
   const results: TestResultTrace[] = [];
@@ -404,6 +406,14 @@ export async function runBenchmarkSuite(
   const timing = results.reduce((total, result) => addTiming(total, result.timing), emptyTiming());
   const completedAt = Date.now();
   return {
+    benchmark: benchmark ?? {
+      definitionId: 'ad-hoc',
+      definitionName: 'Ad hoc benchmark',
+      definitionType: 'ad_hoc',
+      definitionVersion: 1,
+      testIds: testCases.map((testCase) => testCase.id),
+      suiteHash: createBenchmarkSuiteHash(testCases.map((testCase) => testCase.id)),
+    },
     timestamp: completedAt, runDate: new Date(completedAt).toISOString(), model: modelName, mockWorkingDir: 'ephemeral Docker workspace (/workspace)',
     totalTests: results.length, passCount, failCount: results.length - passCount,
     accuracyPercentage: totalAttempts ? Math.round((successfulAttempts / totalAttempts) * 100) : 0,

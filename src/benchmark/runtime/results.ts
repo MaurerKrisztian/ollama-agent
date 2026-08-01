@@ -61,7 +61,7 @@ export function createStandaloneBenchmarkHtml(bundle: BenchmarkRunBundle): strin
 <script type="application/json" id="benchmark-data">${jsonForHtml(bundle)}</script><script>
 const b=JSON.parse(document.getElementById('benchmark-data').textContent),r=b.report,score=r.successRatePercentage??r.accuracyPercentage,compare=r.comparisonDurationMs??r.totalDurationMs;
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-document.getElementById('subtitle').textContent=(b.runName?b.runName+' • ':'')+r.model+' • '+new Date(b.runDate).toLocaleString()+' • '+b.runId;
+document.getElementById('subtitle').textContent=r.benchmark.definitionName+' • '+(b.runName?b.runName+' • ':'')+r.model+' • '+new Date(b.runDate).toLocaleString()+' • '+b.runId;
 document.getElementById('cards').innerHTML=[['Success rate',score+'%',score===100?'good':''],['Successful attempts',(r.successfulAttempts??r.passCount)+' / '+(r.totalAttempts??r.totalTests),'good'],['Fully reliable cases',r.passCount+' / '+r.totalTests,r.failCount?'bad':'good'],['Avg comparison time',(compare/1000).toFixed(2)+'s','']].map(x=>'<div class="card"><div class="muted">'+x[0]+'</div><div class="value '+x[2]+'">'+x[1]+'</div></div>').join('');
 document.getElementById('cases').innerHTML=r.results.map(t=>'<article class="case"><div><strong>'+esc(t.testName)+'</strong> <span class="badge">'+esc(t.category)+'</span><div class="muted">'+esc(t.reason)+'</div></div><span class="status '+(t.successRatePercentage===100?'good':'bad')+'">'+(t.successRatePercentage??(t.passed?100:0))+'%</span><span class="muted">'+Math.round(t.durationMs)+'ms compare</span></article>').join('');
 document.getElementById('timing').textContent=JSON.stringify(r.timing??{comparisonMs:compare},null,2);
@@ -81,6 +81,7 @@ function summarize(bundle: BenchmarkRunBundle, directory: string): SavedBenchmar
     htmlPath: path.join(directory, 'index.html'),
     model: report.model,
     modelConfig: bundle.modelConfig,
+    benchmark: report.benchmark,
     totalTests: report.totalTests,
     passCount: report.passCount,
     failCount: report.failCount,
@@ -120,7 +121,7 @@ export async function saveBenchmarkReport(
   const runId = path.basename(directory);
   const effectiveConfig = report.results[0]?.agentConfig;
   const bundle: BenchmarkRunBundle = {
-    schemaVersion: 2,
+    schemaVersion: 1,
     runId,
     ...(normalizedRunName ? { runName: normalizedRunName } : {}),
     runDate,
@@ -152,8 +153,7 @@ export async function listSavedBenchmarkRuns(
     const directory = path.join(root, entry.name);
     try {
       const bundle = JSON.parse(await fs.readFile(path.join(directory, 'report.json'), 'utf8')) as BenchmarkRunBundle;
-      const schemaVersion = Number((bundle as any).schemaVersion);
-      if ((schemaVersion !== 1 && schemaVersion !== 2) || !bundle.report || !bundle.runId || !bundle.runDate) return null;
+      if (bundle.schemaVersion !== 1 || !bundle.report?.benchmark || !bundle.runId || !bundle.runDate) return null;
       return summarize(bundle, directory);
     } catch (_) {
       return null;
@@ -179,8 +179,7 @@ export async function deleteSavedBenchmarkRun(
   } catch (_) {
     throw new Error('Benchmark run not found or its report is invalid.');
   }
-  const schemaVersion = Number((bundle as any).schemaVersion);
-  if ((schemaVersion !== 1 && schemaVersion !== 2) || bundle.runId !== runId) {
+  if (bundle.schemaVersion !== 1 || !bundle.report?.benchmark || bundle.runId !== runId) {
     throw new Error('Refusing to delete a directory that is not the requested benchmark run.');
   }
   await fs.rm(directory, { recursive: true, force: false });

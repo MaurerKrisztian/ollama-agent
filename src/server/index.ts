@@ -8,7 +8,8 @@ import { promisify } from 'node:util';
 import { AgentEngine } from '../core/agent.js';
 import { TOOL_DEFINITIONS } from '../core/tools.js';
 import { BENCHMARK_TEST_CASES } from '../benchmark/cases/index.js';
-import type { BenchmarkTestCase } from '../benchmark/cases/index.js';
+import { createBenchmarkSuiteHash } from '../benchmark/cases/benchmarks.js';
+import type { BenchmarkDefinition, BenchmarkTestCase } from '../benchmark/cases/index.js';
 import { runBenchmarkCase, runBenchmarkSuite } from '../benchmark/runtime/runner.js';
 import {
   DEFAULT_BENCHMARK_OUTPUT_DIR,
@@ -17,7 +18,15 @@ import {
   listSavedBenchmarkRuns,
   saveBenchmarkReport,
 } from '../benchmark/runtime/results.js';
-import type { BenchmarkAgentConfig } from '../benchmark/types.js';
+import {
+  createBenchmarkDefinition,
+  deleteBenchmarkDefinition,
+  getBenchmarkDefinition,
+  listBenchmarkDefinitions,
+  resolveBenchmarkTests,
+  updateBenchmarkDefinition,
+} from '../benchmark/runtime/definitions.js';
+import type { BenchmarkAgentConfig, BenchmarkSnapshot } from '../benchmark/types.js';
 import { isCommandWhitelisted, DEFAULT_COMMAND_WHITELIST } from '../core/commandWhitelist.js';
 import { handleOpenAiChatCompletions, handleOpenAiModels } from './openaiAdapter.js';
 
@@ -900,6 +909,65 @@ app.get('/api/benchmark/testcases', (req, res) => {
   res.json({ testCases: BENCHMARK_TEST_CASES });
 });
 
+app.get('/api/benchmark/definitions', async (_req, res) => {
+  try {
+    res.json({ success: true, definitions: await listBenchmarkDefinitions() });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/benchmark/definitions', async (req, res) => {
+  try {
+    const definition = await createBenchmarkDefinition(req.body);
+    res.status(201).json({ success: true, definition });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+app.put('/api/benchmark/definitions/:id', async (req, res) => {
+  try {
+    const definition = await updateBenchmarkDefinition(req.params.id, req.body);
+    res.json({ success: true, definition });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+app.delete('/api/benchmark/definitions/:id', async (req, res) => {
+  try {
+    await deleteBenchmarkDefinition(req.params.id);
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+const resolveRequestedBenchmark = async (body: Record<string, any>): Promise<{
+  definition: BenchmarkDefinition;
+  tests: BenchmarkTestCase[];
+  snapshot: BenchmarkSnapshot;
+}> => {
+  if (typeof body.benchmarkId !== 'string' || !body.benchmarkId) {
+    throw new Error('Parameter "benchmarkId" is required.');
+  }
+  const definition = await getBenchmarkDefinition(body.benchmarkId);
+  const tests = resolveBenchmarkTests(definition);
+  return {
+    definition,
+    tests,
+    snapshot: {
+      definitionId: definition.id,
+      definitionName: definition.name,
+      definitionType: definition.type,
+      definitionVersion: definition.version,
+      testIds: [...definition.testIds],
+      suiteHash: createBenchmarkSuiteHash(definition.testIds),
+    },
+  };
+};
+
 const parseBenchmarkOutput = (body: Record<string, any>) => ({
   save: body.saveResults !== false,
   runName: typeof body.runName === 'string' ? body.runName.trim().slice(0, 100) : '',
@@ -986,21 +1054,17 @@ const parseBenchmarkAttempts = (value: unknown): number => {
   return attempts;
 };
 
-// POST /api/benchmark/run - Synchronous benchmark run (optional category filter)
+// POST /api/benchmark/run - Synchronous named benchmark run
 app.post('/api/benchmark/run', async (req, res) => {
   const targetModel = req.body.model || agent.getConfig().model;
   const targetHost = req.body.host || agent.getConfig().ollamaHost;
   const benchmarkAgentConfig = parseBenchmarkAgentConfig(req.body.agentConfig);
-  const category = req.body.category as string | undefined;
   const output = parseBenchmarkOutput(req.body);
 
-  const tests: BenchmarkTestCase[] = category
-    ? BENCHMARK_TEST_CASES.filter((t) => t.category === category)
-    : BENCHMARK_TEST_CASES;
-
   try {
+    const { tests, snapshot } = await resolveRequestedBenchmark(req.body);
     const attemptsPerCase = parseBenchmarkAttempts(req.body.attemptsPerCase);
-    const report = await runBenchmarkSuite(targetModel, targetHost, undefined, tests, agent.getOllamaToken(), undefined, undefined, benchmarkAgentConfig, attemptsPerCase);
+    const report = await runBenchmarkSuite(targetModel, targetHost, undefined, tests, agent.getOllamaToken(), undefined, undefined, benchmarkAgentConfig, attemptsPerCase, snapshot);
     const savedRun = output.save
       ? await saveBenchmarkReport(report, output.directory, { ...benchmarkAgentConfig, model: targetModel, ollamaHost: targetHost }, output.runName)
       : undefined;
@@ -1032,17 +1096,19 @@ app.post('/api/benchmark/run-single', async (req, res) => {
   }
 });
 
-// POST /api/benchmark/run-stream - Real-time SSE benchmark stream (optional category filter)
+// POST /api/benchmark/run-stream - Real-time SSE named benchmark stream
 app.post('/api/benchmark/run-stream', async (req, res) => {
   const targetModel = req.body.model || agent.getConfig().model;
   const targetHost = req.body.host || agent.getConfig().ollamaHost;
   const benchmarkAgentConfig = parseBenchmarkAgentConfig(req.body.agentConfig);
-  const category = req.body.category as string | undefined;
   const output = parseBenchmarkOutput(req.body);
-
-  const tests: BenchmarkTestCase[] = category
-    ? BENCHMARK_TEST_CASES.filter((t) => t.category === category)
-    : BENCHMARK_TEST_CASES;
+  let requestedBenchmark;
+  try {
+    requestedBenchmark = await resolveRequestedBenchmark(req.body);
+  } catch (err: any) {
+    return res.status(400).json({ success: false, error: err.message });
+  }
+  const { tests, snapshot } = requestedBenchmark;
 
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
@@ -1078,6 +1144,7 @@ app.post('/api/benchmark/run-stream', async (req, res) => {
       benchmarkController.signal,
       benchmarkAgentConfig,
       attemptsPerCase,
+      snapshot,
     );
 
     let savedRun;
