@@ -150,6 +150,36 @@ npm run dev:client
 
 Then open **http://localhost:5173** in your browser.
 
+### Run the app and Ollama with Docker Compose
+
+The production container serves both the Web UI and API. Compose also starts the
+official Ollama image and persists its models, application configuration, and saved
+benchmark reports.
+
+```bash
+docker compose up --build -d
+docker compose exec ollama ollama pull qwen3.5:9b
+```
+
+Open **http://localhost:3000**. Override the ports or default model when needed:
+
+```bash
+APP_PORT=8080 OLLAMA_PORT=11435 OLLAMA_MODEL=qwen3.5:9b OLLAMA_NUM_PARALLEL=2 docker compose up --build -d
+```
+
+The default Compose file uses CPU inference. For NVIDIA acceleration, install the
+NVIDIA Container Toolkit and start with the included override:
+
+```bash
+docker compose -f compose.yaml -f compose.nvidia.yaml up --build -d
+```
+
+The repository is mounted at `/workspace`, which lets agent tools operate on the
+current project. The Docker socket is mounted so the benchmark runner can launch its
+isolated attempt containers. Access to that socket grants the app container control
+of the host Docker daemon; remove the socket and `.benchmark-tmp` mounts if benchmark
+execution is not required.
+
 ### Run the CLI
 ```bash
 # Interactive REPL
@@ -209,6 +239,7 @@ Options:
   -c, --category <name>    Run one benchmark category
   --test <id-or-number>    Run one benchmark scenario
   --attempts <count>       Reliability attempts per case, 3–10 (default: 3)
+  --parallelism <count>    Concurrent benchmark attempts, 1–10 (default: 1)
   --help                   Show help
 ```
 

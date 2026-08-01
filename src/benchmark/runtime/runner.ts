@@ -340,18 +340,42 @@ export async function runBenchmarkCase(
   agentConfig: BenchmarkAgentConfig | undefined,
   attemptsPerCase: number,
   onAttemptStart?: (attempt: number, total: number) => void,
+  parallelism: number = 1,
 ): Promise<TestResultTrace> {
   if (!Number.isInteger(attemptsPerCase) || attemptsPerCase < 3 || attemptsPerCase > 10) {
     throw new Error('Benchmark attempts per case must be an integer between 3 and 10.');
   }
-  const attempts: TestResultTrace[] = [];
-  for (let attempt = 1; attempt <= attemptsPerCase; attempt++) {
-    signal?.throwIfAborted();
-    onAttemptStart?.(attempt, attemptsPerCase);
-    const trace = await runSingleBenchmarkTest(testCase.id, modelName, ollamaHost, ollamaToken, signal, agentConfig);
-    trace.attemptNumber = attempt;
-    attempts.push(trace);
+  if (!Number.isInteger(parallelism) || parallelism < 1 || parallelism > 10) {
+    throw new Error('Benchmark parallelism must be an integer between 1 and 10.');
   }
+  signal?.throwIfAborted();
+  const attempts = new Array<TestResultTrace>(attemptsPerCase);
+  const attemptController = new AbortController();
+  const attemptSignal = signal
+    ? AbortSignal.any([signal, attemptController.signal])
+    : attemptController.signal;
+  let nextAttempt = 1;
+  let firstError: unknown;
+  const runWorker = async () => {
+    while (nextAttempt <= attemptsPerCase && !attemptSignal.aborted) {
+      const attempt = nextAttempt++;
+      try {
+        attemptSignal.throwIfAborted();
+        onAttemptStart?.(attempt, attemptsPerCase);
+        const trace = await runSingleBenchmarkTest(testCase.id, modelName, ollamaHost, ollamaToken, attemptSignal, agentConfig);
+        trace.attemptNumber = attempt;
+        attempts[attempt - 1] = trace;
+      } catch (error) {
+        if (firstError === undefined) firstError = error;
+        attemptController.abort();
+      }
+    }
+  };
+  await Promise.all(Array.from(
+    { length: Math.min(parallelism, attemptsPerCase) },
+    () => runWorker(),
+  ));
+  if (firstError !== undefined) throw firstError;
   const successfulAttempts = attempts.filter((attempt) => attempt.passed).length;
   const timing = attempts.reduce((total, attempt) => addTiming(total, attempt.timing), emptyTiming());
   const representative = attempts[attempts.length - 1];
@@ -381,6 +405,7 @@ export async function runBenchmarkSuite(
   agentConfig?: BenchmarkAgentConfig,
   attemptsPerCase: number = 3,
   benchmark?: BenchmarkSnapshot,
+  parallelism: number = 1,
 ): Promise<BenchmarkReport> {
   const startTime = Date.now();
   const results: TestResultTrace[] = [];
@@ -396,6 +421,7 @@ export async function runBenchmarkSuite(
       agentConfig,
       attemptsPerCase,
       (attempt) => onTestStart?.(index + 1, testCases.length, { ...testCase, name: `${testCase.name} (attempt ${attempt}/${attemptsPerCase})` }),
+      parallelism,
     );
     results.push(result);
     onProgress?.(index + 1, testCases.length, result);
@@ -419,6 +445,7 @@ export async function runBenchmarkSuite(
     accuracyPercentage: totalAttempts ? Math.round((successfulAttempts / totalAttempts) * 100) : 0,
     totalDurationMs: Date.now() - startTime,
     attemptsPerCase,
+    parallelism,
     totalAttempts,
     successfulAttempts,
     failedAttempts: totalAttempts - successfulAttempts,

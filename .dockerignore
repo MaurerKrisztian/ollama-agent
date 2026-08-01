@@ -4,3 +4,5 @@ dist
 .agents
 .codex
 npm-debug.log*
+benchmark_runs
+.benchmark-tmp

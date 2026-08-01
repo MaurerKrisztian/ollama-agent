@@ -9,8 +9,11 @@
   "scripts": {
     "dev:server": "tsx watch src/server/index.ts",
     "dev:client": "vite --config src/client/vite.config.ts src/client",
+    "build": "npm run build:client && npm run build:server",
     "cli": "tsx src/cli/index.ts",
     "build:client": "vite build --config src/client/vite.config.ts src/client",
+    "build:server": "tsc",
+    "start": "node dist/server/index.js",
     "benchmark:image": "docker build --file Dockerfile.benchmark --tag local-model-chat-benchmark:node20 .",
     "test": "tsx --test \"src/**/*.test.ts\"",
     "typecheck": "tsc --noEmit"

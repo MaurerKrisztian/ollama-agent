@@ -156,6 +156,7 @@ export interface BenchmarkReport {
   accuracyPercentage: number;
   totalDurationMs: number;
   attemptsPerCase: number;
+  parallelism: number;
   totalAttempts: number;
   successfulAttempts: number;
   failedAttempts: number;
@@ -182,6 +183,7 @@ interface SavedBenchmarkRun {
   accuracyPercentage: number;
   totalDurationMs: number;
   attemptsPerCase: number;
+  parallelism: number;
   totalAttempts: number;
   successfulAttempts: number;
   failedAttempts: number;
@@ -229,6 +231,14 @@ const getBenchmarkDefaults = (config: AgentConfig, toolSettings: ToolSettings): 
     webOutputTTLTurns: config.pruningConfig?.webOutputTTLTurns ?? 5,
   },
 });
+
+const formatRunDate = (runDate: string) => new Intl.DateTimeFormat(undefined, {
+  year: 'numeric',
+  month: 'short',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+}).format(new Date(runDate));
 
 const flattenConfig = (value: Record<string, unknown>, prefix = ''): Record<string, unknown> =>
   Object.entries(value).reduce<Record<string, unknown>>((flattened, [key, entry]) => {
@@ -287,6 +297,7 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
   const [benchmarkConfig, setBenchmarkConfig] = useState<BenchmarkFormConfig>(() => getBenchmarkDefaults(currentConfig, toolSettings));
   const [configDirty, setConfigDirty] = useState(false);
   const [attemptsPerCase, setAttemptsPerCase] = useState(3);
+  const [parallelism, setParallelism] = useState(1);
   const [report, setReport] = useState<BenchmarkReport | null>(null);
   const [liveResults, setLiveResults] = useState<TestResultTrace[]>([]);
   const [testCasesInfo, setTestCasesInfo] = useState<BenchmarkTestCaseInfo[]>([]);
@@ -324,7 +335,7 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
   const [savedRun, setSavedRun] = useState<SavedBenchmarkRun | null>(null);
   const [showMatchingConfigs, setShowMatchingConfigs] = useState(false);
   const [deletingRunId, setDeletingRunId] = useState<string | null>(null);
-  const [runSort, setRunSort] = useState<{ key: 'rank' | 'model' | 'duration'; direction: 'asc' | 'desc' }>({ key: 'rank', direction: 'asc' });
+  const [runSort, setRunSort] = useState<{ key: 'rank' | 'model' | 'date' | 'total' | 'average'; direction: 'asc' | 'desc' }>({ key: 'rank', direction: 'asc' });
 
   const loadSavedRuns = async (directory?: string) => {
     setRunsLoading(true);
@@ -380,6 +391,7 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
     model: benchmarkConfig.model,
     host: benchmarkConfig.ollamaHost,
     attemptsPerCase,
+    parallelism,
     agentConfig: {
       temperature: benchmarkConfig.temperature,
       contextWindow: benchmarkConfig.contextWindow,
@@ -404,6 +416,7 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
     if (!Number.isInteger(benchmarkConfig.contextWindow) || benchmarkConfig.contextWindow < 1024) return 'Context window must be an integer of at least 1024.';
     if (!Number.isInteger(benchmarkConfig.maxLoops) || benchmarkConfig.maxLoops < 0 || benchmarkConfig.maxLoops > 50) return 'Maximum tool loops must be an integer between 0 and 50.';
     if (!Number.isInteger(attemptsPerCase) || attemptsPerCase < 3 || attemptsPerCase > 10) return 'Attempts per case must be an integer between 3 and 10.';
+    if (!Number.isInteger(parallelism) || parallelism < 1 || parallelism > 10) return 'Parallelism must be an integer between 1 and 10.';
     if (!benchmarkConfig.systemPrompt.trim()) return 'System prompt cannot be empty.';
     if (!Number.isInteger(benchmarkConfig.pruningConfig.terminalOutputTTLTurns) || benchmarkConfig.pruningConfig.terminalOutputTTLTurns < 0) return 'Terminal output TTL must be a non-negative integer.';
     if (!Number.isInteger(benchmarkConfig.pruningConfig.webOutputTTLTurns) || benchmarkConfig.pruningConfig.webOutputTTLTurns < 0) return 'Web output TTL must be a non-negative integer.';
@@ -666,8 +679,16 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
       const comparison = a.model.localeCompare(b.model, undefined, { numeric: true, sensitivity: 'base' });
       return runSort.direction === 'asc' ? comparison : -comparison;
     }
-    if (runSort.key === 'duration') {
+    if (runSort.key === 'total') {
+      const comparison = a.timing.comparisonMs - b.timing.comparisonMs;
+      return runSort.direction === 'asc' ? comparison : -comparison;
+    }
+    if (runSort.key === 'average') {
       const comparison = a.comparisonDurationMs - b.comparisonDurationMs;
+      return runSort.direction === 'asc' ? comparison : -comparison;
+    }
+    if (runSort.key === 'date') {
+      const comparison = a.runDate.localeCompare(b.runDate);
       return runSort.direction === 'asc' ? comparison : -comparison;
     }
     return b.successRatePercentage - a.successRatePercentage || a.comparisonDurationMs - b.comparisonDurationMs || b.runDate.localeCompare(a.runDate);
@@ -704,13 +725,13 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
       : [...previous, runId]);
   };
 
-  const toggleRunSort = (key: 'model' | 'duration') => {
+  const toggleRunSort = (key: 'model' | 'date' | 'total' | 'average') => {
     setRunSort((previous) => previous.key === key
       ? { key, direction: previous.direction === 'asc' ? 'desc' : 'asc' }
-      : { key, direction: 'asc' });
+      : { key, direction: key === 'date' ? 'desc' : 'asc' });
   };
 
-  const sortIndicator = (key: 'model' | 'duration') =>
+  const sortIndicator = (key: 'model' | 'date' | 'total' | 'average') =>
     runSort.key === key ? (runSort.direction === 'asc' ? '▲' : '▼') : '↕';
 
   const handleDeleteRun = async (run: SavedBenchmarkRun) => {
@@ -757,19 +778,19 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
             <>
               <div className="glass-panel benchmark-ranking">
                 <div className="benchmark-ranking-header"><Trophy size={19} color="var(--accent-amber)" /><h3>Leaderboard</h3><span>{runSort.key === 'rank' ? 'Success rate first, then comparison time' : `Sorted by ${runSort.key} (${runSort.direction === 'asc' ? 'ascending' : 'descending'})`}</span></div>
-                <div className="benchmark-table-scroll"><table><thead><tr><th>Compare</th><th>Suite rank</th><th>Run label</th><th>Benchmark</th><th><button className={runSort.key === 'model' ? 'benchmark-sort-active' : ''} onClick={() => toggleRunSort('model')}>Model <span>{sortIndicator('model')}</span></button></th><th>Run date</th><th>Score</th><th>Passed</th><th><button className={runSort.key === 'duration' ? 'benchmark-sort-active' : ''} onClick={() => toggleRunSort('duration')}>Duration <span>{sortIndicator('duration')}</span></button></th><th>Actions</th></tr></thead>
+                <div className="benchmark-table-scroll"><table><thead><tr><th>Compare</th><th>Suite rank</th><th>Run label</th><th>Benchmark</th><th><button className={runSort.key === 'model' ? 'benchmark-sort-active' : ''} onClick={() => toggleRunSort('model')}>Model <span>{sortIndicator('model')}</span></button></th><th><button className={runSort.key === 'date' ? 'benchmark-sort-active' : ''} onClick={() => toggleRunSort('date')}>Generated <span>{sortIndicator('date')}</span></button></th><th>Score</th><th>Passed</th><th><button className={runSort.key === 'total' ? 'benchmark-sort-active' : ''} onClick={() => toggleRunSort('total')}>Total compare <span>{sortIndicator('total')}</span></button></th><th><button className={runSort.key === 'average' ? 'benchmark-sort-active' : ''} onClick={() => toggleRunSort('average')}>Avg compare <span>{sortIndicator('average')}</span></button></th><th>Actions</th></tr></thead>
                   <tbody>{rankedRuns.map((run) => <tr key={run.runId}>
                     <td><input type="checkbox" checked={selectedRunIds.includes(run.runId)} onChange={() => toggleComparedRun(run.runId)} /></td>
-                    <td className="benchmark-rank">#{performanceRankById.get(run.runId)}</td><td><strong>{run.runName || 'Unlabeled'}</strong></td><td><strong>{run.benchmark.definitionName}</strong><small>{run.benchmark.testIds.length} tests · v{run.benchmark.definitionVersion}</small></td><td><strong>{run.model}</strong><small>{run.runId}</small></td>
-                    <td>{new Date(run.runDate).toLocaleString()}</td><td><strong className={run.successRatePercentage === 100 ? 'benchmark-pass' : ''}>{run.successRatePercentage}%</strong></td>
-                    <td>{run.successfulAttempts}/{run.totalAttempts}</td><td>{formatMs(run.comparisonDurationMs)}</td>
+                    <td className="benchmark-rank">#{performanceRankById.get(run.runId)}</td><td><strong>{run.runName || 'Unlabeled'}</strong></td><td><strong>{run.benchmark.definitionName}</strong><small>{run.benchmark.testIds.length} tests · {run.attemptsPerCase} attempts · parallelism {run.parallelism ?? 1} · v{run.benchmark.definitionVersion}</small></td><td><strong>{run.model}</strong><small>{run.runId}</small></td>
+                    <td>{formatRunDate(run.runDate)}</td><td><strong className={run.successRatePercentage === 100 ? 'benchmark-pass' : ''}>{run.successRatePercentage}%</strong></td>
+                    <td>{run.successfulAttempts}/{run.totalAttempts}</td><td>{formatMs(run.timing.comparisonMs)}</td><td>{formatMs(run.comparisonDurationMs)}</td>
                     <td><div className="benchmark-run-actions"><a href={`/api/benchmark/report?directory=${encodeURIComponent(run.outputDirectory)}&runId=${encodeURIComponent(run.runId)}`} target="_blank" rel="noreferrer">Open HTML</a><button onClick={() => void handleDeleteRun(run)} disabled={deletingRunId === run.runId} title="Delete this saved benchmark">{deletingRunId === run.runId ? <Loader2 size={13} className="spin" /> : <Trash2 size={13} />} Delete</button></div></td>
                   </tr>)}</tbody></table></div>
               </div>
 
               {comparedRuns.length > 0 && <div className="glass-panel benchmark-matrix">
                 <div className="benchmark-ranking-header"><BarChart3 size={19} color="var(--accent-primary)" /><h3>Per-test comparison</h3><span>{comparedRuns.length} selected run{comparedRuns.length === 1 ? '' : 's'}</span></div>
-                <div className="benchmark-table-scroll"><table><thead><tr><th>Test</th>{comparedRuns.map((run) => <th key={run.runId}>{run.runName || run.model}<small>{run.runName ? run.model : 'Unnamed run'}</small><small>{run.successRatePercentage}% success · {formatMs(run.comparisonDurationMs)} compare</small><small>{new Date(run.runDate).toLocaleDateString()}</small></th>)}</tr></thead>
+                <div className="benchmark-table-scroll"><table><thead><tr><th>Test</th>{comparedRuns.map((run) => <th key={run.runId}>{run.runName || run.model}<small>{run.runName ? run.model : 'Unnamed run'}</small><small>{run.successRatePercentage}% success · {formatMs(run.comparisonDurationMs)} compare</small><small>{formatRunDate(run.runDate)}</small></th>)}</tr></thead>
                   <tbody>{comparedTestIds.map((testId) => {
                     const label = comparedRuns.flatMap((run) => run.results).find((result) => result.testId === testId)?.testName || testId;
                     return <tr key={testId}><td><strong>{label}</strong><small>{testId}</small></td>{comparedRuns.map((run) => {
@@ -788,7 +809,7 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
                   <span>Distinct values use different colors.</span>
                   <label><input type="checkbox" checked={showMatchingConfigs} onChange={(event) => setShowMatchingConfigs(event.target.checked)} /> Show matching settings</label>
                 </div>
-                <div className="benchmark-table-scroll"><table className="benchmark-config-table"><thead><tr><th>Setting</th>{comparedRuns.map((run) => <th key={run.runId}>{run.runName || run.model}<small>{run.runName ? run.model : 'Unnamed run'} · {new Date(run.runDate).toLocaleDateString()}</small></th>)}</tr></thead>
+                <div className="benchmark-table-scroll"><table className="benchmark-config-table"><thead><tr><th>Setting</th>{comparedRuns.map((run) => <th key={run.runId}>{run.runName || run.model}<small>{run.runName ? run.model : 'Unnamed run'} · {formatRunDate(run.runDate)}</small></th>)}</tr></thead>
                   <tbody>{comparedConfigRows
                     .filter((row) => showMatchingConfigs || comparedRuns.length < 2 || row.differs)
                     .map(({ field, values, differs }) => {
@@ -979,6 +1000,11 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
           <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', color: 'var(--text-muted)', fontSize: '0.78rem' }}>
             Reliability attempts per case (3–10)
             <input type="number" min="3" max="10" value={attemptsPerCase} disabled={configLocked} onChange={(event) => setAttemptsPerCase(Number(event.target.value))} style={{ padding: '9px 10px', borderRadius: '7px', border: '1px solid var(--border-color)', background: '#111827', color: 'var(--text-main)' }} />
+          </label>
+
+          <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', color: 'var(--text-muted)', fontSize: '0.78rem' }}>
+            Concurrent attempts (1–10)
+            <input type="number" min="1" max="10" value={parallelism} disabled={configLocked} onChange={(event) => setParallelism(Number(event.target.value))} title="1 runs attempts sequentially; higher values start this many isolated containers at once." style={{ padding: '9px 10px', borderRadius: '7px', border: '1px solid var(--border-color)', background: '#111827', color: 'var(--text-main)' }} />
           </label>
 
           <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', color: 'var(--text-muted)', fontSize: '0.78rem' }}>

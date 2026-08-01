@@ -57,7 +57,7 @@ function getInitialPersistedConfig(): {
   let workingDir = process.cwd();
   let ollamaHost = process.env.OLLAMA_HOST || 'http://127.0.0.1:11434';
   let ollamaToken = process.env.OLLAMA_TOKEN;
-  let model = 'qwen3.5:9b';
+  let model = process.env.OLLAMA_MODEL || 'qwen3.5:9b';
   let allowedCommands = [...DEFAULT_COMMAND_WHITELIST];
   let terminalMode: 'confirm' | 'auto' = 'confirm';
   let fileEditMode: 'confirm' | 'auto' = 'confirm';
@@ -97,6 +97,12 @@ function getInitialPersistedConfig(): {
       }
     }
   } catch (_) {}
+
+  // Explicit environment configuration takes precedence over persisted UI settings.
+  if (process.env.WORKING_DIR && fsSync.existsSync(process.env.WORKING_DIR)) workingDir = process.env.WORKING_DIR;
+  if (process.env.OLLAMA_HOST) ollamaHost = process.env.OLLAMA_HOST;
+  if (process.env.OLLAMA_TOKEN !== undefined) ollamaToken = process.env.OLLAMA_TOKEN;
+  if (process.env.OLLAMA_MODEL) model = process.env.OLLAMA_MODEL;
 
   return { workingDir, ollamaHost, ollamaToken, model, allowedCommands, terminalMode, fileEditMode, enableThinking, complexityProfile };
 }
@@ -1137,6 +1143,14 @@ const parseBenchmarkAttempts = (value: unknown): number => {
   return attempts;
 };
 
+const parseBenchmarkParallelism = (value: unknown): number => {
+  const parallelism = typeof value === 'number' ? value : Number(value ?? 1);
+  if (!Number.isInteger(parallelism) || parallelism < 1 || parallelism > 10) {
+    throw new Error('Benchmark parallelism must be an integer between 1 and 10.');
+  }
+  return parallelism;
+};
+
 // POST /api/benchmark/run - Synchronous named benchmark run
 app.post('/api/benchmark/run', async (req, res) => {
   const targetModel = req.body.model || agent.getConfig().model;
@@ -1147,7 +1161,8 @@ app.post('/api/benchmark/run', async (req, res) => {
   try {
     const { tests, snapshot } = await resolveRequestedBenchmark(req.body);
     const attemptsPerCase = parseBenchmarkAttempts(req.body.attemptsPerCase);
-    const report = await runBenchmarkSuite(targetModel, targetHost, undefined, tests, agent.getOllamaToken(), undefined, undefined, benchmarkAgentConfig, attemptsPerCase, snapshot);
+    const parallelism = parseBenchmarkParallelism(req.body.parallelism);
+    const report = await runBenchmarkSuite(targetModel, targetHost, undefined, tests, agent.getOllamaToken(), undefined, undefined, benchmarkAgentConfig, attemptsPerCase, snapshot, parallelism);
     const savedRun = output.save
       ? await saveBenchmarkReport(report, output.directory, { ...benchmarkAgentConfig, model: targetModel, ollamaHost: targetHost }, output.runName)
       : undefined;
@@ -1170,9 +1185,10 @@ app.post('/api/benchmark/run-single', async (req, res) => {
 
   try {
     const attemptsPerCase = parseBenchmarkAttempts(req.body.attemptsPerCase);
+    const parallelism = parseBenchmarkParallelism(req.body.parallelism);
     const testCase = BENCHMARK_TEST_CASES.find((candidate) => candidate.id === testId);
     if (!testCase) return res.status(404).json({ success: false, error: `Test case "${testId}" not found.` });
-    const trace = await runBenchmarkCase(testCase, targetModel, targetHost, agent.getOllamaToken(), undefined, benchmarkAgentConfig, attemptsPerCase);
+    const trace = await runBenchmarkCase(testCase, targetModel, targetHost, agent.getOllamaToken(), undefined, benchmarkAgentConfig, attemptsPerCase, undefined, parallelism);
     res.json({ success: true, trace });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
@@ -1209,6 +1225,7 @@ app.post('/api/benchmark/run-stream', async (req, res) => {
 
   try {
     const attemptsPerCase = parseBenchmarkAttempts(req.body.attemptsPerCase);
+    const parallelism = parseBenchmarkParallelism(req.body.parallelism);
     const report = await runBenchmarkSuite(
       targetModel,
       targetHost,
@@ -1228,6 +1245,7 @@ app.post('/api/benchmark/run-stream', async (req, res) => {
       benchmarkAgentConfig,
       attemptsPerCase,
       snapshot,
+      parallelism,
     );
 
     let savedRun;
@@ -1258,6 +1276,17 @@ app.post('/api/benchmark/run-stream', async (req, res) => {
 // OpenAI API Compatibility Endpoints (for official benchmark CLI harnesses like TerminalBench 2.0 / SWE-bench)
 app.get('/v1/models', (req, res) => handleOpenAiModels(agent, req, res));
 app.post('/v1/chat/completions', (req, res) => handleOpenAiChatCompletions(agent, req, res));
+
+// In production the API server also hosts the built React application.
+const clientDistDirectory = path.resolve(process.env.CLIENT_DIST_DIR || path.join(process.cwd(), 'dist/client'));
+const clientIndexPath = path.join(clientDistDirectory, 'index.html');
+if (fsSync.existsSync(clientIndexPath)) {
+  app.use(express.static(clientDistDirectory));
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api/') || req.path.startsWith('/v1/') || !req.accepts('html')) return next();
+    res.sendFile(clientIndexPath);
+  });
+}
 
 httpServer.listen(PORT, () => {
   console.log(`\n🚀 Server listening on http://localhost:${PORT}`);

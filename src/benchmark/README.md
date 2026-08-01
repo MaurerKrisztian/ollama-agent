@@ -67,6 +67,8 @@ per-test comparisons across different test selections.
 Suite and individual-case runs execute each selected case 3–10 times in independent
 containers (default: 3). The success rate is successful attempts divided by total
 attempts. A case is marked fully reliable only when every configured attempt passes.
+Attempts run sequentially by default. Run parallelism can be set from 1–10 to execute
+that many attempts concurrently in independent containers.
 
 Reports retain image/setup, container startup, model load, prompt evaluation,
 generation, tool execution, verification, and end-to-end wall time. Rankings use

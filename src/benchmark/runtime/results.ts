@@ -88,6 +88,7 @@ function summarize(bundle: BenchmarkRunBundle, directory: string): SavedBenchmar
     accuracyPercentage: report.accuracyPercentage,
     totalDurationMs: report.totalDurationMs,
     attemptsPerCase: report.attemptsPerCase ?? 1,
+    parallelism: report.parallelism ?? 1,
     totalAttempts: report.totalAttempts ?? report.totalTests,
     successfulAttempts: report.successfulAttempts ?? report.passCount,
     failedAttempts: report.failedAttempts ?? report.failCount,

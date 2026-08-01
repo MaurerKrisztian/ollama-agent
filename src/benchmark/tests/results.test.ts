@@ -70,6 +70,7 @@ const report: BenchmarkReport = {
   accuracyPercentage: 100,
   totalDurationMs: 125,
   attemptsPerCase: 1,
+  parallelism: 1,
   totalAttempts: 1,
   successfulAttempts: 1,
   failedAttempts: 0,
@@ -100,6 +101,7 @@ test('benchmark reports save as unique, discoverable JSON and standalone HTML bu
     assert.equal(bundle.report.benchmark.definitionName, 'Portable benchmark');
     assert.equal(bundle.report.successRatePercentage, 100);
     assert.equal(bundle.report.comparisonDurationMs, 150);
+    assert.equal(bundle.report.parallelism, 1);
     assert.deepEqual(bundle.report.timing, timing);
 
     const html = await fs.readFile(first.htmlPath, 'utf8');
@@ -113,6 +115,7 @@ test('benchmark reports save as unique, discoverable JSON and standalone HTML bu
     assert.equal(discovered[0].accuracyPercentage, 100);
     assert.equal(discovered[0].successRatePercentage, 100);
     assert.equal(discovered[0].comparisonDurationMs, 150);
+    assert.equal(discovered[0].parallelism, 1);
     assert.equal(discovered[0].benchmark.suiteHash, 'fnv1a-test');
     assert.deepEqual(discovered[0].results.map((result) => result.testId), [trace.testId]);
 

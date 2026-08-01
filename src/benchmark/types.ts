@@ -127,6 +127,7 @@ export interface BenchmarkReport {
   accuracyPercentage: number;
   totalDurationMs: number;
   attemptsPerCase: number;
+  parallelism: number;
   totalAttempts: number;
   successfulAttempts: number;
   failedAttempts: number;
@@ -171,6 +172,7 @@ export interface SavedBenchmarkRun {
   accuracyPercentage: number;
   totalDurationMs: number;
   attemptsPerCase: number;
+  parallelism: number;
   totalAttempts: number;
   successfulAttempts: number;
   failedAttempts: number;

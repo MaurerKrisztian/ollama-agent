@@ -36,6 +36,7 @@ program
   .option('-c, --category <name>', 'Filter benchmark to a specific category (use with --benchmark)')
   .option('--test <id-or-number>', 'Run one benchmark scenario by test ID or 1-based number')
   .option('--attempts <count>', 'Reliability attempts per benchmark case (3-10)', '3')
+  .option('--parallelism <count>', 'Concurrent benchmark attempts (1-10)', '1')
   .parse(process.argv);
 
 const options = program.opts();
@@ -60,6 +61,10 @@ async function startCli() {
   const benchmarkAttempts = Number(options.attempts);
   if (!Number.isInteger(benchmarkAttempts) || benchmarkAttempts < 3 || benchmarkAttempts > 10) {
     program.error('--attempts must be an integer between 3 and 10.');
+  }
+  const benchmarkParallelism = Number(options.parallelism);
+  if (!Number.isInteger(benchmarkParallelism) || benchmarkParallelism < 1 || benchmarkParallelism > 10) {
+    program.error('--parallelism must be an integer between 1 and 10.');
   }
   const agent = new AgentEngine({
     model: options.model,
@@ -229,7 +234,7 @@ async function startCli() {
       const test = filteredTests[i];
       process.stdout.write(chalk.dim(`[${i + 1}/${filteredTests.length}] ${test.name} ... `));
       try {
-        const result = await runBenchmarkCase(test, options.model, options.host, options.token, undefined, getBenchmarkAgentConfig(), benchmarkAttempts);
+        const result = await runBenchmarkCase(test, options.model, options.host, options.token, undefined, getBenchmarkAgentConfig(), benchmarkAttempts, undefined, benchmarkParallelism);
         successfulAttempts += result.successfulAttempts;
         totalAttempts += result.attemptCount;
         const label = result.successRatePercentage === 100 ? chalk.green('RELIABLE') : chalk.yellow(`${result.successRatePercentage}%`);
@@ -465,7 +470,7 @@ async function startCli() {
             const bt = testsToRun[bi];
             process.stdout.write(chalk.dim(`  [${bi + 1}/${testsToRun.length}] ${bt.name} ... `));
             try {
-              const res = await runBenchmarkCase(bt, currentModel, currentHost, options.token, undefined, getBenchmarkAgentConfig(), benchmarkAttempts);
+              const res = await runBenchmarkCase(bt, currentModel, currentHost, options.token, undefined, getBenchmarkAgentConfig(), benchmarkAttempts, undefined, benchmarkParallelism);
               bSuccessfulAttempts += res.successfulAttempts;
               bTotalAttempts += res.attemptCount;
               const label = res.successRatePercentage === 100 ? chalk.green('RELIABLE') : chalk.yellow(`${res.successRatePercentage}%`);
