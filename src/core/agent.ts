@@ -234,6 +234,10 @@ export class AgentEngine {
     return this.ollamaClient.pullModel(name, onProgress, signal);
   }
 
+  public async unloadModel(name: string): Promise<void> {
+    return this.ollamaClient.unloadModel(name);
+  }
+
   public resetChat(): void {
     this.contextManager.clear();
   }

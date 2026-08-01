@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { X, Cpu, HardDrive, Zap, Info, FileCode, Sliders, MessageSquare, Layers, Loader2 } from 'lucide-react';
-import { OllamaModelInfo, OllamaRunningModelInfo } from '../types';
+import { OllamaModelInfo, OllamaRunningModelInfo, ollamaModelNamesMatch } from '../types';
 
 interface ModelDetailsModalProps {
   isOpen: boolean;
@@ -55,7 +55,9 @@ export const ModelDetailsModal: React.FC<ModelDetailsModalProps> = ({
   if (!isOpen) return null;
 
   const installedInfo = installedModels.find((m) => m.name === activeModelName);
-  const runningInfo = runningModels.find((m) => m.name === activeModelName || m.model === activeModelName);
+  const runningInfo = runningModels.find((m) =>
+    ollamaModelNamesMatch(m.name, activeModelName) || ollamaModelNamesMatch(m.model, activeModelName)
+  );
 
   const diskGb = installedInfo?.size ? (installedInfo.size / (1024 * 1024 * 1024)).toFixed(2) : null;
   const vramGb = runningInfo?.size_vram ? (runningInfo.size_vram / (1024 * 1024 * 1024)).toFixed(2) : null;

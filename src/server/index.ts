@@ -232,6 +232,21 @@ app.post('/api/models/pull', async (req, res) => {
   }
 });
 
+// POST /api/models/unload - Immediately release a model's RAM/VRAM allocation
+app.post('/api/models/unload', async (req, res) => {
+  const model = typeof req.body?.model === 'string' ? req.body.model.trim() : '';
+  if (!model) return res.status(400).json({ success: false, error: 'A model name is required.' });
+
+  try {
+    await agent.unloadModel(model);
+    const runningModels = await agent.getRunningModels();
+    io.emit('models:running', runningModels);
+    res.json({ success: true, model, runningModels });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // GET /api/models/running - Fetch currently loaded models in VRAM
 app.get('/api/models/running', async (req, res) => {
   try {

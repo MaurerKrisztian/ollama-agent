@@ -172,6 +172,26 @@ export class OllamaClient {
     }
   }
 
+  /** Immediately unload a model from Ollama's RAM/VRAM. */
+  public async unloadModel(modelName: string): Promise<void> {
+    try {
+      const res = await fetch(`${this.host}/api/generate`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...this.getHeaders(),
+        },
+        body: JSON.stringify({ model: modelName, keep_alive: 0, stream: false }),
+      });
+      if (!res.ok) {
+        const message = await res.text();
+        throw new Error(`Ollama server returned HTTP ${res.status}${message ? `: ${message}` : ''}`);
+      }
+    } catch (err: any) {
+      throw new Error(`Failed to unload model "${modelName}": ${err.message}`);
+    }
+  }
+
   /**
    * Helper method to parse tool calls from model output text
    * Supports XML tags, Markdown JSON codeblocks, and raw JSON objects

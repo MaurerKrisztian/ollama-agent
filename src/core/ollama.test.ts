@@ -104,3 +104,27 @@ test('pullModel surfaces errors returned inside a progress stream', async () => 
     global.fetch = originalFetch;
   }
 });
+
+test('unloadModel requests an immediate keep-alive expiry', async () => {
+  const originalFetch = global.fetch;
+  let requestUrl = '';
+  let requestInit: RequestInit | undefined;
+  global.fetch = async (input, init) => {
+    requestUrl = String(input);
+    requestInit = init;
+    return new Response('{}', { status: 200 });
+  };
+
+  try {
+    await new OllamaClient('http://ollama.test').unloadModel('phi4-mini:latest');
+    assert.equal(requestUrl, 'http://ollama.test/api/generate');
+    assert.equal(requestInit?.method, 'POST');
+    assert.deepEqual(JSON.parse(String(requestInit?.body)), {
+      model: 'phi4-mini:latest',
+      keep_alive: 0,
+      stream: false,
+    });
+  } finally {
+    global.fetch = originalFetch;
+  }
+});

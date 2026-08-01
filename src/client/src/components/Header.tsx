@@ -15,7 +15,7 @@ import {
   Brain,
   SlidersHorizontal,
 } from 'lucide-react';
-import { AgentConfig, ContextInfo, OllamaModelInfo, OllamaRunningModelInfo, SystemMetrics } from '../types';
+import { AgentConfig, ContextInfo, OllamaModelInfo, OllamaRunningModelInfo, SystemMetrics, ollamaModelNamesMatch } from '../types';
 
 interface HeaderProps {
   config: AgentConfig;
@@ -78,6 +78,17 @@ export const Header: React.FC<HeaderProps> = ({
   activeTerminalCount = 0,
   onOpenTerminalSessions,
 }) => {
+  const headerLoadedModel = runningModels.find((model) =>
+    (ollamaModelNamesMatch(model.name, config.model) || ollamaModelNamesMatch(model.model, config.model)) &&
+    model.size_vram > 0
+  );
+  const modelRuntimeStatus = headerLoadedModel ? 'loaded' : isGenerating ? 'loading' : 'idle';
+  const modelRuntimeLabel = modelRuntimeStatus === 'loaded'
+    ? 'Loaded in VRAM'
+    : modelRuntimeStatus === 'loading'
+      ? 'Loading into VRAM'
+      : 'Idle';
+
   return (
     <header className="glass-panel app-header" style={{ padding: '12px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', zIndex: 10 }}>
       {/* Brand & Logo */}
@@ -179,10 +190,16 @@ export const Header: React.FC<HeaderProps> = ({
         type="button"
         className="header-model-settings-button"
         onClick={onOpenModelSettings}
-        title={`Model settings · ${config.model}`}
+        title={`Model settings · ${config.model} · ${modelRuntimeLabel}`}
       >
         <Cpu size={16} />
-        <span>{config.model}</span>
+        <span className="header-model-name">{config.model}</span>
+        <span
+          className={`header-model-runtime-dot ${modelRuntimeStatus}`}
+          role="status"
+          aria-label={modelRuntimeLabel}
+          title={modelRuntimeLabel}
+        />
         <SlidersHorizontal size={14} />
       </button>
       <div className="header-center-controls" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
@@ -334,7 +351,7 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* VRAM Loaded Indicator Badge */}
         {(() => {
-          const loadedModel = runningModels.find((m) => m.name === config.model || m.model === config.model);
+          const loadedModel = headerLoadedModel;
 
           if (isGenerating && (!loadedModel || loadedModel.size_vram === 0)) {
             return (

@@ -1,6 +1,6 @@
 import React, { useMemo, useRef, useState } from 'react';
-import { AlertCircle, Brain, CheckCircle2, Cpu, Download, Info, Loader2, Search, SlidersHorizontal, X } from 'lucide-react';
-import { AgentConfig, OllamaModelInfo, OllamaRunningModelInfo, SystemMetrics } from '../types';
+import { AlertCircle, Brain, CheckCircle2, Cpu, Download, Info, Loader2, Power, Search, SlidersHorizontal, X } from 'lucide-react';
+import { AgentConfig, OllamaModelInfo, OllamaRunningModelInfo, SystemMetrics, ollamaModelNamesMatch } from '../types';
 
 interface ModelSettingsModalProps {
   isOpen: boolean;
@@ -15,6 +15,7 @@ interface ModelSettingsModalProps {
   onToggleThinking: (enabled: boolean) => void;
   onOpenModelDetails: () => void;
   onModelsChanged: () => Promise<void>;
+  onUnloadModel: (model: string) => Promise<void>;
 }
 
 const SUGGESTED_MODELS = [
@@ -41,6 +42,7 @@ export const ModelSettingsModal: React.FC<ModelSettingsModalProps> = ({
   onToggleThinking,
   onOpenModelDetails,
   onModelsChanged,
+  onUnloadModel,
 }) => {
   const [downloadOpen, setDownloadOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -48,6 +50,8 @@ export const ModelSettingsModal: React.FC<ModelSettingsModalProps> = ({
   const [downloadState, setDownloadState] = useState<'idle' | 'downloading' | 'success' | 'error'>('idle');
   const [downloadStatus, setDownloadStatus] = useState('');
   const [downloadPercent, setDownloadPercent] = useState<number | null>(null);
+  const [unloadState, setUnloadState] = useState<'idle' | 'unloading' | 'success' | 'error'>('idle');
+  const [unloadMessage, setUnloadMessage] = useState('');
   const abortRef = useRef<AbortController | null>(null);
   const installedNames = useMemo(() => new Set(models.flatMap((model) => [model.name, model.name.replace(/:latest$/, '')])), [models]);
   const searchResults = useMemo(() => {
@@ -67,7 +71,9 @@ export const ModelSettingsModal: React.FC<ModelSettingsModalProps> = ({
 
   if (!isOpen) return null;
 
-  const loadedModel = runningModels.find((model) => model.name === config.model || model.model === config.model);
+  const loadedModel = runningModels.find((model) =>
+    ollamaModelNamesMatch(model.name, config.model) || ollamaModelNamesMatch(model.model, config.model)
+  );
   const vramGb = loadedModel?.size_vram
     ? (loadedModel.size_vram / (1024 * 1024 * 1024)).toFixed(2)
     : null;
@@ -132,6 +138,20 @@ export const ModelSettingsModal: React.FC<ModelSettingsModalProps> = ({
     }
   };
 
+  const unloadActiveModel = async () => {
+    if (!loadedModel || unloadState === 'unloading') return;
+    setUnloadState('unloading');
+    setUnloadMessage('');
+    try {
+      await onUnloadModel(loadedModel.name || loadedModel.model || config.model);
+      setUnloadState('success');
+      setUnloadMessage(`${config.model} was unloaded from VRAM.`);
+    } catch (err: any) {
+      setUnloadState('error');
+      setUnloadMessage(err.message || 'Could not unload the model.');
+    }
+  };
+
   return (
     <div className="settings-overlay" onClick={onClose}>
       <div className="glass-panel model-settings-modal animate-fade-in" onClick={(event) => event.stopPropagation()}>
@@ -162,10 +182,26 @@ export const ModelSettingsModal: React.FC<ModelSettingsModalProps> = ({
                 <Download size={15} /> Download
               </button>
             </div>
-            <div className={`model-status ${loadedModel ? 'loaded' : ''}`}>
-              <span />
-              {loadedModel ? `Loaded${vramGb ? ` · ${vramGb} GB VRAM` : ''}` : 'Idle · loads on the next prompt'}
+            <div className="model-status-row">
+              <div className={`model-status ${loadedModel ? 'loaded' : ''}`}>
+                <span />
+                {loadedModel ? `Loaded${vramGb ? ` · ${vramGb} GB VRAM` : ''}` : 'Idle · loads on the next prompt'}
+              </div>
+              {loadedModel && (
+                <button
+                  type="button"
+                  className="model-unload-button"
+                  disabled={unloadState === 'unloading'}
+                  onClick={() => void unloadActiveModel()}
+                >
+                  {unloadState === 'unloading' ? <Loader2 size={14} className="spin" /> : <Power size={14} />}
+                  {unloadState === 'unloading' ? 'Unloading…' : 'Unload VRAM'}
+                </button>
+              )}
             </div>
+            {unloadMessage && (unloadState === 'error' || !loadedModel) && (
+              <p className={`model-unload-message ${unloadState}`}>{unloadMessage}</p>
+            )}
           </section>
 
           {downloadOpen && (
@@ -194,9 +230,7 @@ export const ModelSettingsModal: React.FC<ModelSettingsModalProps> = ({
               </div>
               <div className="model-search-results">
                 {searchResults.map((suggestion) => {
-                  const installedModel = models.find((model) =>
-                    model.name === suggestion.name || model.name.replace(/:latest$/, '') === suggestion.name.replace(/:latest$/, '')
-                  );
+                  const installedModel = models.find((model) => ollamaModelNamesMatch(model.name, suggestion.name));
                   const installed = Boolean(installedModel) || installedNames.has(suggestion.name) || installedNames.has(suggestion.name.replace(/:latest$/, ''));
                   const diskSize = installedModel?.size
                     ? `${(installedModel.size / (1024 ** 3)).toFixed(1)} GB disk`

@@ -105,6 +105,13 @@ export interface OllamaRunningModelInfo {
   };
 }
 
+/** Ollama may report an implicit default tag as `:latest` in /api/ps. */
+export const normalizeOllamaModelName = (name: string): string =>
+  name.trim().toLowerCase().replace(/:latest$/i, '');
+
+export const ollamaModelNamesMatch = (left: string | undefined, right: string | undefined): boolean =>
+  Boolean(left && right && normalizeOllamaModelName(left) === normalizeOllamaModelName(right));
+
 export interface ImageAttachment {
   name: string;
   type: string;

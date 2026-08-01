@@ -13,7 +13,7 @@ import { ModelDetailsModal } from './components/ModelDetailsModal';
 import { ModelSettingsModal } from './components/ModelSettingsModal';
 import { TerminalSessionsModal } from './components/TerminalSessionsModal';
 import { RightTerminalSidebar } from './components/RightTerminalSidebar';
-import { AgentConfig, ChatMessage, ChatSessionSummary, ContextInfo, OllamaModelInfo, OllamaRunningModelInfo, PendingApprovalCall, SystemMetrics, TerminalSessionInfo, TextAttachment, ToolSettings } from './types';
+import { AgentConfig, ChatMessage, ChatSessionSummary, ContextInfo, OllamaModelInfo, OllamaRunningModelInfo, PendingApprovalCall, SystemMetrics, TerminalSessionInfo, TextAttachment, ToolSettings, ollamaModelNamesMatch } from './types';
 
 export const App: React.FC = () => {
   const [activeView, setActiveView] = useState<'chat' | 'benchmark'>('chat');
@@ -83,6 +83,17 @@ export const App: React.FC = () => {
     const data = await response.json();
     if (!response.ok || !data.success) throw new Error(data.error || 'Could not refresh installed models.');
     setModels(data.models || []);
+  };
+
+  const unloadModel = async (model: string) => {
+    const response = await fetch('/api/models/unload', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model }),
+    });
+    const data = await response.json();
+    if (!response.ok || !data.success) throw new Error(data.error || 'Could not unload the model.');
+    setRunningModels(data.runningModels || []);
   };
 
   const fetchTerminalSessions = async () => {
@@ -206,7 +217,7 @@ export const App: React.FC = () => {
 
   const isActiveModelLoaded = runningModels.some(
     (model) =>
-      (model.name === config.model || model.model === config.model) &&
+      (ollamaModelNamesMatch(model.name, config.model) || ollamaModelNamesMatch(model.model, config.model)) &&
       model.size_vram > 0
   );
 
@@ -770,6 +781,7 @@ export const App: React.FC = () => {
         onChangeContextWindow={handleChangeContextWindow}
         onToggleThinking={handleToggleThinking}
         onModelsChanged={refreshModels}
+        onUnloadModel={unloadModel}
         onOpenModelDetails={() => {
           setModelSettingsModalOpen(false);
           setModelDetailsModalOpen(true);
