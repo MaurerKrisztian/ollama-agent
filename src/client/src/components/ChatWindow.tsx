@@ -1623,6 +1623,18 @@ const SLASH_COMMANDS: SlashCommandItem[] = [
     icon: RotateCcw,
   },
   {
+    cmd: '/skills',
+    label: '/skills',
+    description: 'List reusable workspace and bundled skills',
+    icon: Layers,
+  },
+  {
+    cmd: '/skill',
+    label: '/skill',
+    description: 'Run a request with a specific skill',
+    icon: Sparkles,
+  },
+  {
     cmd: '/settings',
     label: '/settings',
     description: 'Open Tool Approval & Safety Settings modal',
@@ -1765,6 +1777,9 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
     } else if (cmd.cmd === '/clear') {
       setInput('');
       if (onClearChat) onClearChat();
+    } else if (cmd.cmd === '/skills') {
+      setInput('');
+      onSendMessage('/skills');
     } else if (cmd.cmd === '/settings') {
       setInput('');
       if (onOpenToolSettings) onOpenToolSettings();

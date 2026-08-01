@@ -557,6 +557,16 @@ These protections should not be removed when increasing research budgets.
 
 Open **Tool Settings → Web Research Tools** and toggle `deep_research`. The setting is persisted by the server. When disabled, the tool is removed from the model's available tool definitions and deep-research prompts do not create a mandatory tool call.
 
+## Reusable research skill
+
+The repository includes `.agent/skills/research-official-sources/SKILL.md`. It guides current-information research toward first-party sources, requires inspection of the underlying pages, and separates verified facts from inference. The skill chooses `deep_research` for broad investigations and the narrower `web_search` plus `read_web_page` workflow for focused checks.
+
+List available skills with `/skills`, or invoke this bundled workflow explicitly from any working directory:
+
+```text
+/skill research-official-sources Fact-check these provider prices and cite the official rate cards.
+```
+
 ## Example user prompts
 
 - `Deep research the current state of local coding models.`

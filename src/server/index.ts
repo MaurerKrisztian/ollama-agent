@@ -33,6 +33,12 @@ import type { BenchmarkAgentConfig, BenchmarkSnapshot } from '../benchmark/types
 import { isCommandWhitelisted, DEFAULT_COMMAND_WHITELIST } from '../core/commandWhitelist.js';
 import { handleOpenAiChatCompletions, handleOpenAiModels } from './openaiAdapter.js';
 import { ChatSessionStore } from './chatSessions.js';
+import {
+  formatProjectSkillList,
+  listProjectSkills,
+  loadProjectSkill,
+  parseSkillCommand,
+} from '../core/skills.js';
 
 import fsSync from 'node:fs';
 
@@ -586,6 +592,15 @@ app.get('/api/context/workdir', async (_req, res) => {
   }
 });
 
+// GET /api/skills - List valid workspace and application-bundled skills
+app.get('/api/skills', async (_req, res) => {
+  try {
+    res.json({ skills: await listProjectSkills(agent.getConfig().workingDir) });
+  } catch (err: any) {
+    res.status(500).json({ skills: [], error: err.message });
+  }
+});
+
 // GET /api/messages - Restore the visible chat after a browser reload
 app.get('/api/messages', (_req, res) => {
   const sessionId = typeof _req.query.sessionId === 'string' ? _req.query.sessionId : chatSessions.getActiveId();
@@ -1075,6 +1090,37 @@ app.post('/api/chat', async (req, res) => {
     return res.status(400).json({ error: 'Invalid attachment or attachment size limit exceeded (512 KB each, 1 MB total).' });
   }
 
+  const skillCommand = parseSkillCommand(message);
+  if (skillCommand.kind === 'invalid') {
+    return res.status(400).json({ error: skillCommand.error });
+  }
+  if (skillCommand.kind === 'list') {
+    const skills = await listProjectSkills(agent.getConfig().workingDir);
+    const content = formatProjectSkillList(skills);
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders();
+    res.write(`event: message_added\ndata: ${JSON.stringify({
+      id: `skills-${Date.now()}`,
+      role: 'assistant',
+      content,
+      timestamp: Date.now(),
+    })}\n\n`);
+    res.write(`event: done\ndata: ${JSON.stringify({ content })}\n\n`);
+    res.end();
+    return;
+  }
+
+  const selectedSkill = skillCommand.kind === 'invoke'
+    ? await loadProjectSkill(agent.getConfig().workingDir, skillCommand.name)
+    : null;
+  if (skillCommand.kind === 'invoke' && !selectedSkill) {
+    return res.status(404).json({ error: `Skill "${skillCommand.name}" was not found. Use /skills to list available skills.` });
+  }
+  const effectiveMessage = skillCommand.kind === 'invoke' ? skillCommand.request : message;
+
   const generationController = new AbortController();
   activeGenerationControllers.set(sessionId, generationController);
   const sessionRuntime = getChatRuntime(sessionId);
@@ -1087,10 +1133,10 @@ app.post('/api/chat', async (req, res) => {
   const sessionAgent = sessionRuntime.engine;
 
   const modelMessage = attachments.length
-    ? `${message}\n\nThe user attached the following text files. Use their contents to answer the request.\n\n${attachments
+    ? `${effectiveMessage}\n\nThe user attached the following text files. Use their contents to answer the request.\n\n${attachments
         .map((file: any) => `<attached_file name=${JSON.stringify(file.name)}>\n${file.content}\n</attached_file>`)
         .join('\n\n')}`
-    : message;
+    : effectiveMessage;
 
   // Setup Server-Sent Events headers
   res.setHeader('Content-Type', 'text/event-stream');
@@ -1214,6 +1260,7 @@ app.post('/api/chat', async (req, res) => {
       userAttachments: attachments,
       userImages: rawImagesBase64,
       userImageAttachments: imageAttachments,
+      selectedSkill: selectedSkill || undefined,
       onChunk: (chunk) => {
         sendEvent('chunk', { chunk });
       },

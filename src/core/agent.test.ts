@@ -122,6 +122,33 @@ test('working directory info is only added to the model system prompt when enabl
   }
 });
 
+test('explicit skill instructions apply to one turn without replacing the user request', async () => {
+  await withAgent([{ content: 'Verified.', tool_calls: [] }], async (agent) => {
+    agent.updateConfig({ showWorkingDirInfo: false });
+    let request: any;
+    (agent as any).ollamaClient.chatStream = async (captured: any) => {
+      request = captured;
+      return { content: 'Verified.', tool_calls: [] };
+    };
+
+    await agent.sendMessage('Check the current price.', {
+      userDisplayContent: '/skill research-official-sources Check the current price.',
+      selectedSkill: {
+        name: 'research-official-sources',
+        description: 'Verify current claims.',
+        path: '.agent/skills/research-official-sources/SKILL.md',
+        instructions: 'Use first-party sources and cite each current claim.',
+      },
+    });
+
+    assert.match(request.messages[0].content, /Explicitly selected skill: research-official-sources/);
+    assert.match(request.messages[0].content, /Use first-party sources/);
+    assert.equal(request.messages[1].content, 'Check the current price.');
+    const userMessage = agent.getContextManager().getMessages().find((message) => message.role === 'user');
+    assert.equal(userMessage?.displayContent, '/skill research-official-sources Check the current price.');
+  });
+});
+
 test('explicit numbered steps require repeated executions of the same tool', async () => {
   await withAgent(
     [

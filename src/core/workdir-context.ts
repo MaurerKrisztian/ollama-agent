@@ -1,12 +1,11 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
+import { listProjectSkills } from './skills.js';
 
 const MAX_FILES = 200;
 const MAX_DEPTH = 2;
 const MAX_INSTRUCTIONS_CHARS = 12_000;
-const MAX_SKILLS = 50;
-const MAX_SKILL_HEADER_CHARS = 16_000;
 const SKIPPED_DIRECTORIES = new Set(['.git', 'node_modules', 'dist', 'build', 'coverage']);
 
 export function getSystemEnvironmentSummary(): string {
@@ -40,12 +39,6 @@ export function getSystemEnvironmentSummary(): string {
     `- System User: ${username}`,
     `- Default Shell: ${shell}`,
   ].join('\n');
-}
-
-interface ProjectSkillMetadata {
-  name: string;
-  description: string;
-  path: string;
 }
 
 async function collectFiles(root: string): Promise<{ files: string[]; truncated: boolean }> {
@@ -101,64 +94,14 @@ async function getPackageSummary(root: string): Promise<string | null> {
   }
 }
 
-function parseFrontmatterValue(frontmatter: string, key: string): string | null {
-  const match = frontmatter.match(new RegExp(`^${key}:\\s*(.+)$`, 'mi'));
-  if (!match) return null;
-  return match[1].trim().replace(/^(['"])(.*)\1$/, '$2');
-}
-
-async function collectProjectSkills(root: string): Promise<ProjectSkillMetadata[]> {
-  const possibleSkillDirs = [
-    { base: '.agent/skills', fullPath: path.join(root, '.agent', 'skills') },
-    { base: '.agents/skills', fullPath: path.join(root, '.agents', 'skills') },
-  ];
-
-  const skills: ProjectSkillMetadata[] = [];
-  const seenSkillNames = new Set<string>();
-
-  for (const { base, fullPath } of possibleSkillDirs) {
-    let entries;
-    try {
-      entries = await fs.readdir(fullPath, { withFileTypes: true });
-    } catch {
-      continue;
-    }
-
-    for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
-      if (!entry.isDirectory() || skills.length >= MAX_SKILLS) continue;
-      const relativeSkillPath = `${base}/${entry.name}/SKILL.md`;
-      try {
-        const contents = await fs.readFile(path.join(root, relativeSkillPath), 'utf8');
-        const header = contents.slice(0, MAX_SKILL_HEADER_CHARS);
-        const frontmatterMatch = header.match(/^---\s*\n([\s\S]*?)\n---(?:\s*\n|$)/);
-        const frontmatter = frontmatterMatch?.[1] || '';
-        const heading = header.match(/^#\s+(.+)$/m)?.[1]?.trim();
-        const name = parseFrontmatterValue(frontmatter, 'name') || heading || entry.name;
-        if (!seenSkillNames.has(name)) {
-          seenSkillNames.add(name);
-          skills.push({
-            name,
-            description:
-              parseFrontmatterValue(frontmatter, 'description') ||
-              'No description provided; read the skill instructions if its name matches the task.',
-            path: relativeSkillPath,
-          });
-        }
-      } catch {
-        // A skill directory without a readable SKILL.md is not advertised.
-      }
-    }
-  }
-
-  return skills;
-}
-
 export async function buildWorkingDirectoryContext(workingDir: string): Promise<string> {
   const resolvedDir = path.resolve(workingDir);
   const [{ files, truncated }, packageSummary, projectSkills] = await Promise.all([
     collectFiles(resolvedDir),
     getPackageSummary(resolvedDir),
-    collectProjectSkills(resolvedDir),
+    // Bundled skills are invoked through /skill. Only workspace-local skills have
+    // paths that the model can inspect with its workspace file tools.
+    listProjectSkills(resolvedDir, { includeBundled: false }),
   ]);
 
   let agentInstructions: string | null = null;

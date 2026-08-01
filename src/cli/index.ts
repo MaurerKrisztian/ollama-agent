@@ -9,6 +9,13 @@ import { categorizeError } from '../core/types.js';
 import { isCommandWhitelisted, DEFAULT_COMMAND_WHITELIST } from '../core/commandWhitelist.js';
 import type { BenchmarkAgentConfig } from '../benchmark/types.js';
 import type { ContextPruningConfig, ToolComplexityProfile } from '../core/types.js';
+import {
+  formatProjectSkillList,
+  listProjectSkills,
+  loadProjectSkill,
+  parseSkillCommand,
+} from '../core/skills.js';
+import type { LoadedProjectSkill } from '../core/skills.js';
 
 const program = new Command();
 
@@ -283,14 +290,38 @@ async function startCli() {
   rl.prompt();
 
   rl.on('line', async (line) => {
-    const input = line.trim();
+    const originalInput = line.trim();
+    let input = originalInput;
+    let selectedSkill: LoadedProjectSkill | undefined;
     if (!input) {
       rl.prompt();
       return;
     }
 
+    const skillCommand = parseSkillCommand(input);
+    if (skillCommand.kind === 'list') {
+      console.log(`\n${formatProjectSkillList(await listProjectSkills(agent.getConfig().workingDir))}`);
+      rl.prompt();
+      return;
+    }
+    if (skillCommand.kind === 'invalid') {
+      console.log(chalk.red(skillCommand.error));
+      rl.prompt();
+      return;
+    }
+    if (skillCommand.kind === 'invoke') {
+      selectedSkill = await loadProjectSkill(agent.getConfig().workingDir, skillCommand.name) || undefined;
+      if (!selectedSkill) {
+        console.log(chalk.red(`Skill "${skillCommand.name}" was not found. Use /skills to list available skills.`));
+        rl.prompt();
+        return;
+      }
+      input = skillCommand.request;
+      console.log(chalk.dim(`Using skill: ${selectedSkill.name}`));
+    }
+
     // Command handling
-    if (input.startsWith('/')) {
+    if (input.startsWith('/') && !selectedSkill) {
       const [cmd, ...args] = input.split(' ');
       const argString = args.join(' ');
 
@@ -306,6 +337,8 @@ async function startCli() {
           console.log('  /pruning [setting] [value] - View or update context-pruning settings');
           console.log('  /context                   - Show converted text context & stats');
           console.log('  /json                      - Output raw context JSON');
+          console.log('  /skills                    - List available skills');
+          console.log('  /skill <name> <request>    - Run a request with a skill');
           console.log('  /clear                     - Reset current chat context');
           console.log('  /benchmark [category]      - Run benchmark suite (optional category filter)');
           console.log('  /exit                      - Exit CLI application');
@@ -506,6 +539,8 @@ async function startCli() {
 
     try {
       await agent.sendMessage(input, {
+        userDisplayContent: selectedSkill ? originalInput : undefined,
+        selectedSkill,
         onChunk: (chunk) => {
           process.stdout.write(chunk);
         },

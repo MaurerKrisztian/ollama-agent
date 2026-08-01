@@ -1,0 +1,4 @@
+interface:
+  display_name: "Research Official Sources"
+  short_description: "Verify current claims with primary sources"
+  default_prompt: "Use $research-official-sources to verify these claims against current first-party sources."

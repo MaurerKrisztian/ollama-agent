@@ -4,6 +4,8 @@ import type { OllamaPullProgress, OllamaResponseMetrics } from './ollama.js';
 import { getToolDefinitions, ToolExecutor } from './tools.js';
 import { AgentConfig, ChatMessage, OllamaModelInfo, OllamaRunningModelInfo } from './types.js';
 import { buildWorkingDirectoryContext } from './workdir-context.js';
+import { buildSelectedSkillPrompt } from './skills.js';
+import type { LoadedProjectSkill } from './skills.js';
 
 export interface AgentSendMessageOptions {
   onChunk?: (chunk: string) => void;
@@ -19,6 +21,7 @@ export interface AgentSendMessageOptions {
   userAttachments?: ChatMessage['attachments'];
   userImages?: string[];
   userImageAttachments?: ChatMessage['imageAttachments'];
+  selectedSkill?: LoadedProjectSkill;
 }
 
 export type AgentConfigUpdate = Partial<AgentConfig> & { ollamaToken?: string };
@@ -370,6 +373,9 @@ ${conversationText}`;
       let effectiveSystemPrompt = this.contextManager.getEffectiveSystemPrompt(true);
       if (this.config.showWorkingDirInfo) {
         effectiveSystemPrompt += `\n\n${await this.getWorkingDirectoryPromptContext()}`;
+      }
+      if (callbacks?.selectedSkill) {
+        effectiveSystemPrompt += `\n\n${buildSelectedSkillPrompt(callbacks.selectedSkill)}`;
       }
 
       const messagesForOllama = [

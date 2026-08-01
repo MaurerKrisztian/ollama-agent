@@ -260,8 +260,16 @@ Options:
 | `/tool-profile [simple\|medium\|advanced]` | View or change the active tool schema |
 | `/pruning [setting] [value]` | View or change context-pruning and TTL settings |
 | `/dir <path>` | Change working directory |
+| `/skills` | List bundled skills and valid skills from `.agent/skills` and `.agents/skills` |
+| `/skill <name> <request>` | Run one request with the complete selected skill instructions |
 | `/clear` | Clear conversation history |
 | `/help` | Show all slash commands |
+
+### Project Skills
+
+Reusable workflows live in `<working-directory>/.agent/skills/<skill-name>/SKILL.md` (preferred) or `.agents/skills`. Each skill requires YAML frontmatter with a matching lowercase hyphenated `name` and a `description`. The agent advertises workspace-skill metadata when working-directory context is enabled and loads full instructions only when relevant. `/skills` also includes workflows bundled with the application, so they remain available after changing the working directory. A workspace skill overrides a bundled skill with the same name. Use `/skill <name> <request>` to select either kind explicitly.
+
+This repository includes `research-official-sources` for current-information research and fact-checking grounded in first-party sources.
 
 ---
 
@@ -316,6 +324,7 @@ curl -X POST http://localhost:3001/api/benchmark/run
 | `GET` | `/api/tools` | List available agent tools |
 | `GET` | `/api/context` | Get full context window info |
 | `GET` | `/api/context/workdir` | Preview the exact dynamic workdir context |
+| `GET` | `/api/skills` | List valid workspace and bundled skills |
 | `GET` | `/api/messages` | Get stored conversation messages for UI restoration |
 | `POST` | `/api/clear` | Clear conversation history |
 | `POST` | `/api/chat` | Send message (SSE stream) |
