@@ -187,6 +187,9 @@ export const App: React.FC = () => {
             allowedCommands: Array.isArray(activeConfig.allowedCommands)
               ? activeConfig.allowedCommands
               : prev.allowedCommands,
+            complexityProfile: activeConfig.complexityProfile || prev.complexityProfile,
+            maxLoops: activeConfig.maxLoops ?? prev.maxLoops,
+            enableThinking: activeConfig.enableThinking ?? prev.enableThinking,
           }));
         }
         if (activeContext) {
@@ -419,6 +422,7 @@ export const App: React.FC = () => {
         allowedCommands: newSettings.allowedCommands,
         maxLoops: newSettings.maxLoops,
         enableThinking: newSettings.enableThinking,
+        complexityProfile: newSettings.complexityProfile,
       }),
     });
   };
@@ -680,8 +684,8 @@ export const App: React.FC = () => {
         ) : (
           <BenchmarkView
             models={models}
-            activeModel={config.model}
-            onSelectModel={handleSelectModel}
+            currentConfig={config}
+            toolSettings={toolSettings}
           />
         )}
 

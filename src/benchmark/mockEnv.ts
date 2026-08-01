@@ -2,15 +2,13 @@ import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
 
-export const MOCK_ENV_DIR = path.join(os.tmpdir(), 'local-model-chat-benchmark-mock');
+export const MOCK_ENV_BASE_DIR = path.join(os.tmpdir(), 'local-model-chat-benchmark-mock');
 
-export async function setupMockEnvironment(): Promise<string> {
-  // Ensure fresh mock directory
-  try {
-    await fs.rm(MOCK_ENV_DIR, { recursive: true, force: true });
-  } catch (_) {}
-
-  await fs.mkdir(MOCK_ENV_DIR, { recursive: true });
+export async function setupMockEnvironment(workspaceDir?: string): Promise<string> {
+  const targetDir = workspaceDir
+    ? path.resolve(workspaceDir)
+    : path.join(MOCK_ENV_BASE_DIR, `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+  await fs.mkdir(targetDir, { recursive: true });
 
   // Create distinct mock files and subdirectories (zero overlap with system prompt examples)
   const makeReport = (lineCount: number, factLine: number, fact: string) =>
@@ -89,6 +87,15 @@ export async function setupMockEnvironment(): Promise<string> {
         'export function formatLabel(value: string) {\n  const normalized = value.trim().toLowerCase();\n  return `[old] ${normalized}`;\n}\n',
     },
     {
+      filePath: 'src/core/agent.ts',
+      content:
+        'export class AgentEngine {\n' +
+        '  async sendMessage(message: string): Promise<string> {\n' +
+        '    return message;\n' +
+        '  }\n' +
+        '}\n',
+    },
+    {
       filePath: 'docs/release_notes.md',
       content:
         '# Release Notes\n\nStable authentication flow.\n\nDeprecated: legacy token fallback remains enabled.\n\nMetrics export is available.\n',
@@ -136,10 +143,10 @@ export async function setupMockEnvironment(): Promise<string> {
   ];
 
   for (const item of mockFiles) {
-    const fullPath = path.join(MOCK_ENV_DIR, item.filePath);
+    const fullPath = path.join(targetDir, item.filePath);
     await fs.mkdir(path.dirname(fullPath), { recursive: true });
     await fs.writeFile(fullPath, item.content, 'utf-8');
   }
 
-  return MOCK_ENV_DIR;
+  return targetDir;
 }

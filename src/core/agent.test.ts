@@ -433,4 +433,41 @@ test('reaching maxLoops limit triggers warning text and onMaxLoopsReached callba
   });
 });
 
+test('agent applies tool profile and pruning configuration', () => {
+  const agent = new AgentEngine({
+    complexityProfile: 'advanced',
+    pruningConfig: {
+      enabled: false,
+      pruneSupersededReads: false,
+      invalidateOnMutation: false,
+      enableToolTTL: false,
+      terminalOutputTTLTurns: 2,
+      webOutputTTLTurns: 3,
+    },
+  });
+
+  assert.equal(agent.getConfig().complexityProfile, 'advanced');
+  assert.deepEqual(agent.getContextManager().getPruningConfig(), {
+    enabled: false,
+    pruneSupersededReads: false,
+    invalidateOnMutation: false,
+    enableToolTTL: false,
+    terminalOutputTTLTurns: 2,
+    webOutputTTLTurns: 3,
+  });
+
+  agent.updateConfig({
+    complexityProfile: 'medium',
+    pruningConfig: {
+      enabled: true,
+      pruneSupersededReads: true,
+      invalidateOnMutation: true,
+      enableToolTTL: true,
+      terminalOutputTTLTurns: 7,
+      webOutputTTLTurns: 9,
+    },
+  });
+  assert.equal(agent.getConfig().complexityProfile, 'medium');
+  assert.equal(agent.getContextManager().getPruningConfig().terminalOutputTTLTurns, 7);
+});
 

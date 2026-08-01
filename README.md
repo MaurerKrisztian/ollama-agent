@@ -127,7 +127,7 @@ local-model-chat/
 - [Node.js](https://nodejs.org) v18+
 - [Ollama](https://ollama.com) running locally
 - A pulled model (e.g. `ollama pull qwen2.5-coder:7b`)
-- Docker (optional, for terminal benchmark sandbox)
+- Docker (required for benchmarks; each test runs in a fresh container)
 
 ### Install
 ```bash
@@ -193,6 +193,13 @@ Options:
   --token <token>          Optional bearer token      (or set OLLAMA_TOKEN)
   -d, --dir <path>         Working directory           (default: cwd)
   --workdir-info           Include project info, .agent instructions and skills
+  --tool-profile <name>    Tool schema: simple, medium, or advanced
+  --no-pruning             Disable automatic context pruning
+  --no-prune-superseded-reads
+  --no-invalidate-on-mutation
+  --no-tool-ttl
+  --terminal-ttl <turns>   Terminal-output context lifetime
+  --web-ttl <turns>        Web-output context lifetime
   -y, --auto-approve       Skip terminal cmd confirmation
   -s, --system <prompt>    Custom system prompt
   -b, --benchmark          Run benchmark mode
@@ -210,6 +217,8 @@ Options:
 | `/json` | Show raw JSON context |
 | `/sys <prompt>` | Update system prompt |
 | `/workdir-info [on\|off]` | View or toggle automatic project context |
+| `/tool-profile [simple\|medium\|advanced]` | View or change the active tool schema |
+| `/pruning [setting] [value]` | View or change context-pruning and TTL settings |
 | `/dir <path>` | Change working directory |
 | `/clear` | Clear conversation history |
 | `/help` | Show all slash commands |
@@ -225,7 +234,7 @@ Shell command execution (`execute_command` tool) has a built-in approval gate an
 | **Default (Confirm)** | CLI shows `[y/n/a]` prompt; Web UI shows Approve/Reject card |
 | **Command Whitelist** | Whitelisted commands (e.g. `ls`, `pwd`, `git status`) execute without prompting |
 | **Auto-Approve** | CLI `-y` flag; Web UI Tool Settings → Auto-Approve |
-| **Benchmark** | Commands run inside an isolated Docker `alpine` container — zero host risk |
+| **Benchmark** | The complete agent attempt, all tools, fixture, and verifier run in one fresh Docker container per test |
 
 ---
 
@@ -244,7 +253,12 @@ npm run cli -- --benchmark --test test_ast_document_symbols
 curl -X POST http://localhost:3001/api/benchmark/run
 ```
 
-- **50 targeted test cases** across 13 categories including AST/LSP navigation, information retrieval, docker terminal sandbox, project context, and web research.
+- **47 outcome-based test cases** across 13 categories including AST/LSP navigation, information retrieval, terminal execution, project context, and web research.
+- Pass/fail is determined from final answers, command results, or final workspace state—not from matching a prescribed tool call.
+- Results retain assistant thinking, tool arguments, tool results, and their ordered execution trace for diagnosis.
+- The Benchmark tab starts with the current agent configuration and supports run-only overrides for model, Ollama URL, temperature, context size, tool-loop limit, thinking, project context, tool-schema profile, and system prompt.
+- The benchmark image is built automatically once per server/CLI process and reused. Build it manually with `npm run benchmark:image` if desired.
+- On Linux, benchmark containers use host networking so the configured Ollama endpoint `http://127.0.0.1:11434` remains reachable unchanged.
 
 ---
 

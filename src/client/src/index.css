@@ -179,6 +179,30 @@ code {
   overflow-wrap: anywhere;
 }
 
+/* Keep benchmark details within the space left by the sidebars. */
+.benchmark-view,
+.benchmark-test-card,
+.benchmark-trace,
+.benchmark-trace-grid,
+.benchmark-trace-grid > div {
+  min-width: 0;
+}
+
+.benchmark-view,
+.benchmark-test-card,
+.benchmark-trace {
+  max-width: 100%;
+}
+
+.benchmark-trace-grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+}
+
+.benchmark-trace pre {
+  width: 100%;
+  max-width: 100%;
+}
+
 /* Glassmorphism Panel */
 .glass-panel {
   background: var(--bg-card);

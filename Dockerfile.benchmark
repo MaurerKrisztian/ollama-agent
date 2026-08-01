@@ -1,0 +1,13 @@
+FROM node:20-bookworm-slim
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git procps ripgrep \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY tsconfig.json ./
+COPY src ./src
+
+CMD ["node", "--import", "tsx", "src/benchmark/containerWorker.ts"]

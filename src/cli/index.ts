@@ -1,11 +1,13 @@
 import readline from 'readline';
 import chalk from 'chalk';
-import { Command } from 'commander';
+import { Command, Option } from 'commander';
 import { AgentEngine } from '../core/agent.js';
 import { runSingleBenchmarkTest } from '../benchmark/runner.js';
 import { BENCHMARK_TEST_CASES, BenchmarkTestCase } from '../benchmark/testCases.js';
 import { categorizeError } from '../core/types.js';
 import { isCommandWhitelisted, DEFAULT_COMMAND_WHITELIST } from '../core/commandWhitelist.js';
+import type { BenchmarkAgentConfig } from '../benchmark/types.js';
+import type { ContextPruningConfig, ToolComplexityProfile } from '../core/types.js';
 
 const program = new Command();
 
@@ -19,6 +21,13 @@ program
   .option('--token <token>', 'Optional bearer token (or set OLLAMA_TOKEN)', process.env.OLLAMA_TOKEN)
   .option('-d, --dir <path>', 'Working directory path', process.cwd())
   .option('--workdir-info', 'Include project info, .agent instructions, and skill metadata in model context', false)
+  .addOption(new Option('--tool-profile <profile>', 'Tool schema profile').choices(['simple', 'medium', 'advanced']).default('simple'))
+  .option('--no-pruning', 'Disable automatic context pruning')
+  .option('--no-prune-superseded-reads', 'Keep older read_file results in context')
+  .option('--no-invalidate-on-mutation', 'Do not invalidate cached reads after file mutations')
+  .option('--no-tool-ttl', 'Disable terminal/web tool-output expiry')
+  .option('--terminal-ttl <turns>', 'Terminal output lifetime in conversation turns', '5')
+  .option('--web-ttl <turns>', 'Web output lifetime in conversation turns', '5')
   .option('-y, --auto-approve', 'Auto-approve terminal command execution without asking', false)
   .option('-w, --whitelist <cmds...>', 'Whitelisted commands to auto-approve without asking', DEFAULT_COMMAND_WHITELIST.join(','))
   .option('-s, --system <prompt>', 'Custom system prompt')
@@ -31,6 +40,21 @@ const options = program.opts();
 const positionalPrompt = program.args.join(' ');
 
 async function startCli() {
+  const parseTtl = (value: string, optionName: string): number => {
+    const parsed = Number(value);
+    if (!Number.isInteger(parsed) || parsed < 0) {
+      program.error(`${optionName} must be a non-negative integer.`);
+    }
+    return parsed;
+  };
+  const pruningConfig: ContextPruningConfig = {
+    enabled: options.pruning !== false,
+    pruneSupersededReads: options.pruneSupersededReads !== false,
+    invalidateOnMutation: options.invalidateOnMutation !== false,
+    enableToolTTL: options.toolTtl !== false,
+    terminalOutputTTLTurns: parseTtl(options.terminalTtl, '--terminal-ttl'),
+    webOutputTTLTurns: parseTtl(options.webTtl, '--web-ttl'),
+  };
   const agent = new AgentEngine({
     model: options.model,
     ollamaHost: options.host,
@@ -38,7 +62,24 @@ async function startCli() {
     workingDir: options.dir,
     systemPrompt: options.system,
     showWorkingDirInfo: options.workdirInfo,
+    temperature: Number(options.temperature),
+    complexityProfile: options.toolProfile as ToolComplexityProfile,
+    pruningConfig,
   });
+
+  const getBenchmarkAgentConfig = (): BenchmarkAgentConfig => {
+    const config = agent.getConfig();
+    return {
+      temperature: config.temperature,
+      systemPrompt: config.systemPrompt,
+      showWorkingDirInfo: config.showWorkingDirInfo,
+      contextWindow: config.contextWindow,
+      maxLoops: config.maxLoops,
+      enableThinking: config.enableThinking,
+      complexityProfile: config.complexityProfile,
+      pruningConfig: agent.getContextManager().getPruningConfig(),
+    };
+  };
 
   let autoApprove = options.autoApprove === true;
 
@@ -106,6 +147,8 @@ async function startCli() {
   console.log(chalk.dim(`Ollama Host: ${agent.getConfig().ollamaHost}`));
   console.log(chalk.dim(`Active Model: ${agent.getConfig().model}`));
   console.log(chalk.dim(`Working Dir: ${agent.getConfig().workingDir}`));
+  console.log(chalk.dim(`Tool Profile: ${agent.getConfig().complexityProfile}`));
+  console.log(chalk.dim(`Context Pruning: ${agent.getContextManager().getPruningConfig().enabled ? 'ENABLED' : 'DISABLED'}`));
   console.log(chalk.dim(`Auto-Approve Terminal: ${autoApprove ? 'ENABLED (-y)' : 'DISABLED (Confirmation Prompt Active)'}`));
   console.log(chalk.dim('Type /help for slash commands, or type your message to chat.\n'));
 
@@ -180,7 +223,7 @@ async function startCli() {
       const test = filteredTests[i];
       process.stdout.write(chalk.dim(`[${i + 1}/${filteredTests.length}] ${test.name} ... `));
       try {
-        const result = await runSingleBenchmarkTest(test.id, options.model, options.host, options.token);
+        const result = await runSingleBenchmarkTest(test.id, options.model, options.host, options.token, undefined, getBenchmarkAgentConfig());
         if (result.passed) {
           pass++;
           console.log(chalk.green(`PASS`) + chalk.dim(` (${result.durationMs}ms)`));
@@ -250,6 +293,8 @@ async function startCli() {
           console.log('  /dir [path]                - View or set working directory');
           console.log('  /sys [prompt]              - View or update custom system prompt');
           console.log('  /workdir-info [on|off]     - View or toggle working directory context');
+          console.log('  /tool-profile [profile]    - View or set simple, medium, or advanced tool schemas');
+          console.log('  /pruning [setting] [value] - View or update context-pruning settings');
           console.log('  /context                   - Show converted text context & stats');
           console.log('  /json                      - Output raw context JSON');
           console.log('  /clear                     - Reset current chat context');
@@ -317,6 +362,62 @@ async function startCli() {
           break;
         }
 
+        case '/tool-profile': {
+          const profile = argString.trim().toLowerCase();
+          if (!profile) {
+            console.log(chalk.yellow(`Tool schema profile: ${agent.getConfig().complexityProfile}`));
+          } else if (profile === 'simple' || profile === 'medium' || profile === 'advanced') {
+            agent.updateConfig({ complexityProfile: profile });
+            console.log(chalk.green(`✓ Tool schema profile set to ${profile}.`));
+          } else {
+            console.log(chalk.red('Usage: /tool-profile [simple|medium|advanced]'));
+          }
+          break;
+        }
+
+        case '/pruning': {
+          const [setting = '', rawValue = ''] = args.map((value) => value.trim().toLowerCase());
+          const current = agent.getContextManager().getPruningConfig();
+          if (!setting) {
+            console.log(chalk.yellow('Context pruning configuration:'));
+            console.log(JSON.stringify(current, null, 2));
+            break;
+          }
+
+          if ((setting === 'on' || setting === 'off') && !rawValue) {
+            agent.updateConfig({ pruningConfig: { ...current, enabled: setting === 'on' } });
+            console.log(chalk.green(`✓ Context pruning ${setting}.`));
+            break;
+          }
+
+          const booleanSettings: Record<string, keyof Pick<ContextPruningConfig, 'pruneSupersededReads' | 'invalidateOnMutation' | 'enableToolTTL'>> = {
+            superseded: 'pruneSupersededReads',
+            mutation: 'invalidateOnMutation',
+            ttl: 'enableToolTTL',
+          };
+          const booleanKey = booleanSettings[setting];
+          if (booleanKey && (rawValue === 'on' || rawValue === 'off')) {
+            agent.updateConfig({ pruningConfig: { ...current, [booleanKey]: rawValue === 'on' } });
+            console.log(chalk.green(`✓ Pruning setting ${setting} set to ${rawValue}.`));
+            break;
+          }
+
+          const ttlSettings: Record<string, 'terminalOutputTTLTurns' | 'webOutputTTLTurns'> = {
+            'terminal-ttl': 'terminalOutputTTLTurns',
+            'web-ttl': 'webOutputTTLTurns',
+          };
+          const ttlKey = ttlSettings[setting];
+          const ttlValue = Number(rawValue);
+          if (ttlKey && Number.isInteger(ttlValue) && ttlValue >= 0) {
+            agent.updateConfig({ pruningConfig: { ...current, [ttlKey]: ttlValue } });
+            console.log(chalk.green(`✓ ${setting} set to ${ttlValue} turns.`));
+            break;
+          }
+
+          console.log(chalk.red('Usage: /pruning [on|off|superseded on|off|mutation on|off|ttl on|off|terminal-ttl N|web-ttl N]'));
+          break;
+        }
+
         case '/context':
           const info = agent.getContextManager().getContextInfo();
           console.log(chalk.bold.magenta('\n=== CONVERSATION CONTEXT ==='));
@@ -360,7 +461,7 @@ async function startCli() {
             const bt = testsToRun[bi];
             process.stdout.write(chalk.dim(`  [${bi + 1}/${testsToRun.length}] ${bt.name} ... `));
             try {
-              const res = await runSingleBenchmarkTest(bt.id, currentModel, currentHost, options.token);
+              const res = await runSingleBenchmarkTest(bt.id, currentModel, currentHost, options.token, undefined, getBenchmarkAgentConfig());
               if (res.passed) {
                 bPass++;
                 console.log(chalk.green('PASS') + chalk.dim(` (${res.durationMs}ms)`));

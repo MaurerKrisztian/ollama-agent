@@ -19,6 +19,7 @@ export interface AgentConfig {
   ollamaTokenConfigured?: boolean;
   pruningConfig?: ContextPruningConfig;
   enableThinking?: boolean;
+  complexityProfile?: ToolComplexityProfile;
 }
 
 export type ToolComplexityProfile = 'simple' | 'medium' | 'advanced';

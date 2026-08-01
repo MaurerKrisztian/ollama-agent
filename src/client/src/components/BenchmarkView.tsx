@@ -18,7 +18,26 @@ import {
   RotateCw,
   Square,
 } from 'lucide-react';
-import { OllamaModelInfo } from '../types';
+import { AgentConfig, ContextPruningConfig, OllamaModelInfo, ToolComplexityProfile, ToolSettings } from '../types';
+import { highlightJson } from './JsonEditor';
+
+interface HighlightedJsonProps {
+  value: unknown;
+  emptyText?: string;
+  style?: React.CSSProperties;
+}
+
+const HighlightedJson: React.FC<HighlightedJsonProps> = ({ value, emptyText = '', style }) => {
+  const json = JSON.stringify(value, null, 2) ?? emptyText;
+
+  return (
+    <pre
+      className="benchmark-json"
+      style={{ fontSize: '0.775rem', ...style }}
+      dangerouslySetInnerHTML={{ __html: highlightJson(json) }}
+    />
+  );
+};
 
 export interface TestResultTrace {
   testId: string;
@@ -28,6 +47,17 @@ export interface TestResultTrace {
   expectedTool: string | null;
   expectedToolSequence?: string[];
   actualToolsCalled: Array<{ name: string; args: Record<string, any> }>;
+  toolResults: Array<{ name: string; result: any }>;
+  executionTrace: Array<{
+    sequence: number;
+    timestamp: number;
+    type: 'assistant_message' | 'tool_start' | 'tool_end';
+    name?: string;
+    args?: Record<string, any>;
+    result?: any;
+    content?: string;
+    thinking?: string;
+  }>;
   passed: boolean;
   reason: string;
   durationMs: number;
@@ -35,6 +65,20 @@ export interface TestResultTrace {
   objective: string;
   requiredOutput: string;
   evaluationCriteria: string;
+  verificationDetails?: { passed: boolean; reason: string; details?: Record<string, any> };
+  container: { image: string; isolated: boolean; workspace: string };
+  agentConfig: {
+    model: string;
+    ollamaHost: string;
+    temperature?: number;
+    systemPrompt?: string;
+    showWorkingDirInfo?: boolean;
+    contextWindow?: number;
+    maxLoops?: number;
+    enableThinking?: boolean;
+    complexityProfile?: ToolComplexityProfile;
+    pruningConfig?: AgentConfig['pruningConfig'];
+  };
 }
 
 export interface BenchmarkTestCaseInfo {
@@ -44,6 +88,11 @@ export interface BenchmarkTestCaseInfo {
   prompt: string;
   expectedTool?: string | null;
   expectedToolSequence?: string[];
+  expectedResponseSubstrings?: string[];
+  expectedFileState?: unknown[];
+  expectedFileJson?: unknown;
+  expectedDirectoryEntries?: unknown[];
+  expectedToolResults?: unknown[];
   description: string;
   objective: string;
   requiredOutput: string;
@@ -64,15 +113,50 @@ export interface BenchmarkReport {
 
 interface BenchmarkViewProps {
   models: OllamaModelInfo[];
-  activeModel: string;
-  onSelectModel: (model: string) => void;
+  currentConfig: AgentConfig;
+  toolSettings: ToolSettings;
 }
+
+interface BenchmarkFormConfig {
+  model: string;
+  ollamaHost: string;
+  temperature: number;
+  contextWindow: number;
+  maxLoops: number;
+  enableThinking: boolean;
+  showWorkingDirInfo: boolean;
+  complexityProfile: ToolComplexityProfile;
+  systemPrompt: string;
+  pruningConfig: Required<ContextPruningConfig>;
+}
+
+const getBenchmarkDefaults = (config: AgentConfig, toolSettings: ToolSettings): BenchmarkFormConfig => ({
+  model: config.model,
+  ollamaHost: config.ollamaHost,
+  temperature: config.temperature,
+  contextWindow: config.contextWindow ?? 16384,
+  maxLoops: toolSettings.maxLoops ?? config.maxLoops ?? 10,
+  enableThinking: toolSettings.enableThinking ?? config.enableThinking ?? true,
+  showWorkingDirInfo: config.showWorkingDirInfo,
+  complexityProfile: toolSettings.complexityProfile ?? config.complexityProfile ?? 'simple',
+  systemPrompt: config.systemPrompt,
+  pruningConfig: {
+    enabled: config.pruningConfig?.enabled ?? true,
+    pruneSupersededReads: config.pruningConfig?.pruneSupersededReads ?? true,
+    invalidateOnMutation: config.pruningConfig?.invalidateOnMutation ?? true,
+    enableToolTTL: config.pruningConfig?.enableToolTTL ?? true,
+    terminalOutputTTLTurns: config.pruningConfig?.terminalOutputTTLTurns ?? 5,
+    webOutputTTLTurns: config.pruningConfig?.webOutputTTLTurns ?? 5,
+  },
+});
 
 export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
   models,
-  activeModel,
-  onSelectModel,
+  currentConfig,
+  toolSettings,
 }) => {
+  const [benchmarkConfig, setBenchmarkConfig] = useState<BenchmarkFormConfig>(() => getBenchmarkDefaults(currentConfig, toolSettings));
+  const [configDirty, setConfigDirty] = useState(false);
   const [report, setReport] = useState<BenchmarkReport | null>(null);
   const [liveResults, setLiveResults] = useState<TestResultTrace[]>([]);
   const [testCasesInfo, setTestCasesInfo] = useState<BenchmarkTestCaseInfo[]>([]);
@@ -90,6 +174,63 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
   const [expandedTestId, setExpandedTestId] = useState<string | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
 
+  useEffect(() => {
+    if (!configDirty) setBenchmarkConfig(getBenchmarkDefaults(currentConfig, toolSettings));
+  }, [currentConfig, toolSettings, configDirty]);
+
+  const updateBenchmarkConfig = <K extends keyof BenchmarkFormConfig>(key: K, value: BenchmarkFormConfig[K]) => {
+    setConfigDirty(true);
+    setBenchmarkConfig((previous) => ({ ...previous, [key]: value }));
+  };
+
+  const resetBenchmarkConfig = () => {
+    setBenchmarkConfig(getBenchmarkDefaults(currentConfig, toolSettings));
+    setConfigDirty(false);
+  };
+
+  const updatePruningConfig = <K extends keyof BenchmarkFormConfig['pruningConfig']>(
+    key: K,
+    value: BenchmarkFormConfig['pruningConfig'][K],
+  ) => {
+    setConfigDirty(true);
+    setBenchmarkConfig((previous) => ({
+      ...previous,
+      pruningConfig: { ...previous.pruningConfig, [key]: value },
+    }));
+  };
+
+  const benchmarkRequestConfig = () => ({
+    model: benchmarkConfig.model,
+    host: benchmarkConfig.ollamaHost,
+    agentConfig: {
+      temperature: benchmarkConfig.temperature,
+      contextWindow: benchmarkConfig.contextWindow,
+      maxLoops: benchmarkConfig.maxLoops,
+      enableThinking: benchmarkConfig.enableThinking,
+      showWorkingDirInfo: benchmarkConfig.showWorkingDirInfo,
+      complexityProfile: benchmarkConfig.complexityProfile,
+      systemPrompt: benchmarkConfig.systemPrompt,
+      pruningConfig: benchmarkConfig.pruningConfig,
+    },
+  });
+
+  const validateBenchmarkConfig = (): string | null => {
+    if (!benchmarkConfig.model.trim()) return 'Select a model.';
+    try {
+      const url = new URL(benchmarkConfig.ollamaHost);
+      if (url.protocol !== 'http:' && url.protocol !== 'https:') return 'Ollama API URL must use HTTP or HTTPS.';
+    } catch (_) {
+      return 'Enter a valid Ollama API URL.';
+    }
+    if (!Number.isFinite(benchmarkConfig.temperature) || benchmarkConfig.temperature < 0 || benchmarkConfig.temperature > 1) return 'Temperature must be between 0 and 1.';
+    if (!Number.isInteger(benchmarkConfig.contextWindow) || benchmarkConfig.contextWindow < 1024) return 'Context window must be an integer of at least 1024.';
+    if (!Number.isInteger(benchmarkConfig.maxLoops) || benchmarkConfig.maxLoops < 0 || benchmarkConfig.maxLoops > 50) return 'Maximum tool loops must be an integer between 0 and 50.';
+    if (!benchmarkConfig.systemPrompt.trim()) return 'System prompt cannot be empty.';
+    if (!Number.isInteger(benchmarkConfig.pruningConfig.terminalOutputTTLTurns) || benchmarkConfig.pruningConfig.terminalOutputTTLTurns < 0) return 'Terminal output TTL must be a non-negative integer.';
+    if (!Number.isInteger(benchmarkConfig.pruningConfig.webOutputTTLTurns) || benchmarkConfig.pruningConfig.webOutputTTLTurns < 0) return 'Web output TTL must be a non-negative integer.';
+    return null;
+  };
+
   // Modal State for Test Info
   const [selectedInfoTest, setSelectedInfoTest] = useState<BenchmarkTestCaseInfo | TestResultTrace | null>(null);
 
@@ -105,6 +246,11 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
   useEffect(() => () => benchmarkAbortController.current?.abort(), []);
 
   const handleRunAllBenchmarks = async () => {
+    const configError = validateBenchmarkConfig();
+    if (configError) {
+      alert(configError);
+      return;
+    }
     const controller = new AbortController();
     benchmarkAbortController.current = controller;
     setIsRunning(true);
@@ -122,7 +268,7 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: activeModel,
+          ...benchmarkRequestConfig(),
           ...(selectedCategory !== 'all' ? { category: selectedCategory } : {}),
         }),
         signal: controller.signal,
@@ -204,12 +350,17 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
   };
 
   const handleRunSingleTest = async (testId: string) => {
+    const configError = validateBenchmarkConfig();
+    if (configError) {
+      alert(configError);
+      return;
+    }
     setRunningSingleId(testId);
     try {
       const res = await fetch('/api/benchmark/run-single', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ testId, model: activeModel }),
+        body: JSON.stringify({ testId, ...benchmarkRequestConfig() }),
       });
       const data = await res.json();
       if (data.success && data.trace) {
@@ -235,6 +386,7 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
   const failCount = liveResults.filter((r) => !r.passed).length;
   const accuracyPercentage = liveResults.length > 0 ? Math.round((passCount / liveResults.length) * 100) : 0;
   const totalDurationMs = liveResults.reduce((sum, r) => sum + r.durationMs, 0);
+  const configLocked = isRunning || runningSingleId !== null;
 
   return (
     <div className="benchmark-view" style={{ flex: 1, overflowY: 'auto', padding: '32px 40px', display: 'flex', flexDirection: 'column', gap: '24px' }}>
@@ -244,11 +396,11 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
           <div className="benchmark-title" style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '6px' }}>
             <Zap size={22} color="var(--accent-amber)" />
             <h2 style={{ fontSize: '1.4rem', fontWeight: 700, color: 'var(--text-main)' }}>
-              Real-Time Tool Calling Benchmark Suite
+              Dockerized Outcome Benchmark Suite
             </h2>
           </div>
           <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)', maxWidth: '560px', lineHeight: 1.5 }}>
-            Run benchmarks 1-by-1 or execute the full suite against your local model in an isolated mock environment.
+            Run each task in a fresh container, score the observable outcome, and inspect the complete model and tool trace.
           </p>
         </div>
 
@@ -257,9 +409,9 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
           <div className="benchmark-model-picker" style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'rgba(15, 23, 42, 0.8)', padding: '8px 14px', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
             <Cpu size={16} color="var(--accent-primary)" />
             <select
-              value={activeModel}
-              onChange={(e) => onSelectModel(e.target.value)}
-              disabled={isRunning || runningSingleId !== null}
+              value={benchmarkConfig.model}
+              onChange={(e) => updateBenchmarkConfig('model', e.target.value)}
+              disabled={configLocked}
               style={{
                 background: 'transparent',
                 color: 'var(--text-main)',
@@ -267,7 +419,7 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
                 fontSize: '0.9rem',
                 fontWeight: 500,
                 outline: 'none',
-                cursor: isRunning || runningSingleId !== null ? 'not-allowed' : 'pointer',
+                cursor: configLocked ? 'not-allowed' : 'pointer',
               }}
             >
               {models.map((m) => (
@@ -308,6 +460,107 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
                   : `Run Category (${testCasesInfo.filter((t) => t.category === selectedCategory).length})`}
             </span>
           </button>
+        </div>
+      </div>
+
+      <div className="glass-panel" style={{ padding: '20px', borderRadius: '14px', border: '1px solid rgba(99, 102, 241, 0.28)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '16px', marginBottom: '16px', flexWrap: 'wrap' }}>
+          <div>
+            <h3 style={{ margin: 0, color: 'var(--text-main)', fontSize: '1rem' }}>Benchmark Agent Configuration</h3>
+            <p style={{ margin: '4px 0 0', color: 'var(--text-muted)', fontSize: '0.8rem' }}>
+              Initialized from the current agent. Changes here apply only to benchmark runs.
+            </p>
+          </div>
+          <button
+            onClick={resetBenchmarkConfig}
+            disabled={configLocked || !configDirty}
+            style={{ padding: '7px 12px', borderRadius: '7px', border: '1px solid var(--border-color)', background: 'rgba(255,255,255,0.06)', color: 'var(--text-main)', cursor: configLocked || !configDirty ? 'not-allowed' : 'pointer', opacity: configLocked || !configDirty ? 0.55 : 1 }}
+          >
+            Reset to current agent
+          </button>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: '14px' }}>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', color: 'var(--text-muted)', fontSize: '0.78rem' }}>
+            Model
+            <select value={benchmarkConfig.model} disabled={configLocked} onChange={(event) => updateBenchmarkConfig('model', event.target.value)} style={{ padding: '9px 10px', borderRadius: '7px', border: '1px solid var(--border-color)', background: '#111827', color: 'var(--text-main)' }}>
+              {models.map((model) => <option key={model.name} value={model.name}>{model.name}</option>)}
+            </select>
+          </label>
+
+          <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', color: 'var(--text-muted)', fontSize: '0.78rem' }}>
+            Ollama API URL
+            <input value={benchmarkConfig.ollamaHost} disabled={configLocked} onChange={(event) => updateBenchmarkConfig('ollamaHost', event.target.value)} style={{ padding: '9px 10px', borderRadius: '7px', border: '1px solid var(--border-color)', background: '#111827', color: 'var(--text-main)' }} />
+          </label>
+
+          <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', color: 'var(--text-muted)', fontSize: '0.78rem' }}>
+            Temperature (0–1)
+            <input type="number" min="0" max="1" step="0.05" value={benchmarkConfig.temperature} disabled={configLocked} onChange={(event) => updateBenchmarkConfig('temperature', Number(event.target.value))} style={{ padding: '9px 10px', borderRadius: '7px', border: '1px solid var(--border-color)', background: '#111827', color: 'var(--text-main)' }} />
+          </label>
+
+          <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', color: 'var(--text-muted)', fontSize: '0.78rem' }}>
+            Context window
+            <input type="number" min="1024" step="1024" value={benchmarkConfig.contextWindow} disabled={configLocked} onChange={(event) => updateBenchmarkConfig('contextWindow', Number(event.target.value))} style={{ padding: '9px 10px', borderRadius: '7px', border: '1px solid var(--border-color)', background: '#111827', color: 'var(--text-main)' }} />
+          </label>
+
+          <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', color: 'var(--text-muted)', fontSize: '0.78rem' }}>
+            Maximum tool loops (0 = unlimited)
+            <input type="number" min="0" max="50" value={benchmarkConfig.maxLoops} disabled={configLocked} onChange={(event) => updateBenchmarkConfig('maxLoops', Number(event.target.value))} style={{ padding: '9px 10px', borderRadius: '7px', border: '1px solid var(--border-color)', background: '#111827', color: 'var(--text-main)' }} />
+          </label>
+
+          <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', color: 'var(--text-muted)', fontSize: '0.78rem' }}>
+            Tool schema profile
+            <select value={benchmarkConfig.complexityProfile} disabled={configLocked} onChange={(event) => updateBenchmarkConfig('complexityProfile', event.target.value as ToolComplexityProfile)} style={{ padding: '9px 10px', borderRadius: '7px', border: '1px solid var(--border-color)', background: '#111827', color: 'var(--text-main)' }}>
+              <option value="simple">Simple</option>
+              <option value="medium">Medium</option>
+              <option value="advanced">Advanced</option>
+            </select>
+          </label>
+
+          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-main)', fontSize: '0.82rem', alignSelf: 'end', minHeight: '38px' }}>
+            <input type="checkbox" checked={benchmarkConfig.enableThinking} disabled={configLocked} onChange={(event) => updateBenchmarkConfig('enableThinking', event.target.checked)} />
+            Enable model thinking
+          </label>
+
+          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-main)', fontSize: '0.82rem', alignSelf: 'end', minHeight: '38px' }}>
+            <input type="checkbox" checked={benchmarkConfig.showWorkingDirInfo} disabled={configLocked} onChange={(event) => updateBenchmarkConfig('showWorkingDirInfo', event.target.checked)} />
+            Include project context
+          </label>
+
+          <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', color: 'var(--text-muted)', fontSize: '0.78rem', gridColumn: '1 / -1' }}>
+            System prompt
+            <textarea value={benchmarkConfig.systemPrompt} disabled={configLocked} rows={4} onChange={(event) => updateBenchmarkConfig('systemPrompt', event.target.value)} style={{ padding: '10px', borderRadius: '7px', border: '1px solid var(--border-color)', background: '#111827', color: 'var(--text-main)', resize: 'vertical', lineHeight: 1.45 }} />
+          </label>
+
+          <div style={{ gridColumn: '1 / -1', borderTop: '1px solid var(--border-color)', paddingTop: '14px' }}>
+            <div style={{ color: 'var(--text-main)', fontSize: '0.85rem', fontWeight: 600, marginBottom: '10px' }}>Context Pruning</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: '12px' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-main)', fontSize: '0.8rem' }}>
+                <input type="checkbox" checked={benchmarkConfig.pruningConfig.enabled} disabled={configLocked} onChange={(event) => updatePruningConfig('enabled', event.target.checked)} />
+                Enable context pruning
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-main)', fontSize: '0.8rem' }}>
+                <input type="checkbox" checked={benchmarkConfig.pruningConfig.pruneSupersededReads} disabled={configLocked || !benchmarkConfig.pruningConfig.enabled} onChange={(event) => updatePruningConfig('pruneSupersededReads', event.target.checked)} />
+                Prune superseded reads
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-main)', fontSize: '0.8rem' }}>
+                <input type="checkbox" checked={benchmarkConfig.pruningConfig.invalidateOnMutation} disabled={configLocked || !benchmarkConfig.pruningConfig.enabled} onChange={(event) => updatePruningConfig('invalidateOnMutation', event.target.checked)} />
+                Invalidate reads after mutation
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-main)', fontSize: '0.8rem' }}>
+                <input type="checkbox" checked={benchmarkConfig.pruningConfig.enableToolTTL} disabled={configLocked || !benchmarkConfig.pruningConfig.enabled} onChange={(event) => updatePruningConfig('enableToolTTL', event.target.checked)} />
+                Enable tool-output TTL
+              </label>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', color: 'var(--text-muted)', fontSize: '0.78rem' }}>
+                Terminal output TTL (turns)
+                <input type="number" min="0" value={benchmarkConfig.pruningConfig.terminalOutputTTLTurns} disabled={configLocked || !benchmarkConfig.pruningConfig.enabled || !benchmarkConfig.pruningConfig.enableToolTTL} onChange={(event) => updatePruningConfig('terminalOutputTTLTurns', Number(event.target.value))} style={{ padding: '9px 10px', borderRadius: '7px', border: '1px solid var(--border-color)', background: '#111827', color: 'var(--text-main)' }} />
+              </label>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', color: 'var(--text-muted)', fontSize: '0.78rem' }}>
+                Web output TTL (turns)
+                <input type="number" min="0" value={benchmarkConfig.pruningConfig.webOutputTTLTurns} disabled={configLocked || !benchmarkConfig.pruningConfig.enabled || !benchmarkConfig.pruningConfig.enableToolTTL} onChange={(event) => updatePruningConfig('webOutputTTLTurns', Number(event.target.value))} style={{ padding: '9px 10px', borderRadius: '7px', border: '1px solid var(--border-color)', background: '#111827', color: 'var(--text-main)' }} />
+              </label>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -359,7 +612,7 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
             <div style={{ fontSize: '2rem', fontWeight: 800, color: '#10b981', marginTop: '4px' }}>
               {passCount}
             </div>
-            <span style={{ fontSize: '0.8rem', color: 'var(--text-dim)' }}>Zero tool call hallucinations</span>
+            <span style={{ fontSize: '0.8rem', color: 'var(--text-dim)' }}>Required outcomes verified</span>
           </div>
 
           <div className="glass-panel" style={{ padding: '20px', borderRadius: '14px' }}>
@@ -367,7 +620,7 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
             <div style={{ fontSize: '2rem', fontWeight: 800, color: failCount > 0 ? '#ef4444' : 'var(--text-dim)', marginTop: '4px' }}>
               {failCount}
             </div>
-            <span style={{ fontSize: '0.8rem', color: 'var(--text-dim)' }}>Incorrect or missing tool calls</span>
+            <span style={{ fontSize: '0.8rem', color: 'var(--text-dim)' }}>Outcome verification failures</span>
           </div>
 
           <div className="glass-panel" style={{ padding: '20px', borderRadius: '14px' }}>
@@ -523,7 +776,7 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
                   {resultTrace && (
                     <div style={{ textAlign: 'right', fontSize: '0.8rem' }}>
                       <div style={{ color: 'var(--text-muted)' }}>
-                        Expected: <strong style={{ color: '#fff' }}>{resultTrace.expectedTool || 'None'}</strong>
+                        Outcome: <strong style={{ color: '#fff' }}>{resultTrace.passed ? 'verified' : 'not met'}</strong>
                       </div>
                       <div style={{ color: resultTrace.passed ? '#10b981' : '#ef4444' }}>
                         Called: <strong>{resultTrace.actualToolsCalled.map((t) => t.name).join(' -> ') || 'None'}</strong>
@@ -585,14 +838,18 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
                 <div className="benchmark-trace" style={{ padding: '16px 20px', borderTop: '1px solid var(--border-color)', background: 'rgba(15, 23, 42, 0.8)', fontSize: '0.85rem' }}>
                   <div style={{ marginBottom: '12px', padding: '8px 12px', borderRadius: '6px', background: resultTrace.passed ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)', color: resultTrace.passed ? '#34d399' : '#f87171' }}>
                     <strong>Verdict Reason:</strong> {resultTrace.reason}
+                    <div style={{ marginTop: '4px', color: 'var(--text-muted)' }}>
+                      Container: {resultTrace.container.image} · workspace {resultTrace.container.workspace} · isolated: {String(resultTrace.container.isolated)}
+                    </div>
                   </div>
 
-                  <div className="benchmark-trace-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                  <div className="benchmark-trace-grid" style={{ display: 'grid', gap: '16px' }}>
                     <div>
                       <strong style={{ color: 'var(--accent-primary)', display: 'block', marginBottom: '4px' }}>Tools Invoked ({resultTrace.actualToolsCalled.length}):</strong>
-                      <pre style={{ fontSize: '0.775rem' }}>
-                        {resultTrace.actualToolsCalled.length > 0 ? JSON.stringify(resultTrace.actualToolsCalled, null, 2) : 'No tools invoked.'}
-                      </pre>
+                      <HighlightedJson
+                        value={resultTrace.actualToolsCalled.length > 0 ? resultTrace.actualToolsCalled : undefined}
+                        emptyText="No tools invoked."
+                      />
                     </div>
 
                     <div>
@@ -601,6 +858,21 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
                         {resultTrace.responseContent || '(Empty response)'}
                       </pre>
                     </div>
+                  </div>
+
+                  <div style={{ marginTop: '16px' }}>
+                    <strong style={{ color: 'var(--accent-amber)', display: 'block', marginBottom: '4px' }}>Outcome Verification:</strong>
+                    <HighlightedJson value={resultTrace.verificationDetails} emptyText="No verification details." style={{ whiteSpace: 'pre-wrap' }} />
+                  </div>
+
+                  <div style={{ marginTop: '16px' }}>
+                    <strong style={{ color: 'var(--accent-primary)', display: 'block', marginBottom: '4px' }}>Effective Agent Configuration:</strong>
+                    <HighlightedJson value={resultTrace.agentConfig} style={{ whiteSpace: 'pre-wrap' }} />
+                  </div>
+
+                  <div style={{ marginTop: '16px' }}>
+                    <strong style={{ color: '#c084fc', display: 'block', marginBottom: '4px' }}>Complete Execution Trace:</strong>
+                    <HighlightedJson value={resultTrace.executionTrace} style={{ whiteSpace: 'pre-wrap', maxHeight: '420px', overflow: 'auto' }} />
                   </div>
                 </div>
               )}
@@ -640,14 +912,14 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
               {/* Prompt */}
               <div>
                 <strong style={{ color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>Prompt Sent to Agent:</strong>
-                <pre style={{ margin: 0, fontSize: '0.85rem', color: '#fcd34d' }}>"{selectedInfoTest.prompt}"</pre>
+                <pre style={{ margin: 0, fontSize: '0.85rem', color: '#fcd34d', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>"{selectedInfoTest.prompt}"</pre>
               </div>
 
               {/* Required Output */}
               <div style={{ background: 'rgba(20, 184, 166, 0.08)', padding: '14px', borderRadius: '8px', border: '1px solid rgba(20, 184, 166, 0.25)' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--accent-teal)', fontWeight: 600, marginBottom: '4px' }}>
                   <FileCode2 size={16} />
-                  <span>Required Output & Tool Behavior:</span>
+                  <span>Requested User Outcome:</span>
                 </div>
                 <p style={{ color: '#e2e8f0', margin: 0 }}>{selectedInfoTest.requiredOutput}</p>
               </div>

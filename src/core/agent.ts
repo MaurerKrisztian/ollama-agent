@@ -136,11 +136,13 @@ export class AgentEngine {
       showWorkingDirInfo: config?.showWorkingDirInfo ?? true,
       contextWindow: config?.contextWindow !== undefined ? config.contextWindow : 16384,
       maxLoops: config?.maxLoops !== undefined ? config.maxLoops : 10,
+      complexityProfile: config?.complexityProfile || 'simple',
       enableThinking: config?.enableThinking ?? true,
     };
 
     this.toolExecutor = new ToolExecutor(this.config.workingDir);
-    this.contextManager = new ContextManager(this.config.systemPrompt);
+    this.contextManager = new ContextManager(this.config.systemPrompt, undefined, config?.pruningConfig);
+    this.config.pruningConfig = this.contextManager.getPruningConfig();
     this.ollamaClient = new OllamaClient(this.config.ollamaHost, config?.ollamaToken);
   }
 
@@ -151,6 +153,10 @@ export class AgentEngine {
     this.config = { ...this.config, ...definedConfig };
     if (newConfig.systemPrompt !== undefined) {
       this.contextManager.setSystemPrompt(newConfig.systemPrompt);
+    }
+    if (newConfig.pruningConfig !== undefined) {
+      this.contextManager.setPruningConfig(newConfig.pruningConfig);
+      this.config.pruningConfig = this.contextManager.getPruningConfig();
     }
     if (newConfig.ollamaHost !== undefined) {
       this.ollamaClient.setHost(newConfig.ollamaHost);
@@ -164,7 +170,11 @@ export class AgentEngine {
   }
 
   public getConfig(): AgentConfig {
-    return { ...this.config, workingDir: this.toolExecutor.getWorkingDir() };
+    return {
+      ...this.config,
+      workingDir: this.toolExecutor.getWorkingDir(),
+      pruningConfig: this.contextManager.getPruningConfig(),
+    };
   }
 
   public hasOllamaToken(): boolean {

@@ -1,3 +1,5 @@
+import { DirectoryEntriesSpec, FileStateSpec, ToolResultSpec } from './types.js';
+
 export interface BenchmarkTestCase {
   id: string;
   name: string;
@@ -30,21 +32,85 @@ export interface BenchmarkTestCase {
     relativePath: string;
     values: Record<string, string | number | boolean | null>;
   };
+  expectedFileState?: FileStateSpec[];
+  expectedDirectoryEntries?: DirectoryEntriesSpec[];
+  expectedToolResults?: ToolResultSpec[];
+  verificationScript?: string;
   description: string;
   objective: string;
   requiredOutput: string;
   evaluationCriteria: string;
 }
 
-export const BENCHMARK_TEST_CASES: BenchmarkTestCase[] = [
+function describeFileState(spec: FileStateSpec): string {
+  if (spec.mustExist === false) return `"${spec.relativePath}" must not exist`;
+  const requirements = [`"${spec.relativePath}" must exist`];
+  if (spec.exactMatch !== undefined) requirements.push('its content must exactly match the expected text');
+  if (spec.containsSubstrings?.length) {
+    requirements.push(`it must contain ${spec.containsSubstrings.map((value) => JSON.stringify(value)).join(', ')}`);
+  }
+  if (spec.excludesSubstrings?.length) {
+    requirements.push(`it must not contain ${spec.excludesSubstrings.map((value) => JSON.stringify(value)).join(', ')}`);
+  }
+  return requirements.join('; ');
+}
+
+export function describeBenchmarkOutcome(testCase: BenchmarkTestCase): {
+  requiredOutput: string;
+  evaluationCriteria: string;
+} {
+  const requirements: string[] = [];
+  for (const spec of testCase.expectedDirectoryEntries ?? []) {
+    requirements.push(
+      `The final answer must report every expected entry in "${spec.relativePath}": ${spec.entries.join(', ')}`
+    );
+  }
+  if (testCase.expectedResponseSubstrings?.length) {
+    requirements.push(
+      `The final answer must contain: ${testCase.expectedResponseSubstrings.map((value) => JSON.stringify(value)).join(', ')}`
+    );
+  }
+  if (testCase.expectedFileJson) {
+    requirements.push(
+      `The final "${testCase.expectedFileJson.relativePath}" JSON must contain: ${Object.entries(testCase.expectedFileJson.values)
+        .map(([key, value]) => `${key}=${JSON.stringify(value)}`)
+        .join(', ')}`
+    );
+  }
+  for (const spec of testCase.expectedFileState ?? []) {
+    requirements.push(describeFileState(spec));
+  }
+  for (const spec of testCase.expectedToolResults ?? []) {
+    requirements.push(
+      `The executed tool output must contain: ${spec.containsSubstrings.map((value) => JSON.stringify(value)).join(', ')}`
+    );
+  }
+  if (testCase.verificationScript) {
+    requirements.push('The configured verification script must exit successfully');
+  }
+
+  const requiredOutput = requirements.length > 0
+    ? requirements.map((requirement, index) => `${index + 1}. ${requirement}.`).join(' ')
+    : 'No outcome verifier is configured.';
+  const evaluationCriteria = requirements.length > 0
+    ? `PASSES only when ${requirements.length === 1 ? 'the configured outcome check succeeds' : `all ${requirements.length} configured outcome checks succeed`}. Tool calls and results remain available in the execution trace, but the chosen tool name does not determine the verdict.`
+    : 'FAILS because this benchmark has no observable outcome verifier.';
+  return { requiredOutput, evaluationCriteria };
+}
+
+const BENCHMARK_DEFINITIONS: BenchmarkTestCase[] = [
   // --- CATEGORY 1: DIRECTORY LISTING ---
   {
     id: 'test_list_root_directory',
     name: 'Root Directory Listing (.)',
     category: 'directory_reading',
-    prompt: 'List all files in the root working directory.',
+    prompt: 'List every immediate entry in the root working directory, including hidden entries. Return the entry names in your final answer.',
     expectedTool: 'list_directory',
     expectedArgSubstrings: { relative_path: '.' },
+    expectedDirectoryEntries: [{
+      relativePath: '.',
+      entries: ['.agent', 'README.md', 'config', 'docs', 'modules', 'package.json', 'retrieval', 'server_info.txt', 'src', 'user_profile.json'],
+    }],
     description: 'Verifies the model invokes `list_directory` targeting root directory relative_path: "." or empty.',
     objective: 'Tests root workspace directory exploration capability.',
     requiredOutput: 'Tool call request: list_directory(relative_path: "."). Expected output: workspace entries.',
@@ -54,9 +120,10 @@ export const BENCHMARK_TEST_CASES: BenchmarkTestCase[] = [
     id: 'test_list_sub_dir',
     name: 'Subdirectory Listing (modules folder)',
     category: 'directory_reading',
-    prompt: 'List all files inside the modules folder.',
+    prompt: 'List every immediate entry inside the modules folder and include the entry names in your final answer.',
     expectedTool: 'list_directory',
     expectedArgSubstrings: { relative_path: 'modules' },
+    expectedDirectoryEntries: [{ relativePath: 'modules', entries: ['formatter.ts', 'utility.js'] }],
     description: 'Verifies the model dynamically selects `list_directory` targeting relative_path: "modules".',
     objective: 'Tests if the agent recognizes directory listing intent for non-example subdirectories.',
     requiredOutput: 'Tool call request: list_directory(relative_path: "modules"). Expected output: entries array containing utility.js.',
@@ -71,6 +138,7 @@ export const BENCHMARK_TEST_CASES: BenchmarkTestCase[] = [
     prompt: 'Read user_profile.json and tell me what the userId is.',
     expectedTool: 'read_file',
     expectedArgSubstrings: { relative_path: 'user_profile.json' },
+    expectedResponseSubstrings: ['9482'],
     description: 'Verifies the model dynamically selects `read_file` with relative_path: "user_profile.json".',
     objective: 'Tests dynamic file targeting for benchmark-specific JSON files not present in prompt examples.',
     requiredOutput: 'Tool call request: read_file(relative_path: "user_profile.json"). Expected output: file content with userId 9482.',
@@ -83,6 +151,7 @@ export const BENCHMARK_TEST_CASES: BenchmarkTestCase[] = [
     prompt: 'Read the app_settings.env file inside the config directory and tell me what DB_HOST is set to.',
     expectedTool: 'read_file',
     expectedArgSubstrings: { relative_path: 'app_settings.env' },
+    expectedResponseSubstrings: ['mockdb.internal'],
     description: 'Verifies the model dynamically targets nested subdirectory path config/app_settings.env.',
     objective: 'Tests nested subdirectory path resolution without example overlap.',
     requiredOutput: 'Tool call request: read_file(relative_path: "config/app_settings.env"). Expected output: env file text.',
@@ -97,10 +166,17 @@ export const BENCHMARK_TEST_CASES: BenchmarkTestCase[] = [
     prompt: 'Create a new file named services/logger.ts containing "export const log = (msg) => console.log(msg);".',
     expectedTool: 'create_file',
     expectedArgSubstrings: { relative_path: 'logger.ts', content: 'console.log' },
+    expectedFileState: [
+      {
+        relativePath: 'services/logger.ts',
+        mustExist: true,
+        containsSubstrings: ['console.log'],
+      },
+    ],
     description: 'Verifies model selects `create_file` to generate new workspace files.',
     objective: 'Tests file creation capabilities for new source files.',
     requiredOutput: 'Tool call request: create_file(relative_path: "services/logger.ts", content: "...").',
-    evaluationCriteria: 'PASSES if create_file is invoked with valid path and content. FAILS if file creation tool is not called.',
+    evaluationCriteria: 'PASSES if services/logger.ts is created on disk with valid content.',
   },
   {
     id: 'test_create_nested_test',
@@ -109,10 +185,17 @@ export const BENCHMARK_TEST_CASES: BenchmarkTestCase[] = [
     prompt: 'Create a new test file named tests/unit/auth.test.ts containing "test(\"login\", () => {});".',
     expectedTool: 'create_file',
     expectedArgSubstrings: { relative_path: 'auth.test.ts', content: 'login' },
+    expectedFileState: [
+      {
+        relativePath: 'tests/unit/auth.test.ts',
+        mustExist: true,
+        containsSubstrings: ['login'],
+      },
+    ],
     description: 'Verifies model creates new nested test directory files cleanly.',
     objective: 'Tests nested subdirectory path creation for new files.',
     requiredOutput: 'Tool call request: create_file(relative_path: "tests/unit/auth.test.ts", content: "...").',
-    evaluationCriteria: 'PASSES if create_file is invoked targeting auth.test.ts with valid test code.',
+    evaluationCriteria: 'PASSES if tests/unit/auth.test.ts is created on disk with valid test code.',
   },
 
   // --- CATEGORY 4: FILE EDITING & REFACTORING ---
@@ -123,10 +206,17 @@ export const BENCHMARK_TEST_CASES: BenchmarkTestCase[] = [
     prompt: 'Edit config/app_settings.env to change PORT=9090 to PORT=8080.',
     expectedTool: 'edit_file',
     expectedArgSubstrings: { relative_path: 'app_settings.env', target_text: '9090', replacement_text: '8080' },
+    expectedFileState: [
+      {
+        relativePath: 'config/app_settings.env',
+        mustExist: true,
+        containsSubstrings: ['PORT=8080'],
+      },
+    ],
     description: 'Verifies the model selects `edit_file` with exact target_text ("9090") and replacement_text ("8080").',
     objective: 'Tests partial string replacement file editing capability.',
     requiredOutput: 'Tool call request: edit_file(relative_path: "config/app_settings.env", target_text: "9090", replacement_text: "8080").',
-    evaluationCriteria: 'PASSES if edit_file is called with target_text containing "9090" and replacement_text containing "8080". FAILS if wrong tool or missing arguments.',
+    evaluationCriteria: 'PASSES if config/app_settings.env contains PORT=8080 on disk.',
   },
   {
     id: 'test_edit_json_value',
@@ -139,11 +229,18 @@ export const BENCHMARK_TEST_CASES: BenchmarkTestCase[] = [
       target_text: 'admin',
       replacement_text: 'editor',
     },
+    expectedFileJson: {
+      relativePath: 'user_profile.json',
+      values: {
+        role: 'editor',
+        userId: 9482,
+      },
+    },
     description: 'Verifies a quoted JSON string value can be replaced without rewriting unrelated fields.',
     objective: 'Tests precise structured-data editing with punctuation and quotes around the target value.',
     requiredOutput: 'Call edit_file for user_profile.json, replacing admin with editor.',
     evaluationCriteria:
-      'PASSES if edit_file executes with the correct file and replacement, and editor is present on disk.',
+      'PASSES if user_profile.json has role "editor" and userId 9482 verified on disk.',
   },
   {
     id: 'test_edit_package_version_after_read',
@@ -156,6 +253,12 @@ export const BENCHMARK_TEST_CASES: BenchmarkTestCase[] = [
       target_text: '2.0.0',
       replacement_text: '2.0.1',
     },
+    expectedFileJson: {
+      relativePath: 'package.json',
+      values: {
+        version: '2.0.1',
+      },
+    },
     description:
       'Reproduces the stale-target failure where the model guessed version 1.0.0 instead of inspecting the current package version.',
     objective:
@@ -163,7 +266,7 @@ export const BENCHMARK_TEST_CASES: BenchmarkTestCase[] = [
     requiredOutput:
       'Call read_file on package.json, then edit_file using current version 2.0.0 as target_text and 2.0.1 as replacement_text.',
     evaluationCriteria:
-      'PASSES only if package.json is read before editing and version 2.0.1 is verified on disk.',
+      'PASSES only if package.json version 2.0.1 is verified on disk.',
   },
   {
     id: 'test_edit_package_metadata',
@@ -200,11 +303,17 @@ export const BENCHMARK_TEST_CASES: BenchmarkTestCase[] = [
       target_text: 'false',
       replacement_text: 'true',
     },
+    expectedFileJson: {
+      relativePath: 'config/feature_flags.json',
+      values: {
+        darkMode: true,
+      },
+    },
     description: 'Verifies boolean replacement in a nested JSON fixture.',
     objective: 'Tests editing a non-string scalar while preserving valid surrounding JSON.',
     requiredOutput: 'Call edit_file on config/feature_flags.json and replace false with true.',
     evaluationCriteria:
-      'PASSES if edit_file changes the darkMode value and true is verified in the fixture on disk.',
+      'PASSES if config/feature_flags.json has darkMode set to true on disk.',
   },
   {
     id: 'test_edit_yaml_endpoint',
@@ -218,12 +327,19 @@ export const BENCHMARK_TEST_CASES: BenchmarkTestCase[] = [
       target_text: 'https://staging.internal/v1',
       replacement_text: 'https://api.internal/v2',
     },
+    expectedFileState: [
+      {
+        relativePath: 'config/service.yaml',
+        mustExist: true,
+        containsSubstrings: ['https://api.internal/v2'],
+      },
+    ],
     description: 'Verifies exact editing of punctuation-heavy URL text in YAML.',
     objective: 'Tests preservation of slashes, colons, dots, and surrounding YAML indentation.',
     requiredOutput:
       'Call edit_file on config/service.yaml with the complete old and new endpoint URLs.',
     evaluationCriteria:
-      'PASSES if edit_file uses the correct URL values and the v2 endpoint is present on disk.',
+      'PASSES if config/service.yaml has the v2 endpoint on disk.',
   },
   {
     id: 'test_edit_multiline_function_body',
@@ -236,6 +352,11 @@ export const BENCHMARK_TEST_CASES: BenchmarkTestCase[] = [
       relative_path: 'formatter.ts',
       replacement_text: '[ready]',
     },
+    expectedFileState: [{
+      relativePath: 'modules/formatter.ts',
+      containsSubstrings: ['[ready]', 'value.trim()'],
+      excludesSubstrings: ['toLowerCase'],
+    }],
     description: 'Verifies inspection followed by replacement of a complete multi-line TypeScript function.',
     objective: 'Tests clean code-block rewriting without leaving the old normalization statement behind.',
     requiredOutput:
@@ -255,6 +376,11 @@ export const BENCHMARK_TEST_CASES: BenchmarkTestCase[] = [
       target_text: 'Deprecated: legacy token fallback remains enabled.',
       replacement_text: '',
     },
+    expectedFileState: [{
+      relativePath: 'docs/release_notes.md',
+      containsSubstrings: ['Stable authentication flow.', 'Metrics export is available.'],
+      excludesSubstrings: ['Deprecated: legacy token fallback remains enabled.'],
+    }],
     description: 'Verifies exact paragraph deletion by using an empty replacement string.',
     objective: 'Tests deletion of punctuation-sensitive prose without removing adjacent document sections.',
     requiredOutput:
@@ -273,6 +399,11 @@ export const BENCHMARK_TEST_CASES: BenchmarkTestCase[] = [
       target_text: 'pending-review',
       replacement_text: 'production-ready',
     },
+    expectedFileState: [{
+      relativePath: 'docs/status.txt',
+      containsSubstrings: ['production-ready', 'Owner: platform-team.'],
+      excludesSubstrings: ['pending-review'],
+    }],
     description: 'Verifies replacement of a hyphenated token in a plain-text status file.',
     objective: 'Tests exact token editing where punctuation is semantically significant.',
     requiredOutput: 'Call edit_file on docs/status.txt, replacing pending-review with production-ready.',
@@ -286,6 +417,11 @@ export const BENCHMARK_TEST_CASES: BenchmarkTestCase[] = [
     prompt: 'Edit config/app_settings.env to delete the SECRET_KEY line.',
     expectedTool: 'edit_file',
     expectedArgSubstrings: { relative_path: 'app_settings.env', target_text: 'SECRET_KEY', replacement_text: '' },
+    expectedFileState: [{
+      relativePath: 'config/app_settings.env',
+      containsSubstrings: ['PORT=9090', 'DB_HOST=mockdb.internal'],
+      excludesSubstrings: ['SECRET_KEY'],
+    }],
     description: 'Verifies deleting lines of code/text by setting replacement_text to an empty string.',
     objective: 'Tests line deletion protocol by replacing target snippet with empty string "".',
     requiredOutput: 'Tool call request: edit_file(relative_path: "config/app_settings.env", target_text: "SECRET_KEY...", replacement_text: "").',
@@ -298,6 +434,11 @@ export const BENCHMARK_TEST_CASES: BenchmarkTestCase[] = [
     prompt: 'Inspect modules/utility.js and rewrite the computeHash function so it returns "SHA256_" + input.',
     expectedToolSequence: ['read_file', 'edit_file'],
     expectedArgSubstrings: { relative_path: 'utility.js', replacement_text: 'SHA256_' },
+    expectedFileState: [{
+      relativePath: 'modules/utility.js',
+      containsSubstrings: ['return "SHA256_" + input'],
+      excludesSubstrings: ['hash_'],
+    }],
     description: 'Verifies multi-line code function rewriting capabilities in code files.',
     objective: 'Tests multi-line function rewriting in source code files.',
     requiredOutput: 'Tool call request: read_file -> edit_file on modules/utility.js replacing complete function block with "SHA256_".',
@@ -312,6 +453,7 @@ export const BENCHMARK_TEST_CASES: BenchmarkTestCase[] = [
     prompt: 'Search the workspace for the word computeHash.',
     expectedTool: 'grep_search',
     expectedArgSubstrings: { query: 'computeHash' },
+    expectedResponseSubstrings: ['modules/utility.js', 'computeHash'],
     description: 'Verifies model selects `grep_search` to locate symbol definitions across workspace files.',
     objective: 'Tests workspace text/code pattern search capabilities.',
     requiredOutput: 'Tool call request: grep_search(query: "computeHash").',
@@ -324,6 +466,7 @@ export const BENCHMARK_TEST_CASES: BenchmarkTestCase[] = [
     prompt: 'Search the workspace for DB_HOST.',
     expectedTool: 'grep_search',
     expectedArgSubstrings: { query: 'DB_HOST' },
+    expectedResponseSubstrings: ['config/app_settings.env', 'DB_HOST'],
     description: 'Verifies model selects `grep_search` to find environment configuration keys.',
     objective: 'Tests configuration key search across all project files.',
     requiredOutput: 'Tool call request: grep_search(query: "DB_HOST").',
@@ -337,6 +480,7 @@ export const BENCHMARK_TEST_CASES: BenchmarkTestCase[] = [
     category: 'discrimination',
     prompt: 'What is the capital of Japan?',
     expectedTool: null,
+    expectedResponseSubstrings: ['Tokyo'],
     description: 'Verifies the model answers general knowledge questions directly without unnecessary tool invocation.',
     objective: 'Tests tool call discrimination to prevent calling file tools for general questions.',
     requiredOutput: 'Direct text answer "Tokyo" with 0 tool call requests.',
@@ -351,6 +495,11 @@ export const BENCHMARK_TEST_CASES: BenchmarkTestCase[] = [
     prompt: 'List the config folder to find the environment settings file, read app_settings.env, and edit app_settings.env to change DB_HOST from mockdb.internal to db.prod.com.',
     expectedToolSequence: ['list_directory', 'read_file', 'edit_file'],
     expectedArgSubstrings: { relative_path: 'app_settings.env', replacement_text: 'db.prod.com' },
+    expectedFileState: [{
+      relativePath: 'config/app_settings.env',
+      containsSubstrings: ['DB_HOST=db.prod.com', 'PORT=9090'],
+      excludesSubstrings: ['DB_HOST=mockdb.internal'],
+    }],
     description: 'Evaluates a complex 3-step agentic tool chain: list_directory -> read_file -> edit_file.',
     objective: 'Tests multi-step reasoning where 3 separate tools are executed sequentially.',
     requiredOutput: 'Sequential tool sequence: 1) list_directory("config"), 2) read_file("config/app_settings.env"), 3) edit_file(replacement_text: "db.prod.com").',
@@ -363,6 +512,11 @@ export const BENCHMARK_TEST_CASES: BenchmarkTestCase[] = [
     prompt: 'Search the workspace for computeHash, read utility.js where it is defined, and edit computeHash to return "SHA256_" + input.',
     expectedToolSequence: ['grep_search', 'read_file', 'edit_file'],
     expectedArgSubstrings: { relative_path: 'utility.js', replacement_text: 'SHA256_' },
+    expectedFileState: [{
+      relativePath: 'modules/utility.js',
+      containsSubstrings: ['return "SHA256_" + input'],
+      excludesSubstrings: ['hash_'],
+    }],
     description: 'Evaluates search-driven code refactoring workflow: grep_search -> read_file -> edit_file.',
     objective: 'Tests multi-step agentic workflow using code search to locate files before refactoring.',
     requiredOutput: 'Sequential tool sequence: 1) grep_search("computeHash"), 2) read_file("modules/utility.js"), 3) edit_file(replacement_text: "SHA256_").',
@@ -375,6 +529,10 @@ export const BENCHMARK_TEST_CASES: BenchmarkTestCase[] = [
     prompt: 'Read user_profile.json to check the user data, then create a new file services/user_service.ts containing "export const userId = 9482;".',
     expectedToolSequence: ['read_file', 'create_file'],
     expectedArgSubstrings: { relative_path: 'user_service.ts', content: '9482' },
+    expectedFileState: [{
+      relativePath: 'services/user_service.ts',
+      containsSubstrings: ['export const userId = 9482;'],
+    }],
     description: 'Evaluates multi-step specification-driven file generation: read_file -> create_file.',
     objective: 'Tests multi-turn reasoning where file inspection informs new file generation.',
     requiredOutput: 'Sequential tool sequence: 1) read_file("user_profile.json"), 2) create_file("services/user_service.ts", content: "9482").',
@@ -440,6 +598,7 @@ export const BENCHMARK_TEST_CASES: BenchmarkTestCase[] = [
     prompt: 'Run a terminal command using execute_command to list directory files in long format.',
     expectedTool: 'execute_command',
     expectedArgSubstrings: { command: 'ls' },
+    expectedToolResults: [{ containsSubstrings: ['README.md', 'package.json'] }],
     description: 'Verifies execution of bash shell commands inside the isolated Docker container sandbox.',
     objective: 'Tests terminal command invocation capability isolated within Docker sandbox.',
     requiredOutput: 'Tool call request: execute_command(command: "ls -la"). Expected output: directory listing.',
@@ -452,10 +611,17 @@ export const BENCHMARK_TEST_CASES: BenchmarkTestCase[] = [
     prompt: 'Use the execute_command tool to run the shell command: echo "Docker Sandbox Execution" > container_test.txt.',
     expectedTool: 'execute_command',
     expectedArgSubstrings: { command: 'echo' },
+    expectedFileState: [
+      {
+        relativePath: 'container_test.txt',
+        mustExist: true,
+        containsSubstrings: ['Docker Sandbox Execution'],
+      },
+    ],
     description: 'Verifies shell command file creation inside the isolated Docker container sandbox.',
     objective: 'Tests terminal-based file generation capabilities in isolated Docker environment.',
     requiredOutput: 'Tool call request: execute_command(command: "echo ... > container_test.txt").',
-    evaluationCriteria: 'PASSES if execute_command is invoked with echo command. FAILS if terminal command is omitted.',
+    evaluationCriteria: 'PASSES if container_test.txt is created on disk containing "Docker Sandbox Execution".',
   },
   {
     id: 'test_terminal_env_vars',
@@ -464,6 +630,7 @@ export const BENCHMARK_TEST_CASES: BenchmarkTestCase[] = [
     prompt: 'Use execute_command to print all environment variables in the shell.',
     expectedTool: 'execute_command',
     expectedArgSubstrings: { command: 'env' },
+    expectedToolResults: [{ containsSubstrings: ['PATH='] }],
     description: 'Verifies the model issues an env-inspection command (env or printenv) inside the sandbox.',
     objective: 'Tests environment variable listing via shell command.',
     requiredOutput: 'Tool call request: execute_command(command: "env" or "printenv"). Expected output: list of key=value pairs.',
@@ -476,6 +643,8 @@ export const BENCHMARK_TEST_CASES: BenchmarkTestCase[] = [
     prompt: 'Use execute_command to calculate 47 multiplied by 13 using a shell command and return the result.',
     expectedTool: 'execute_command',
     expectedArgSubstrings: { command: '47' },
+    expectedToolResults: [{ containsSubstrings: ['611'] }],
+    expectedResponseSubstrings: ['611'],
     description: 'Verifies the model performs in-shell arithmetic (expr, bc, or echo $((...))) inside the Docker sandbox.',
     objective: 'Tests shell arithmetic computation capability.',
     requiredOutput: 'Tool call request: execute_command(command containing "47" and "13"). Expected output: 611.',
@@ -488,6 +657,7 @@ export const BENCHMARK_TEST_CASES: BenchmarkTestCase[] = [
     prompt: 'Use execute_command to read server_info.txt and filter lines containing the word "cluster" using grep.',
     expectedTool: 'execute_command',
     expectedArgSubstrings: { command: 'grep' },
+    expectedToolResults: [{ containsSubstrings: ['cluster alpha-9'] }],
     description: 'Verifies the model constructs a piped shell command (cat file | grep keyword) inside the Docker sandbox.',
     objective: 'Tests pipe and grep pattern matching via shell command.',
     requiredOutput: 'Tool call request: execute_command(command with "grep" and "cluster"). Expected output: matching line.',
@@ -500,6 +670,7 @@ export const BENCHMARK_TEST_CASES: BenchmarkTestCase[] = [
     prompt: 'Use execute_command to list all running processes in the shell.',
     expectedTool: 'execute_command',
     expectedArgSubstrings: { command: 'ps' },
+    expectedToolResults: [{ containsSubstrings: ['PID'] }],
     description: 'Verifies the model issues a process-listing command (ps aux or ps -e) inside the Docker sandbox.',
     objective: 'Tests process enumeration via shell command.',
     requiredOutput: 'Tool call request: execute_command(command: "ps aux" or "ps -e"). Expected output: process table.',
@@ -509,9 +680,11 @@ export const BENCHMARK_TEST_CASES: BenchmarkTestCase[] = [
     id: 'test_terminal_count_files',
     name: 'Terminal File Count (ls | wc -l)',
     category: 'terminal_execution',
-    prompt: 'Use execute_command to count the total number of files in the current directory using a shell command.',
+    prompt: 'Use execute_command with `ls -1 | wc -l` to count the immediate non-hidden entries in the current directory, then report the count.',
     expectedTool: 'execute_command',
     expectedArgSubstrings: { command: 'wc' },
+    expectedToolResults: [{ containsSubstrings: ['9'] }],
+    expectedResponseSubstrings: ['9'],
     description: 'Verifies the model constructs a file-counting pipeline (ls | wc -l or find | wc -l) inside the sandbox.',
     objective: 'Tests file counting via shell pipeline.',
     requiredOutput: 'Tool call request: execute_command(command containing "wc"). Expected output: a numeric count.',
@@ -524,6 +697,8 @@ export const BENCHMARK_TEST_CASES: BenchmarkTestCase[] = [
     prompt: 'You must use execute_command for every step — do NOT use create_file or edit_file. Step 1: call execute_command with command "mkdir output". Step 2: call execute_command with command "echo benchmark_result > output/result.txt". Step 3: call execute_command with command "cat output/result.txt" to confirm the file content.',
     expectedToolSequence: ['execute_command', 'execute_command', 'execute_command'],
     expectedArgSubstrings: { command: 'mkdir' },
+    expectedFileState: [{ relativePath: 'output/result.txt', exactMatch: 'benchmark_result\n' }],
+    expectedToolResults: [{ containsSubstrings: ['benchmark_result'] }],
     description: 'Verifies multi-step terminal workflow: directory creation, file write, and file read — all via execute_command in sequence.',
     objective: 'Tests multi-turn shell command chaining (mkdir → echo → cat) inside Docker sandbox.',
     requiredOutput: 'Three sequential execute_command calls: mkdir output, echo "benchmark_result" > output/result.txt, cat output/result.txt.',
@@ -535,6 +710,7 @@ export const BENCHMARK_TEST_CASES: BenchmarkTestCase[] = [
     category: 'terminal_execution',
     prompt: 'How many miles is 10 kilometres? Answer directly without running any commands.',
     expectedTool: null,
+    expectedResponseSubstrings: ['6.21'],
     description: 'Verifies the model does not invoke execute_command for a simple unit conversion question that can be answered directly.',
     objective: 'Tests discrimination to avoid unnecessary terminal tool calls for pure knowledge questions.',
     requiredOutput: 'Direct text answer (≈6.21 miles) with zero tool calls.',
@@ -546,6 +722,8 @@ export const BENCHMARK_TEST_CASES: BenchmarkTestCase[] = [
     category: 'terminal_execution',
     prompt: 'You must use execute_command for both steps. Step 1: call execute_command with command "grep userId user_profile.json" to extract the userId from the file. Step 2: call execute_command with command "echo User ID is 9482" to print the result. Do NOT use read_file — use only execute_command for both steps.',
     expectedToolSequence: ['execute_command', 'execute_command'],
+    expectedToolResults: [{ containsSubstrings: ['User ID is 9482'] }],
+    expectedResponseSubstrings: ['9482'],
     description: 'Verifies a two-step terminal pipeline: grep to extract a value from a JSON file, then echo the result — both via execute_command.',
     objective: 'Tests chained shell commands where the output of one informs the next.',
     requiredOutput: 'Two sequential execute_command calls: grep userId user_profile.json, then echo "User ID is 9482".',
@@ -732,9 +910,16 @@ export const BENCHMARK_TEST_CASES: BenchmarkTestCase[] = [
     prompt: 'Get structural AST outline of symbols in src/core/agent.ts.',
     expectedTool: 'get_document_symbols',
     expectedArgSubstrings: { relative_path: 'src/core/agent.ts' },
+    expectedToolResults: [{ containsSubstrings: ['AgentEngine', 'sendMessage'] }],
+    expectedResponseSubstrings: ['AgentEngine', 'sendMessage'],
     description: 'Verifies model calls `get_document_symbols` to get functions, classes, and types from AST.',
     objective: 'Tests language-aware AST symbol navigation.',
     requiredOutput: 'Invoke get_document_symbols for src/core/agent.ts.',
     evaluationCriteria: 'PASSES if get_document_symbols is invoked targeting src/core/agent.ts.',
   },
 ];
+
+export const BENCHMARK_TEST_CASES: BenchmarkTestCase[] = BENCHMARK_DEFINITIONS.map((testCase) => ({
+  ...testCase,
+  ...describeBenchmarkOutcome(testCase),
+}));

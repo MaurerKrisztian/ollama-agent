@@ -9,7 +9,9 @@ import { AgentEngine } from '../core/agent.js';
 import { TOOL_DEFINITIONS } from '../core/tools.js';
 import { runBenchmarkSuite, runSingleBenchmarkTest } from '../benchmark/runner.js';
 import { BENCHMARK_TEST_CASES, BenchmarkTestCase } from '../benchmark/testCases.js';
+import type { BenchmarkAgentConfig } from '../benchmark/types.js';
 import { isCommandWhitelisted, DEFAULT_COMMAND_WHITELIST } from '../core/commandWhitelist.js';
+import { handleOpenAiChatCompletions, handleOpenAiModels } from './openaiAdapter.js';
 
 import fsSync from 'node:fs';
 
@@ -27,6 +29,7 @@ function getInitialPersistedConfig(): {
   terminalMode: 'confirm' | 'auto';
   fileEditMode: 'confirm' | 'auto';
   enableThinking: boolean;
+  complexityProfile: 'simple' | 'medium' | 'advanced';
 } {
   let workingDir = process.cwd();
   let ollamaHost = process.env.OLLAMA_HOST || 'http://127.0.0.1:11434';
@@ -36,6 +39,7 @@ function getInitialPersistedConfig(): {
   let terminalMode: 'confirm' | 'auto' = 'confirm';
   let fileEditMode: 'confirm' | 'auto' = 'confirm';
   let enableThinking = true;
+  let complexityProfile: 'simple' | 'medium' | 'advanced' = 'simple';
 
   try {
     if (fsSync.existsSync(CONFIG_FILE_PATH)) {
@@ -65,10 +69,13 @@ function getInitialPersistedConfig(): {
       if (typeof parsed.enableThinking === 'boolean') {
         enableThinking = parsed.enableThinking;
       }
+      if (parsed.complexityProfile === 'simple' || parsed.complexityProfile === 'medium' || parsed.complexityProfile === 'advanced') {
+        complexityProfile = parsed.complexityProfile;
+      }
     }
   } catch (_) {}
 
-  return { workingDir, ollamaHost, ollamaToken, model, allowedCommands, terminalMode, fileEditMode, enableThinking };
+  return { workingDir, ollamaHost, ollamaToken, model, allowedCommands, terminalMode, fileEditMode, enableThinking, complexityProfile };
 }
 
 function savePersistedConfig(updatedConfig: Record<string, any>) {
@@ -94,6 +101,7 @@ const agent = new AgentEngine({
   ollamaToken: initialConfig.ollamaToken,
   workingDir: initialConfig.workingDir,
   enableThinking: initialConfig.enableThinking,
+  complexityProfile: initialConfig.complexityProfile,
 });
 
 // Auto-load MCP configuration if available
@@ -627,7 +635,7 @@ app.post('/api/chat/tool-approval', (req, res) => {
 
 // POST /api/chat/tool-settings - Update tool approval preferences & max loops & thinking
 app.post('/api/chat/tool-settings', (req, res) => {
-  const { terminalMode, fileEditMode, allowedCommands, maxLoops, enableThinking } = req.body;
+  const { terminalMode, fileEditMode, allowedCommands, maxLoops, enableThinking, complexityProfile } = req.body;
   if (terminalMode === 'confirm' || terminalMode === 'auto') {
     terminalRequireConfirm = terminalMode === 'confirm';
   }
@@ -643,12 +651,16 @@ app.post('/api/chat/tool-settings', (req, res) => {
   if (typeof enableThinking === 'boolean') {
     agent.updateConfig({ enableThinking });
   }
+  if (complexityProfile === 'simple' || complexityProfile === 'medium' || complexityProfile === 'advanced') {
+    agent.updateConfig({ complexityProfile });
+  }
 
   savePersistedConfig({
     allowedCommands: allowedCommandsState,
     terminalMode: terminalRequireConfirm ? 'confirm' : 'auto',
     fileEditMode: fileEditRequireConfirm ? 'confirm' : 'auto',
     enableThinking: agent.getConfig().enableThinking,
+    complexityProfile: agent.getConfig().complexityProfile,
   });
 
   res.json({
@@ -880,10 +892,39 @@ app.get('/api/benchmark/testcases', (req, res) => {
   res.json({ testCases: BENCHMARK_TEST_CASES });
 });
 
+const parseBenchmarkAgentConfig = (value: unknown): BenchmarkAgentConfig => {
+  if (!value || typeof value !== 'object') return {};
+  const input = value as Record<string, unknown>;
+  const config: BenchmarkAgentConfig = {};
+  if (typeof input.temperature === 'number' && input.temperature >= 0 && input.temperature <= 1) config.temperature = input.temperature;
+  if (typeof input.systemPrompt === 'string' && input.systemPrompt.trim()) config.systemPrompt = input.systemPrompt;
+  if (typeof input.showWorkingDirInfo === 'boolean') config.showWorkingDirInfo = input.showWorkingDirInfo;
+  if (typeof input.contextWindow === 'number' && Number.isInteger(input.contextWindow) && input.contextWindow >= 1024) config.contextWindow = input.contextWindow;
+  if (typeof input.maxLoops === 'number' && Number.isInteger(input.maxLoops) && input.maxLoops >= 0 && input.maxLoops <= 50) config.maxLoops = input.maxLoops;
+  if (typeof input.enableThinking === 'boolean') config.enableThinking = input.enableThinking;
+  if (input.complexityProfile === 'simple' || input.complexityProfile === 'medium' || input.complexityProfile === 'advanced') {
+    config.complexityProfile = input.complexityProfile;
+  }
+  if (input.pruningConfig && typeof input.pruningConfig === 'object') {
+    const pruning = input.pruningConfig as Record<string, unknown>;
+    const current = agent.getContextManager().getPruningConfig();
+    config.pruningConfig = {
+      enabled: typeof pruning.enabled === 'boolean' ? pruning.enabled : current.enabled,
+      pruneSupersededReads: typeof pruning.pruneSupersededReads === 'boolean' ? pruning.pruneSupersededReads : current.pruneSupersededReads,
+      invalidateOnMutation: typeof pruning.invalidateOnMutation === 'boolean' ? pruning.invalidateOnMutation : current.invalidateOnMutation,
+      enableToolTTL: typeof pruning.enableToolTTL === 'boolean' ? pruning.enableToolTTL : current.enableToolTTL,
+      terminalOutputTTLTurns: typeof pruning.terminalOutputTTLTurns === 'number' && Number.isInteger(pruning.terminalOutputTTLTurns) && pruning.terminalOutputTTLTurns >= 0 ? pruning.terminalOutputTTLTurns : current.terminalOutputTTLTurns,
+      webOutputTTLTurns: typeof pruning.webOutputTTLTurns === 'number' && Number.isInteger(pruning.webOutputTTLTurns) && pruning.webOutputTTLTurns >= 0 ? pruning.webOutputTTLTurns : current.webOutputTTLTurns,
+    };
+  }
+  return config;
+};
+
 // POST /api/benchmark/run - Synchronous benchmark run (optional category filter)
 app.post('/api/benchmark/run', async (req, res) => {
   const targetModel = req.body.model || agent.getConfig().model;
   const targetHost = req.body.host || agent.getConfig().ollamaHost;
+  const benchmarkAgentConfig = parseBenchmarkAgentConfig(req.body.agentConfig);
   const category = req.body.category as string | undefined;
 
   const tests: BenchmarkTestCase[] = category
@@ -891,7 +932,7 @@ app.post('/api/benchmark/run', async (req, res) => {
     : BENCHMARK_TEST_CASES;
 
   try {
-    const report = await runBenchmarkSuite(targetModel, targetHost, undefined, tests, agent.getOllamaToken());
+    const report = await runBenchmarkSuite(targetModel, targetHost, undefined, tests, agent.getOllamaToken(), undefined, undefined, benchmarkAgentConfig);
     res.json({ success: true, report });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
@@ -907,9 +948,10 @@ app.post('/api/benchmark/run-single', async (req, res) => {
 
   const targetModel = model || agent.getConfig().model;
   const targetHost = host || agent.getConfig().ollamaHost;
+  const benchmarkAgentConfig = parseBenchmarkAgentConfig(req.body.agentConfig);
 
   try {
-    const trace = await runSingleBenchmarkTest(testId, targetModel, targetHost, agent.getOllamaToken());
+    const trace = await runSingleBenchmarkTest(testId, targetModel, targetHost, agent.getOllamaToken(), undefined, benchmarkAgentConfig);
     res.json({ success: true, trace });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
@@ -920,6 +962,7 @@ app.post('/api/benchmark/run-single', async (req, res) => {
 app.post('/api/benchmark/run-stream', async (req, res) => {
   const targetModel = req.body.model || agent.getConfig().model;
   const targetHost = req.body.host || agent.getConfig().ollamaHost;
+  const benchmarkAgentConfig = parseBenchmarkAgentConfig(req.body.agentConfig);
   const category = req.body.category as string | undefined;
 
   const tests: BenchmarkTestCase[] = category
@@ -957,6 +1000,7 @@ app.post('/api/benchmark/run-stream', async (req, res) => {
         });
       },
       benchmarkController.signal,
+      benchmarkAgentConfig,
     );
 
     sendEvent('benchmark_done', { report });
@@ -970,6 +1014,10 @@ app.post('/api/benchmark/run-stream', async (req, res) => {
     res.end();
   }
 });
+
+// OpenAI API Compatibility Endpoints (for official benchmark CLI harnesses like TerminalBench 2.0 / SWE-bench)
+app.get('/v1/models', (req, res) => handleOpenAiModels(agent, req, res));
+app.post('/v1/chat/completions', (req, res) => handleOpenAiChatCompletions(agent, req, res));
 
 app.listen(PORT, () => {
   console.log(`\n🚀 Server listening on http://localhost:${PORT}`);

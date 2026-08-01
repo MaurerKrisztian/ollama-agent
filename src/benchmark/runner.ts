@@ -1,36 +1,103 @@
+import { execFile, spawn } from 'child_process';
 import fs from 'fs/promises';
+import os from 'os';
 import path from 'path';
+import { fileURLToPath } from 'url';
+import { promisify } from 'util';
 import { AgentEngine } from '../core/agent.js';
+import type { ChatMessage } from '../core/types.js';
+import { evaluateBenchmarkTask } from './evaluators.js';
 import { setupMockEnvironment } from './mockEnv.js';
 import { BENCHMARK_TEST_CASES, BenchmarkTestCase } from './testCases.js';
+import type { BenchmarkAgentConfig, BenchmarkReport, TestResultTrace } from './types.js';
 
-export interface TestResultTrace {
+export type { BenchmarkReport, TestResultTrace };
+
+export const BENCHMARK_DOCKER_IMAGE = 'local-model-chat-benchmark:node20';
+const execFileAsync = promisify(execFile);
+const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+let imageBuildPromise: Promise<void> | null = null;
+
+interface ContainerRequest {
   testId: string;
-  testName: string;
-  category: string;
-  prompt: string;
-  expectedTool: string | null;
-  expectedToolSequence?: string[];
-  actualToolsCalled: Array<{ name: string; args: Record<string, any> }>;
-  passed: boolean;
-  reason: string;
-  durationMs: number;
-  responseContent: string;
-  objective: string;
-  requiredOutput: string;
-  evaluationCriteria: string;
+  modelName: string;
+  ollamaHost: string;
+  ollamaToken?: string;
+  agentConfig?: BenchmarkAgentConfig;
 }
 
-export interface BenchmarkReport {
-  timestamp: number;
-  model: string;
-  mockWorkingDir: string;
-  totalTests: number;
-  passCount: number;
-  failCount: number;
-  accuracyPercentage: number;
-  totalDurationMs: number;
-  results: TestResultTrace[];
+async function ensureBenchmarkImage(): Promise<void> {
+  if (!imageBuildPromise) {
+    imageBuildPromise = (async () => {
+      await execFileAsync(
+        'docker',
+        ['build', '--file', 'Dockerfile.benchmark', '--tag', BENCHMARK_DOCKER_IMAGE, '.'],
+        { cwd: projectRoot, timeout: 10 * 60_000, maxBuffer: 10 * 1024 * 1024 }
+      );
+    })().catch((error) => {
+      imageBuildPromise = null;
+      throw error;
+    });
+  }
+  await imageBuildPromise;
+}
+
+async function runDockerContainer(
+  request: ContainerRequest,
+  ioDir: string,
+  workspaceDir: string,
+  signal?: AbortSignal
+): Promise<void> {
+  const containerName = `local-model-chat-bench-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  const args = [
+    'run', '--rm', '--name', containerName,
+    '--user', `${process.getuid?.() ?? 1000}:${process.getgid?.() ?? 1000}`,
+    '--cap-drop', 'ALL',
+    '--security-opt', 'no-new-privileges',
+    '--pids-limit', '256',
+    '--memory', '1g',
+    '--cpus', '2',
+    '--env', 'BENCHMARK_CONTAINER=1',
+    '--network', 'host',
+    '--mount', `type=bind,src=${ioDir},dst=/benchmark-io`,
+    '--mount', `type=bind,src=${workspaceDir},dst=/workspace`,
+    BENCHMARK_DOCKER_IMAGE,
+  ];
+
+  await fs.writeFile(path.join(ioDir, 'request.json'), JSON.stringify(request), { mode: 0o600 });
+
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn('docker', args, { cwd: projectRoot, stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+    const collect = (chunk: Buffer, target: 'stdout' | 'stderr') => {
+      if (target === 'stdout') stdout += chunk.toString();
+      else stderr += chunk.toString();
+    };
+    child.stdout.on('data', (chunk) => collect(chunk, 'stdout'));
+    child.stderr.on('data', (chunk) => collect(chunk, 'stderr'));
+
+    const abort = () => {
+      child.kill('SIGTERM');
+      void execFileAsync('docker', ['stop', '--time', '1', containerName]).catch(() => undefined);
+      const error = new Error('Benchmark container execution was aborted.');
+      error.name = 'AbortError';
+      reject(error);
+    };
+    if (signal?.aborted) return abort();
+    signal?.addEventListener('abort', abort, { once: true });
+
+    child.on('error', (error) => {
+      signal?.removeEventListener('abort', abort);
+      reject(error);
+    });
+    child.on('close', (code) => {
+      signal?.removeEventListener('abort', abort);
+      if (signal?.aborted) return;
+      if (code === 0) resolve();
+      else reject(new Error(`Benchmark container exited with code ${code}.\n${stderr || stdout}`));
+    });
+  });
 }
 
 export async function runSingleBenchmarkTest(
@@ -39,396 +106,173 @@ export async function runSingleBenchmarkTest(
   ollamaHost: string = 'http://127.0.0.1:11434',
   ollamaToken?: string,
   signal?: AbortSignal,
+  agentConfig?: BenchmarkAgentConfig,
 ): Promise<TestResultTrace> {
   signal?.throwIfAborted();
-  const testCase = BENCHMARK_TEST_CASES.find((t) => t.id === testId);
-  if (!testCase) {
+  if (!BENCHMARK_TEST_CASES.some((testCase) => testCase.id === testId)) {
     throw new Error(`Test case "${testId}" not found.`);
   }
 
-  const mockDir = await setupMockEnvironment();
-  const testStart = Date.now();
+  await ensureBenchmarkImage();
+  signal?.throwIfAborted();
+  const attemptDir = await fs.mkdtemp(path.join(os.tmpdir(), 'local-model-chat-benchmark-'));
+  const ioDir = path.join(attemptDir, 'io');
+  const workspaceDir = path.join(attemptDir, 'workspace');
+  await fs.mkdir(ioDir);
+  await fs.mkdir(workspaceDir);
 
+  try {
+    await runDockerContainer({
+      testId,
+      modelName,
+      ollamaHost,
+      ollamaToken,
+      agentConfig,
+    }, ioDir, workspaceDir, signal);
+    const result = JSON.parse(await fs.readFile(path.join(ioDir, 'result.json'), 'utf8')) as TestResultTrace;
+    return result;
+  } finally {
+    await fs.rm(attemptDir, { recursive: true, force: true });
+  }
+}
+
+export async function runBenchmarkAttemptInContainer(
+  testCase: BenchmarkTestCase,
+  modelName: string,
+  ollamaHost: string,
+  ollamaToken?: string,
+  agentConfig?: BenchmarkAgentConfig,
+): Promise<TestResultTrace> {
+  if (process.env.BENCHMARK_CONTAINER !== '1') {
+    throw new Error('Refusing to execute a benchmark attempt outside its Docker container.');
+  }
+  const workspace = await setupMockEnvironment('/workspace');
+  const startedAt = Date.now();
   const agent = new AgentEngine({
     model: modelName,
     ollamaHost,
     ollamaToken,
-    workingDir: mockDir,
-    showWorkingDirInfo: testCase.enableProjectContext ?? false,
+    workingDir: workspace,
+    temperature: agentConfig?.temperature,
+    systemPrompt: agentConfig?.systemPrompt,
+    showWorkingDirInfo: agentConfig?.showWorkingDirInfo ?? testCase.enableProjectContext ?? false,
+    contextWindow: agentConfig?.contextWindow,
+    maxLoops: agentConfig?.maxLoops,
+    enableThinking: agentConfig?.enableThinking,
+    complexityProfile: agentConfig?.complexityProfile,
+    pruningConfig: agentConfig?.pruningConfig,
   });
 
-  // Wrap ToolExecutor with Docker Sandbox Isolation for benchmark terminal tasks
   const executor = agent.getToolExecutor();
-  const originalExecuteCommand = executor.executeCommand.bind(executor);
   const originalExecuteTool = executor.executeTool.bind(executor);
   executor.executeTool = async (name: string, args: Record<string, any>) => {
     if (name === 'web_search') {
       const query = String(args.query || '');
       if (query.toLowerCase().includes('node')) {
-        return {
-          query,
-          result_count: 2,
-          results: [
-            {
-              title: 'Node.js releases',
-              url: 'https://benchmark.example/node-release-schedule',
-              snippet: 'Official release schedule and support status for Node.js versions.',
-            },
-            {
-              title: 'Node.js 22 release announcement',
-              url: 'https://benchmark.example/node-22-announcement',
-              snippet: 'Highlights from the original Node.js 22 release.',
-            },
-          ],
-        };
+        return { query, result_count: 2, results: [
+          { title: 'Node.js releases', url: 'https://benchmark.example/node-release-schedule', snippet: 'Official release schedule and support status for Node.js versions.' },
+          { title: 'Node.js 22 release announcement', url: 'https://benchmark.example/node-22-announcement', snippet: 'Highlights from the original Node.js 22 release.' },
+        ] };
       }
       if (query.toLowerCase().includes('lighthouse')) {
-        return {
-          query,
-          result_count: 2,
-          results: [
-            {
-              title: 'Project Lighthouse release notes',
-              url: 'https://benchmark.example/lighthouse-release',
-              snippet: 'Official release announcement and launch details for Project Lighthouse.',
-            },
-            {
-              title: 'Lighthouse project archive',
-              url: 'https://benchmark.example/lighthouse-archive',
-              snippet: 'Older Project Lighthouse planning documents.',
-            },
-          ],
-        };
+        return { query, result_count: 2, results: [
+          { title: 'Project Lighthouse release notes', url: 'https://benchmark.example/lighthouse-release', snippet: 'Official release announcement and launch details for Project Lighthouse.' },
+          { title: 'Lighthouse project archive', url: 'https://benchmark.example/lighthouse-archive', snippet: 'Older Project Lighthouse planning documents.' },
+        ] };
       }
-      return {
-        query,
-        result_count: 2,
-        results: [
-          {
-            title: 'Ollama documentation',
-            url: 'https://docs.ollama.com/',
-            snippet: 'Official documentation for running and building with Ollama.',
-          },
-          {
-            title: 'Ollama on GitHub',
-            url: 'https://github.com/ollama/ollama',
-            snippet: 'Source code and project information.',
-          },
-        ],
-      };
+      return { query, result_count: 2, results: [
+        { title: 'Ollama documentation', url: 'https://docs.ollama.com/', snippet: 'Official documentation for running and building with Ollama.' },
+        { title: 'Ollama on GitHub', url: 'https://github.com/ollama/ollama', snippet: 'Source code and project information.' },
+      ] };
     }
     if (name === 'read_web_page') {
-      if (String(args.url || '').includes('node-release-schedule')) {
+      const url = String(args.url || '');
+      if (url.includes('node-release-schedule')) {
         return {
-          title: 'Node.js releases',
-          url: String(args.url || ''),
-          byline: 'Node.js Release Working Group',
+          title: 'Node.js releases', url, byline: 'Node.js Release Working Group',
           excerpt: 'Release schedule and support status for Node.js versions.',
-          markdown:
-            '# Node.js releases\n\n' +
-            'Production applications should use Active LTS or Maintenance LTS releases.\n\n' +
-            '## Release schedule\n\n' +
-            '| Version | Status | End of security support |\n' +
-            '| --- | --- | --- |\n' +
-            '| Node.js 22 | Maintenance LTS | **30 April 2027** |\n',
+          markdown: '# Node.js releases\n\n| Version | Status | End of security support |\n| --- | --- | --- |\n| Node.js 22 | Maintenance LTS | **30 April 2027** |\n',
           truncated: false,
         };
       }
       return {
-        title: 'Project Lighthouse release notes',
-        url: String(args.url || ''),
-        byline: 'Lighthouse Release Team',
+        title: 'Project Lighthouse release notes', url, byline: 'Lighthouse Release Team',
         excerpt: 'Official Project Lighthouse release announcement.',
-        markdown:
-          '# Project Lighthouse release notes\n\n' +
-          'The exact release codename is **NEBULA-FERN-204**.\n\n' +
-          'The public release date is **17 October 2026**.',
+        markdown: '# Project Lighthouse release notes\n\nThe exact release codename is **NEBULA-FERN-204**.\n\nThe public release date is **17 October 2026**.',
         truncated: false,
       };
     }
     return originalExecuteTool(name, args);
   };
-  executor.executeCommand = async (command: string) => {
-    const dockerCmd = `docker run --rm -v "${mockDir}":/workspace -w /workspace alpine sh -c ${JSON.stringify(command)}`;
-    try {
-      const res = await originalExecuteCommand(dockerCmd);
-      return { ...res, command };
-    } catch (_) {
-      return await originalExecuteCommand(command);
-    }
-  };
 
   const actualToolsCalled: Array<{ name: string; args: Record<string, any> }> = [];
+  const toolResults: Array<{ name: string; result: any }> = [];
+  const executionTrace: TestResultTrace['executionTrace'] = [];
+  let sequence = 0;
   let responseContent = '';
+  let lastAssistantContent = '';
   let testError: string | null = null;
+  const record = (event: Omit<TestResultTrace['executionTrace'][number], 'sequence' | 'timestamp'>) => {
+    executionTrace.push({ sequence: ++sequence, timestamp: Date.now(), ...event });
+  };
 
   try {
-    responseContent = await agent.sendMessage(testCase.prompt, {
+    const aggregateResponse = await agent.sendMessage(testCase.prompt, {
       onToolStart: (name, args) => {
         actualToolsCalled.push({ name, args });
+        record({ type: 'tool_start', name, args });
       },
-      signal,
+      onToolEnd: (name, result) => {
+        toolResults.push({ name, result });
+        record({ type: 'tool_end', name, result });
+      },
+      onMessageAdded: (message: ChatMessage) => {
+        if (message.role === 'assistant') {
+          if (message.content.trim()) lastAssistantContent = message.content;
+          record({ type: 'assistant_message', content: message.content, thinking: message.thinking });
+        }
+      },
     });
+    responseContent = lastAssistantContent || aggregateResponse;
   } catch (err: any) {
-    if (signal?.aborted || err?.name === 'AbortError') throw err;
     testError = err.message;
   }
 
-  const durationMs = Date.now() - testStart;
-
-  let passed = false;
-  let reason = '';
-  const normalizeToolName = (name: string) => (name === 'replace_file' ? 'edit_file' : name);
-  const toolArgumentContains = (
-    call: { name: string; args: Record<string, any> },
-    key: string,
-    expectedSubstring: string
-  ): boolean => {
-    if (expectedSubstring === '') return true;
-    if (call.name === 'replace_file' && key === 'target_text') {
-      // A whole-file replacement has no literal old target. Its correctness is
-      // established by replacement-content and disk verification below.
-      return true;
-    }
-    const actualValue =
-      call.name === 'replace_file' && key === 'replacement_text'
-        ? call.args.content
-        : call.args[key];
-    if (key === 'relative_path' && expectedSubstring === '.') {
-      const val = String(actualValue ?? '').trim();
-      return val === '.' || val === '' || val === './';
-    }
-    return String(actualValue ?? '').includes(expectedSubstring);
-  };
-
-  if (testError) {
-    passed = false;
-    reason = `Execution error: ${testError}`;
-  } else if (testCase.expectedToolSequence) {
-    const expectedSeq = testCase.expectedToolSequence;
-    const actualNames = actualToolsCalled.map((t) => normalizeToolName(t.name));
-
-    let seqMatches = true;
-    let seqError = '';
-
-    let searchFrom = 0;
-    for (let s = 0; s < expectedSeq.length; s++) {
-      const reqTool = expectedSeq[s];
-      const matchIndex = actualNames.indexOf(reqTool, searchFrom);
-      if (matchIndex === -1) {
-        seqMatches = false;
-        seqError = `Missing ordered occurrence ${s + 1} ("${reqTool}") in multi-turn sequence. Called: [${actualNames.join(' -> ')}]`;
-        break;
-      }
-      searchFrom = matchIndex + 1;
-    }
-
-    if (seqMatches) {
-      let argsValid = true;
-      let argMismatchDetail = '';
-
-      if (testCase.expectedArgSubstrings) {
-        for (const [key, expectedSub] of Object.entries(testCase.expectedArgSubstrings)) {
-          const matchingCall = actualToolsCalled.find(
-            (t) => toolArgumentContains(t, key, expectedSub)
-          );
-          if (!matchingCall && expectedSub !== '') {
-            argsValid = false;
-            argMismatchDetail = `Expected argument "${key}" with substring "${expectedSub}" was not found in tool calls.`;
-            break;
-          }
-        }
-      }
-
-      if (argsValid) {
-        passed = true;
-        reason = `Passed Multi-Step Workflow: Successfully executed tool chain [${actualNames.join(' -> ')}].`;
-      } else {
-        passed = false;
-        reason = `Failed Multi-Step Workflow: Executed tools [${actualNames.join(' -> ')}], but argument check failed: ${argMismatchDetail}`;
-      }
-    } else {
-      passed = false;
-      reason = `Failed Multi-Step Workflow: ${seqError}`;
-    }
-  } else if (testCase.expectedTool === null) {
-    if (actualToolsCalled.length === 0) {
-      passed = true;
-      reason = 'Passed: Correctly answered without invoking unnecessary tools.';
-    } else {
-      passed = false;
-      reason = `Failed: Expected 0 tool calls, but model invoked [${actualToolsCalled.map((t) => t.name).join(', ')}].`;
-    }
-  } else {
-    const matchedTool = actualToolsCalled.find(
-      (t) => normalizeToolName(t.name) === testCase.expectedTool
-    );
-
-    if (!matchedTool) {
-      passed = false;
-      const calledNames = actualToolsCalled.map((t) => t.name).join(', ') || 'none';
-      reason = `Failed: Expected tool "${testCase.expectedTool}", but model called [${calledNames}].`;
-    } else {
-      let argsValid = true;
-      let argMismatchDetail = '';
-
-      if (testCase.expectedArgSubstrings) {
-        for (const [key, expectedSub] of Object.entries(testCase.expectedArgSubstrings)) {
-          const actualVal =
-            matchedTool.name === 'replace_file' && key === 'replacement_text'
-              ? String(matchedTool.args.content ?? '')
-              : String(matchedTool.args[key] ?? '');
-          if (!toolArgumentContains(matchedTool, key, expectedSub)) {
-            argsValid = false;
-            argMismatchDetail = `Argument "${key}" expected substring "${expectedSub}", got "${actualVal}".`;
-            break;
-          }
-        }
-      }
-
-      if (argsValid) {
-        passed = true;
-        reason = `Passed: Correctly invoked "${matchedTool.name}" with valid parameters.`;
-      } else {
-        passed = false;
-        reason = `Failed: Invoked "${matchedTool.name}", but parameter check failed: ${argMismatchDetail}`;
-      }
-    }
-  }
-
-  if (passed && testCase.expectedResponseSubstrings?.length) {
-    const normalizedResponse = responseContent.toLowerCase();
-    const missingFacts = testCase.expectedResponseSubstrings.filter(
-      (expected) => !normalizedResponse.includes(expected.toLowerCase())
-    );
-    if (missingFacts.length > 0) {
-      passed = false;
-      reason = `Failed Information Retrieval: Tool usage was correct, but the final response was missing: ${missingFacts.join(', ')}.`;
-    } else {
-      reason = `Passed Information Retrieval: Correct tool call and grounded response containing ${testCase.expectedResponseSubstrings.join(', ')}.`;
-    }
-  }
-
-  if (passed && testCase.forbiddenToolCalls?.length) {
-    const forbiddenCall = testCase.forbiddenToolCalls.find((forbidden) =>
-      actualToolsCalled.some(
-        (call) =>
-          call.name === forbidden.name &&
-          String(call.args[forbidden.argument] ?? '').includes(forbidden.substring)
-      )
-    );
-    if (forbiddenCall) {
-      passed = false;
-      reason =
-        `Failed Selective Skill Loading: "${forbiddenCall.name}" was called with ` +
-        `"${forbiddenCall.argument}" containing forbidden path "${forbiddenCall.substring}".`;
-    }
-  }
-
-  if (passed && testCase.expectedFileJson) {
-    const { relativePath, values } = testCase.expectedFileJson;
-    try {
-      const diskContent = await fs.readFile(path.join(mockDir, relativePath), 'utf-8');
-      const parsed = JSON.parse(diskContent) as Record<string, unknown>;
-      const mismatches = Object.entries(values)
-        .filter(([key, expected]) => parsed[key] !== expected)
-        .map(([key, expected]) => `${key}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(parsed[key])}`);
-
-      if (mismatches.length > 0) {
-        passed = false;
-        reason = `Failed JSON Disk Verification: ${mismatches.join('; ')}.`;
-      } else {
-        reason = `Passed Multi-Field JSON Edit: ${relativePath} contains all expected values.`;
-      }
-    } catch (err: any) {
-      passed = false;
-      reason = `Failed JSON Disk Verification: ${relativePath} could not be parsed (${err.message}).`;
-    }
-  }
-
-  // Disk Verification Assertion for edit_file tasks
-  if (passed && actualToolsCalled.some((t) => t.name === 'edit_file' || t.name === 'replace_file')) {
-    if (testCase.expectedArgSubstrings && testCase.expectedArgSubstrings.replacement_text !== undefined) {
-      const expectedReplacement = testCase.expectedArgSubstrings.replacement_text;
-      const targetRelPath = testCase.expectedArgSubstrings.relative_path || '';
-      const diskFilePath = path.join(mockDir, targetRelPath);
-
-      if (expectedReplacement !== '') {
-        try {
-          const diskContent = await fs.readFile(diskFilePath, 'utf-8');
-          if (!diskContent.includes(expectedReplacement)) {
-            passed = false;
-            reason = `Failed Disk Verification: edit_file tool was called, but replacement text "${expectedReplacement}" was not found in mock disk file.`;
-          }
-        } catch (_) {
-          const baseName = path.basename(targetRelPath);
-          try {
-            const files = await fs.readdir(mockDir, { recursive: true });
-            let fileFound = false;
-            for (const f of files) {
-              if (typeof f === 'string' && f.endsWith(baseName)) {
-                const content = await fs.readFile(path.join(mockDir, f), 'utf-8');
-                if (content.includes(expectedReplacement)) {
-                  fileFound = true;
-                  break;
-                }
-              }
-            }
-            if (!fileFound) {
-              passed = false;
-              reason = `Failed Disk Verification: Replacement text "${expectedReplacement}" was not found in mock disk file.`;
-            }
-          } catch (_) {}
-        }
-      } else if (testCase.expectedArgSubstrings.target_text) {
-        const deletedTarget = testCase.expectedArgSubstrings.target_text;
-        try {
-          const diskContent = await fs.readFile(diskFilePath, 'utf-8');
-          if (diskContent.includes(deletedTarget)) {
-            passed = false;
-            reason = `Failed Disk Verification: Deletion requested, but target text "${deletedTarget}" still exists in mock disk file.`;
-          }
-        } catch (_) {}
-      }
-    }
-  }
-
-  // Disk Verification Assertion for create_file tasks
-  if (passed && actualToolsCalled.some((t) => t.name === 'create_file')) {
-    if (testCase.expectedArgSubstrings && testCase.expectedArgSubstrings.relative_path) {
-      const targetRelPath = testCase.expectedArgSubstrings.relative_path || '';
-      const diskFilePath = path.join(mockDir, targetRelPath);
-      try {
-        await fs.stat(diskFilePath);
-      } catch (_) {
-        const baseName = path.basename(targetRelPath);
-        try {
-          const files = await fs.readdir(mockDir, { recursive: true });
-          const found = files.some((f) => typeof f === 'string' && f.endsWith(baseName));
-          if (!found) {
-            passed = false;
-            reason = `Failed Disk Verification: create_file tool was called, but created file "${targetRelPath}" was not found on disk.`;
-          }
-        } catch (_) {}
-      }
-    }
-  }
+  const evaluation = testError
+    ? { passed: false, reason: `Agent execution failed: ${testError}` }
+    : await evaluateBenchmarkTask(testCase, workspace, actualToolsCalled, responseContent, toolResults);
 
   return {
     testId: testCase.id,
     testName: testCase.name,
     category: testCase.category,
     prompt: testCase.prompt,
-    expectedTool: testCase.expectedToolSequence ? testCase.expectedToolSequence.join(' -> ') : (testCase.expectedTool ?? null),
+    expectedTool: testCase.expectedToolSequence?.join(' -> ') ?? testCase.expectedTool ?? null,
     expectedToolSequence: testCase.expectedToolSequence,
     actualToolsCalled,
-    passed,
-    reason,
-    durationMs,
+    toolResults,
+    executionTrace,
+    passed: evaluation.passed,
+    reason: evaluation.reason,
+    durationMs: Date.now() - startedAt,
     responseContent,
     objective: testCase.objective,
     requiredOutput: testCase.requiredOutput,
     evaluationCriteria: testCase.evaluationCriteria,
+    verificationDetails: evaluation,
+    container: { image: BENCHMARK_DOCKER_IMAGE, isolated: true, workspace: '/workspace' },
+    agentConfig: {
+      model: modelName,
+      ollamaHost,
+      temperature: agent.getConfig().temperature,
+      systemPrompt: agent.getConfig().systemPrompt,
+      showWorkingDirInfo: agent.getConfig().showWorkingDirInfo,
+      contextWindow: agent.getConfig().contextWindow,
+      maxLoops: agent.getConfig().maxLoops,
+      enableThinking: agent.getConfig().enableThinking,
+      complexityProfile: agent.getConfig().complexityProfile,
+      pruningConfig: agent.getContextManager().getPruningConfig(),
+    },
   };
 }
 
@@ -440,39 +284,23 @@ export async function runBenchmarkSuite(
   ollamaToken?: string,
   onTestStart?: (current: number, total: number, testCase: BenchmarkTestCase) => void,
   signal?: AbortSignal,
+  agentConfig?: BenchmarkAgentConfig,
 ): Promise<BenchmarkReport> {
-  signal?.throwIfAborted();
   const startTime = Date.now();
-  const mockDir = await setupMockEnvironment();
-
   const results: TestResultTrace[] = [];
-  let passCount = 0;
-
-  for (let i = 0; i < testCases.length; i++) {
+  for (let index = 0; index < testCases.length; index++) {
     signal?.throwIfAborted();
-    const testCase = testCases[i];
-    onTestStart?.(i + 1, testCases.length, testCase);
-    const trace = await runSingleBenchmarkTest(testCase.id, modelName, ollamaHost, ollamaToken, signal);
-    if (trace.passed) passCount++;
-    results.push(trace);
-
-    if (onProgress) {
-      onProgress(i + 1, testCases.length, trace);
-    }
+    const testCase = testCases[index];
+    onTestStart?.(index + 1, testCases.length, testCase);
+    const result = await runSingleBenchmarkTest(testCase.id, modelName, ollamaHost, ollamaToken, signal, agentConfig);
+    results.push(result);
+    onProgress?.(index + 1, testCases.length, result);
   }
-
-  const totalDurationMs = Date.now() - startTime;
-  const accuracyPercentage = Math.round((passCount / testCases.length) * 100);
-
+  const passCount = results.filter((result) => result.passed).length;
   return {
-    timestamp: Date.now(),
-    model: modelName,
-    mockWorkingDir: mockDir,
-    totalTests: testCases.length,
-    passCount,
-    failCount: testCases.length - passCount,
-    accuracyPercentage,
-    totalDurationMs,
-    results,
+    timestamp: Date.now(), model: modelName, mockWorkingDir: 'ephemeral Docker workspace (/workspace)',
+    totalTests: results.length, passCount, failCount: results.length - passCount,
+    accuracyPercentage: results.length ? Math.round((passCount / results.length) * 100) : 0,
+    totalDurationMs: Date.now() - startTime, results,
   };
 }
