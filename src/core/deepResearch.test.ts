@@ -282,6 +282,7 @@ test('deep research recursively checks relevant links up to the configured depth
 test('semantic classification uses surrounding context and rejects invented URLs', async () => {
   const read: string[] = [];
   const semanticRequests: any[] = [];
+  const classificationProgress: any[] = [];
   const client = {
     async search() {
       return [{ title: 'Battery report', url: 'https://research.example/report', snippet: 'Battery recycling costs' }];
@@ -318,7 +319,9 @@ test('semantic classification uses surrounding context and rejects invented URLs
     return request.pages.map((page) => ({ url: page.url, classification: 'relevant', relevance_score: 92, confidence: 90, reason: 'Actual content confirms the methodology.' }));
   });
 
-  const result = await runner.run('battery recycling costs', 0, undefined, { searchCount: 1, pageCount: 1, linkedPageCount: 2 });
+  const result = await runner.run('battery recycling costs', 0, (progress) => {
+    if (progress.phase === 'classifying_links') classificationProgress.push(progress.link_analysis);
+  }, { searchCount: 1, pageCount: 1, linkedPageCount: 2 });
 
   assert.deepEqual(read, ['https://research.example/report', 'https://research.example/methodology']);
   assert.equal(semanticRequests.length, 2);
@@ -326,6 +329,9 @@ test('semantic classification uses surrounding context and rejects invented URLs
   assert.equal(result.sources[0].discovered_links[0].confirmation, 'confirmed_relevant');
   assert.match(result.sources[0].discovered_links[0].reason, /surrounding section/);
   assert.ok(result.sources.every((source) => !source.url.includes('invented.example')));
+  assert.ok(classificationProgress.some((progress) => progress?.stage === 'ranking_candidates' && progress.status === 'running'));
+  assert.ok(classificationProgress.some((progress) => progress?.stage === 'ranking_candidates' && progress.batches_completed === progress.batches_total));
+  assert.ok(classificationProgress.some((progress) => progress?.stage === 'confirming_pages' && progress.items_completed === 1));
 });
 
 test('actual-content confirmation prevents low-relevance pages from expanding', async () => {

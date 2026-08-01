@@ -441,12 +441,14 @@ const DeepResearchProgress: React.FC<{ args: Record<string, any>; progress?: any
     : null;
   const inspectedPages = Array.isArray(progress?.pages) ? progress.pages : [];
   const noteBatches = Array.isArray(progress?.note_batches) ? progress.note_batches : [];
+  const linkAnalysis = progress?.link_analysis;
   const liveNoteCount = noteBatches.reduce((total: number, batch: any) => total + Number(batch.notes_completed || 0), 0);
   const liveNoteTokens = noteBatches.reduce((total: number, batch: any) =>
     total + Number(batch.estimated_tokens || Math.ceil(String(batch.content || '').length / 4)), 0);
   const phaseLabels: Record<string, string> = {
     searching: 'Searching the web',
     reading: 'Inspecting promising pages',
+    classifying_links: linkAnalysis?.stage === 'confirming_pages' ? 'Confirming linked-page relevance with AI' : 'Ranking discovered links with AI',
     following_links: 'Following relevant website links',
     analyzing: 'Extracting request-relevant evidence',
     collecting_images: 'Collecting and attributing images',
@@ -456,7 +458,15 @@ const DeepResearchProgress: React.FC<{ args: Record<string, any>; progress?: any
   const workflow = [
     { icon: Search, label: 'Search the web', detail: 'Run several focused search queries' },
     { icon: FileText, label: 'Inspect sources', detail: 'Read the most relevant public pages' },
-    { icon: ExternalLink, label: 'Follow evidence', detail: 'Open useful links from those websites' },
+    {
+      icon: ExternalLink,
+      label: 'Follow evidence',
+      detail: progress?.phase === 'classifying_links'
+        ? linkAnalysis?.stage === 'confirming_pages'
+          ? `Confirming ${linkAnalysis.items_completed || 0}/${linkAnalysis.candidates || 0} fetched pages`
+          : `Ranking ${linkAnalysis.items_completed || 0}/${linkAnalysis.candidates || 0} discovered links`
+        : 'Open useful links from those websites',
+    },
     { icon: Brain, label: 'Create relevance notes', detail: 'Use the active model to extract information that directly answers the request' },
     {
       icon: ImageIcon,
@@ -538,6 +548,32 @@ const DeepResearchProgress: React.FC<{ args: Record<string, any>; progress?: any
         </div>
       </div>
 
+      {progress?.phase === 'classifying_links' && linkAnalysis && (
+        <div style={{ marginTop: '10px', padding: '10px 11px', borderRadius: '8px', border: '1px solid rgba(59, 130, 246, 0.3)', background: 'linear-gradient(135deg, rgba(30, 64, 175, 0.12), rgba(124, 58, 237, 0.09))' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '7px', flexWrap: 'wrap' }}>
+            {linkAnalysis.status === 'complete' ? <CheckCircle2 size={13} color="#5eead4" /> : <Loader2 size={13} className="spin" color="#93c5fd" />}
+            <strong style={{ color: '#bfdbfe', fontSize: '0.72rem' }}>
+              {linkAnalysis.stage === 'confirming_pages' ? 'AI is checking fetched-page content' : 'AI is ranking discovered links'}
+            </strong>
+            <span style={{ color: 'var(--text-muted)', fontSize: '0.67rem' }}>depth {linkAnalysis.depth}</span>
+            <span style={{ marginLeft: 'auto', color: '#c4b5fd', fontFamily: 'var(--font-code)', fontSize: '0.66rem' }}>
+              {linkAnalysis.batches_completed}/{linkAnalysis.batches_total} batches · {linkAnalysis.items_completed}/{linkAnalysis.candidates} {linkAnalysis.stage === 'confirming_pages' ? 'pages' : 'links'}
+            </span>
+          </div>
+          <div style={{ height: '5px', marginTop: '8px', overflow: 'hidden', borderRadius: '999px', background: 'rgba(30, 41, 59, 0.8)' }}>
+            <div style={{ width: `${linkAnalysis.batches_total > 0 ? Math.max(4, Math.min(100, (linkAnalysis.batches_completed / linkAnalysis.batches_total) * 100)) : 100}%`, height: '100%', borderRadius: 'inherit', background: linkAnalysis.status === 'complete' ? '#2dd4bf' : 'linear-gradient(90deg, #3b82f6, #8b5cf6)', transition: 'width 180ms ease' }} />
+          </div>
+          <div style={{ marginTop: '7px', display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap', color: 'var(--text-muted)', fontSize: '0.65rem' }}>
+            {Array.isArray(linkAnalysis.active_sites) && linkAnalysis.active_sites.length > 0 ? (
+              <>
+                <span>Active model batches:</span>
+                {linkAnalysis.active_sites.map((site: string, index: number) => <span key={`${site}-${index}`} style={{ padding: '2px 6px', borderRadius: '999px', border: '1px solid rgba(147, 197, 253, 0.18)', color: '#bfdbfe', background: 'rgba(30, 58, 138, 0.14)' }}>{site}</span>)}
+              </>
+            ) : <span>{linkAnalysis.status === 'complete' ? 'Classification complete; selecting the next pages.' : 'Preparing bounded model batches…'}</span>}
+          </div>
+        </div>
+      )}
+
       <ResearchTrail
         live
         steps={Array.isArray(progress?.steps) ? progress.steps : []}
@@ -615,17 +651,46 @@ const DeepResearchProgress: React.FC<{ args: Record<string, any>; progress?: any
 
 const FinalAnswerContextPreview: React.FC<{
   rawContext: string;
-  notes: any[];
-}> = ({ rawContext, notes }) => {
+  sources: any[];
+}> = ({ rawContext, sources }) => {
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [contextView, setContextView] = useState<'relevant' | 'raw'>('relevant');
+  const notes = sources.map((source) => source.ai_note).filter(Boolean);
   const noteContext = JSON.stringify(notes);
   const noteTokens = Math.ceil(noteContext.length / 4);
   const totalTokens = Math.ceil(rawContext.length / 4);
+  const relevantSources = sources.map((source) => {
+    const relevantLinks = (Array.isArray(source.discovered_links) ? source.discovered_links : [])
+      .filter((link: any) =>
+        link.status !== 'failed' &&
+        (link.confirmation === 'confirmed_relevant' || link.classification === 'relevant'),
+      );
+    return { source, relevantLinks };
+  }).filter(({ source, relevantLinks }) => source.ai_note?.relevant || relevantLinks.length > 0);
+  const relevantContext = JSON.stringify({
+    relevant_sources: relevantSources.map(({ source, relevantLinks }) => ({
+      source_id: source.id,
+      title: source.title,
+      url: source.url,
+      ai_note: source.ai_note || null,
+      relevant_links: relevantLinks.map((link: any) => ({
+        title: link.title,
+        url: link.url,
+        status: link.status,
+        confirmation: link.confirmation,
+        relevance_score: link.relevance_score,
+        confidence: link.confidence,
+        reason: link.reason,
+        confirmation_reason: link.confirmation_reason,
+      })),
+    })),
+  }, null, 2);
+  const activeContext = contextView === 'relevant' ? relevantContext : rawContext;
 
   const copyContext = async () => {
     try {
-      await navigator.clipboard.writeText(rawContext);
+      await navigator.clipboard.writeText(activeContext);
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1600);
     } catch (_) {}
@@ -657,18 +722,72 @@ const FinalAnswerContextPreview: React.FC<{
             <div style={{ display: 'flex', alignItems: 'center', gap: '9px', padding: '12px 14px', borderBottom: '1px solid rgba(56, 189, 248, 0.2)' }}>
               <Brain size={16} color="#c4b5fd" />
               <div style={{ minWidth: 0 }}>
-                <strong style={{ display: 'block', color: 'var(--text-main)', fontSize: '0.82rem' }}>Raw deep-research context for the final answer</strong>
-                <span style={{ color: 'var(--text-muted)', fontSize: '0.68rem' }}>{rawContext.length.toLocaleString()} characters · approximately {totalTokens.toLocaleString()} tokens</span>
+                <strong style={{ display: 'block', color: 'var(--text-main)', fontSize: '0.82rem' }}>Deep-research context for the final answer</strong>
+                <span style={{ color: 'var(--text-muted)', fontSize: '0.68rem' }}>{notes.length} relevance notes · raw payload approximately {totalTokens.toLocaleString()} tokens</span>
               </div>
               <button type="button" onClick={copyContext} style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '5px 8px', borderRadius: '5px', border: '1px solid var(--border-color)', background: 'rgba(30, 41, 59, 0.7)', color: copied ? '#5eead4' : 'var(--text-muted)', cursor: 'pointer', fontSize: '0.68rem' }}>
                 {copied ? <Check size={12} /> : <Copy size={12} />} {copied ? 'Copied' : 'Copy'}
               </button>
               <button type="button" onClick={() => setOpen(false)} aria-label="Close context preview" style={{ display: 'grid', placeItems: 'center', width: '28px', height: '28px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer' }}><X size={15} /></button>
             </div>
-            <div style={{ padding: '10px 14px', borderBottom: '1px solid rgba(167, 139, 250, 0.16)', background: 'rgba(124, 58, 237, 0.07)', color: '#cbd5e1', fontSize: '0.7rem', lineHeight: 1.45 }}>
-              This is the exact serialized <code>deep_research</code> tool payload placed in the model conversation. It contains website evidence, AI relevance notes, link decisions, budgets, errors, and answer guidance. The model also sees the conversation’s system instructions, earlier messages, and the final-answer reminder.
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 14px', borderBottom: '1px solid rgba(167, 139, 250, 0.16)', background: 'rgba(124, 58, 237, 0.07)' }}>
+              <button type="button" onClick={() => setContextView('relevant')} style={{ padding: '5px 9px', borderRadius: '6px', border: `1px solid ${contextView === 'relevant' ? 'rgba(167, 139, 250, 0.5)' : 'transparent'}`, background: contextView === 'relevant' ? 'rgba(124, 58, 237, 0.18)' : 'transparent', color: contextView === 'relevant' ? '#ddd6fe' : 'var(--text-muted)', cursor: 'pointer', fontSize: '0.69rem', fontWeight: 650 }}>
+                Relevant notes &amp; links
+              </button>
+              <button type="button" onClick={() => setContextView('raw')} style={{ padding: '5px 9px', borderRadius: '6px', border: `1px solid ${contextView === 'raw' ? 'rgba(56, 189, 248, 0.5)' : 'transparent'}`, background: contextView === 'raw' ? 'rgba(14, 116, 144, 0.18)' : 'transparent', color: contextView === 'raw' ? '#bae6fd' : 'var(--text-muted)', cursor: 'pointer', fontSize: '0.69rem', fontWeight: 650 }}>
+                Exact raw context
+              </button>
+              <span style={{ marginLeft: 'auto', color: 'var(--text-dim)', fontSize: '0.65rem' }}>
+                {contextView === 'relevant' ? `${relevantSources.length} relevant sources` : `${rawContext.length.toLocaleString()} characters`}
+              </span>
             </div>
-            <pre style={{ flex: 1, minHeight: 0, margin: 0, padding: '14px', overflow: 'auto', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', color: '#dbeafe', background: '#060b16', fontFamily: 'var(--font-code)', fontSize: '0.7rem', lineHeight: 1.45 }}>{rawContext}</pre>
+            {contextView === 'relevant' ? (
+              <div style={{ flex: 1, minHeight: 0, padding: '14px', overflow: 'auto', background: '#060b16', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                <div style={{ color: '#cbd5e1', fontSize: '0.7rem', lineHeight: 1.45 }}>
+                  This filtered view shows relevant AI notes and relevant links for readability. Use “Exact raw context” to see the complete serialized payload actually placed in the model conversation.
+                </div>
+                {relevantSources.length === 0 ? (
+                  <div style={{ padding: '16px', borderRadius: '8px', border: '1px solid var(--border-color)', color: 'var(--text-muted)', textAlign: 'center', fontSize: '0.74rem' }}>No sources were classified as relevant.</div>
+                ) : relevantSources.map(({ source, relevantLinks }) => (
+                  <div key={`${source.id}-${source.url}`} style={{ padding: '11px 12px', borderRadius: '8px', border: '1px solid rgba(167, 139, 250, 0.24)', background: 'rgba(30, 41, 59, 0.45)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '7px', minWidth: 0 }}>
+                      <WebsiteFavicon url={source.url} size={16} />
+                      <a href={source.url} target="_blank" rel="noreferrer" style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#7dd3fc', textDecoration: 'none', fontSize: '0.75rem', fontWeight: 650 }}>{source.title || source.url}</a>
+                      <span style={{ marginLeft: 'auto', flexShrink: 0, color: '#c4b5fd', fontFamily: 'var(--font-code)', fontSize: '0.64rem' }}>{source.id}</span>
+                    </div>
+                    {source.ai_note && (
+                      <div style={{ marginTop: '8px', padding: '9px 10px', borderRadius: '7px', border: '1px solid rgba(167, 139, 250, 0.2)', background: 'rgba(124, 58, 237, 0.08)', color: '#ddd6fe', fontSize: '0.7rem', lineHeight: 1.48 }}>
+                        <strong style={{ display: 'block', marginBottom: '5px', color: '#c4b5fd' }}>AI relevance note</strong>
+                        {source.ai_note.note && <p style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{source.ai_note.note}</p>}
+                        {Array.isArray(source.ai_note.key_points) && source.ai_note.key_points.length > 0 && <ul style={{ margin: '7px 0 0 18px', padding: 0, color: '#cbd5e1' }}>{source.ai_note.key_points.map((point: string, index: number) => <li key={`${source.id}-context-point-${index}`}>{point}</li>)}</ul>}
+                        {source.ai_note.limitations && <p style={{ margin: '7px 0 0', color: '#a5b4fc' }}><strong>Limitation:</strong> {source.ai_note.limitations}</p>}
+                      </div>
+                    )}
+                    {relevantLinks.length > 0 && (
+                      <div style={{ marginTop: '8px' }}>
+                        <strong style={{ display: 'block', marginBottom: '5px', color: '#99f6e4', fontSize: '0.67rem' }}>Relevant links</strong>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                          {relevantLinks.map((link: any, index: number) => (
+                            <a key={`${link.url}-${index}`} href={link.url} target="_blank" rel="noreferrer" title={link.reason || link.title} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '5px 7px', borderRadius: '6px', border: '1px solid rgba(45, 212, 191, 0.16)', background: 'rgba(20, 184, 166, 0.06)', color: link.confirmation === 'confirmed_relevant' ? '#5eead4' : '#93c5fd', textDecoration: 'none', fontSize: '0.68rem' }}>
+                              <WebsiteFavicon url={link.url} size={14} />
+                              <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{link.title || link.site_name || link.url}</span>
+                              <span style={{ marginLeft: 'auto', flexShrink: 0, color: 'var(--text-dim)', fontSize: '0.61rem' }}>{link.confirmation === 'confirmed_relevant' ? 'confirmed' : `score ${link.relevance_score}`}</span>
+                            </a>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+                <div style={{ padding: '9px 14px', borderBottom: '1px solid rgba(56, 189, 248, 0.12)', color: '#cbd5e1', fontSize: '0.68rem', lineHeight: 1.4 }}>
+                  This is the exact serialized <code>deep_research</code> tool payload. The model also sees system instructions, earlier messages, and the final-answer reminder.
+                </div>
+                <pre style={{ flex: 1, minHeight: 0, margin: 0, padding: '14px', overflow: 'auto', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', color: '#dbeafe', background: '#060b16', fontFamily: 'var(--font-code)', fontSize: '0.7rem', lineHeight: 1.45 }}>{rawContext}</pre>
+              </div>
+            )}
           </div>
         </div>,
         document.body,
@@ -727,7 +846,7 @@ const DeepResearchResultsView: React.FC<{
           Budget: {researchBudget.searches ?? searchesCompleted} searches · {researchBudget.primary_pages ?? 'adaptive'} primary pages · {researchBudget.follow_up_pages ?? 'adaptive'} follow-ups · link depth {researchBudget.link_depth ?? 1} · semantic ranking {researchBudget.semantic_link_classification === false ? 'off' : `on (≥${researchBudget.link_relevance_threshold ?? 70})`} · {Number(researchBudget.evidence_characters || 0).toLocaleString()} evidence characters
         </span>
       )}
-      <FinalAnswerContextPreview rawContext={rawContext} notes={sources.map((source) => source.ai_note).filter(Boolean)} />
+      <FinalAnswerContextPreview rawContext={rawContext} sources={sources} />
     </div>
     <div style={{ display: 'flex', alignItems: 'flex-start', gap: '7px', padding: '8px 10px', borderRadius: '6px', border: '1px solid rgba(99, 102, 241, 0.24)', background: 'rgba(99, 102, 241, 0.08)', color: 'var(--text-muted)', fontSize: '0.71rem', lineHeight: 1.45 }}>
       <Info size={13} style={{ marginTop: '2px', flexShrink: 0, color: '#a5b4fc' }} />

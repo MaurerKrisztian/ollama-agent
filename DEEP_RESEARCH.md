@@ -431,6 +431,7 @@ Expand **Peek into live research steps** in the active Deep Research card. It sh
 - every completed or failed search;
 - each successfully inspected or failed page;
 - each followed evidence link;
+- live semantic-link ranking and fetched-page confirmation, including depth, completed batches, candidate counts, and active websites;
 - each collected image;
 - live AI-note count and approximate note-context tokens;
 - the current phase and aggregate counters.
@@ -443,7 +444,7 @@ Tasks can complete out of order because searches and page reads run concurrently
 2. Select **Formatted**.
 3. Expand **Inspect research trail**.
 4. Expand any individual source to see its URL, discovery path, excerpt, extracted evidence, and truncation marker.
-5. Use **View AI final-answer context** to inspect or copy the exact serialized deep-research payload placed in the model conversation, including evidence, notes, link decisions, and answer guidance.
+5. Use **View AI final-answer context** for a focused **Relevant notes & links** view, or switch to **Exact raw context** to inspect and copy the complete serialized payload placed in the model conversation.
 6. Select **Raw JSON** to inspect the complete machine-readable payload inline.
 
 The completed trail is stored with the conversation, so it remains inspectable after the live progress card disappears.

@@ -163,7 +163,7 @@ export interface DeepResearchImage {
 }
 
 export interface DeepResearchProgress {
-  phase: 'searching' | 'reading' | 'following_links' | 'analyzing' | 'collecting_images' | 'complete';
+  phase: 'searching' | 'reading' | 'classifying_links' | 'following_links' | 'analyzing' | 'collecting_images' | 'complete';
   searches_completed: number;
   search_queries: string[];
   search_results_found: number;
@@ -175,6 +175,18 @@ export interface DeepResearchProgress {
   images_found: number;
   steps: DeepResearchStep[];
   note_batches: DeepResearchNoteProgress[];
+  link_analysis: DeepResearchLinkAnalysisProgress | null;
+}
+
+export interface DeepResearchLinkAnalysisProgress {
+  stage: 'ranking_candidates' | 'confirming_pages';
+  depth: number;
+  candidates: number;
+  batches_total: number;
+  batches_completed: number;
+  items_completed: number;
+  active_sites: string[];
+  status: 'preparing' | 'running' | 'complete';
 }
 
 export interface DeepResearchStep {
@@ -457,6 +469,8 @@ export class DeepResearchRunner {
     query: string,
     visited: Set<string>,
     semanticEnabled: boolean,
+    depth: number,
+    onAnalysisProgress?: (progress: DeepResearchLinkAnalysisProgress) => void,
   ): Promise<SemanticLinkCandidate[]> {
     const queryTokens = tokenize(query);
     const candidates: SemanticLinkCandidate[] = [];
@@ -497,8 +511,34 @@ export class DeepResearchRunner {
       }
     }
 
-    if (!semanticEnabled || !this.semanticClassifier || batches.length === 0) return candidates;
-    await mapConcurrent(batches, 2, async (batch) => {
+    const report = (
+      status: DeepResearchLinkAnalysisProgress['status'],
+      batchesCompleted: number,
+      itemsCompleted: number,
+      activeSites: string[],
+    ) => onAnalysisProgress?.({
+      stage: 'ranking_candidates',
+      depth,
+      candidates: batches.reduce((total, batch) => total + batch.links.length, 0),
+      batches_total: batches.length,
+      batches_completed: batchesCompleted,
+      items_completed: itemsCompleted,
+      active_sites: activeSites,
+      status,
+    });
+    report('preparing', 0, 0, []);
+    if (!semanticEnabled || !this.semanticClassifier || batches.length === 0) {
+      report('complete', batches.length, candidates.length, []);
+      return candidates;
+    }
+    let batchesCompleted = 0;
+    let itemsCompleted = 0;
+    const activeBatches = new Map<number, string>();
+    await mapConcurrent(batches, 2, async (batch, batchIndex) => {
+      let siteName = batch.parentTitle || batch.parentUrl;
+      try { siteName = new URL(batch.parentUrl).hostname.replace(/^www\./i, ''); } catch (_) {}
+      activeBatches.set(batchIndex, siteName);
+      report('running', batchesCompleted, itemsCompleted, [...activeBatches.values()]);
       try {
         const decisions = await this.semanticClassifier!({
           phase: 'candidate_links',
@@ -522,6 +562,11 @@ export class DeepResearchRunner {
         }
       } catch (_) {
         // Keep deterministic decisions when the model is unavailable or malformed.
+      } finally {
+        batchesCompleted++;
+        itemsCompleted += batch.links.length;
+        activeBatches.delete(batchIndex);
+        report(batchesCompleted === batches.length ? 'complete' : 'running', batchesCompleted, itemsCompleted, [...activeBatches.values()]);
       }
     });
     return candidates;
@@ -532,6 +577,8 @@ export class DeepResearchRunner {
     pages: Array<{ url: string; title: string; excerpt: string | null; markdown: string }>,
     semanticEnabled: boolean,
     relevanceThreshold: number,
+    depth: number,
+    onAnalysisProgress?: (progress: DeepResearchLinkAnalysisProgress) => void,
   ): Promise<Map<string, DeepResearchSemanticDecision>> {
     const queryTokens = tokenize(query);
     const confirmed = new Map<string, DeepResearchSemanticDecision>();
@@ -547,11 +594,36 @@ export class DeepResearchRunner {
         reason: rawScore > 0 ? 'Fetched page content contains terms connected to the research request.' : 'Fetched page content did not match the request in deterministic fallback analysis.',
       });
     }
-    if (!semanticEnabled || !this.semanticClassifier || pages.length === 0) return confirmed;
-
     const batches: typeof pages[] = [];
     for (let index = 0; index < pages.length; index += SEMANTIC_BATCH_SIZE) batches.push(pages.slice(index, index + SEMANTIC_BATCH_SIZE));
-    await mapConcurrent(batches, 2, async (batch) => {
+    const report = (
+      status: DeepResearchLinkAnalysisProgress['status'],
+      batchesCompleted: number,
+      itemsCompleted: number,
+      activeSites: string[],
+    ) => onAnalysisProgress?.({
+      stage: 'confirming_pages',
+      depth,
+      candidates: pages.length,
+      batches_total: batches.length,
+      batches_completed: batchesCompleted,
+      items_completed: itemsCompleted,
+      active_sites: activeSites,
+      status,
+    });
+    report('preparing', 0, 0, []);
+    if (!semanticEnabled || !this.semanticClassifier || pages.length === 0) {
+      report('complete', batches.length, pages.length, []);
+      return confirmed;
+    }
+    let batchesCompleted = 0;
+    let itemsCompleted = 0;
+    const activeBatches = new Map<number, string>();
+    await mapConcurrent(batches, 2, async (batch, batchIndex) => {
+      activeBatches.set(batchIndex, batch.map((page) => {
+        try { return new URL(page.url).hostname.replace(/^www\./i, ''); } catch (_) { return page.title; }
+      }).join(', '));
+      report('running', batchesCompleted, itemsCompleted, [...activeBatches.values()]);
       try {
         const decisions = await this.semanticClassifier!({
           phase: 'fetched_pages',
@@ -568,6 +640,11 @@ export class DeepResearchRunner {
         for (const [url, decision] of validated) confirmed.set(url, decision);
       } catch (_) {
         // Keep content-based deterministic confirmation.
+      } finally {
+        batchesCompleted++;
+        itemsCompleted += batch.length;
+        activeBatches.delete(batchIndex);
+        report(batchesCompleted === batches.length ? 'complete' : 'running', batchesCompleted, itemsCompleted, [...activeBatches.values()]);
       }
     });
     return confirmed;
@@ -629,6 +706,7 @@ export class DeepResearchRunner {
     const inspectedPages: DeepResearchProgress['pages'] = [];
     const steps: DeepResearchStep[] = [];
     const noteBatches = new Map<string, DeepResearchNoteProgress>();
+    let linkAnalysis: DeepResearchLinkAnalysisProgress | null = null;
     const addStep = (step: Omit<DeepResearchStep, 'id'>) => {
       steps.push({ id: steps.length + 1, ...step });
     };
@@ -642,6 +720,7 @@ export class DeepResearchRunner {
           pages: [...inspectedPages],
           images_found: imagesFound,
           steps: [...steps],
+          link_analysis: linkAnalysis ? { ...linkAnalysis, active_sites: [...linkAnalysis.active_sites] } : null,
           note_batches: [...noteBatches.values()].map((batch) => ({
             ...batch,
             source_ids: [...batch.source_ids],
@@ -716,6 +795,11 @@ export class DeepResearchRunner {
         normalizedQuery,
         visited,
         budgets.semanticLinkClassification,
+        depth,
+        (analysis) => {
+          linkAnalysis = analysis;
+          emitProgress('classifying_links');
+        },
       );
       for (const candidate of classifiedLinks) {
         const parentLinks = classifiedLinksByParent.get(candidate.parentUrl) || new Map<string, SemanticLinkCandidate>();
@@ -751,6 +835,11 @@ export class DeepResearchRunner {
         fetchedDepthPages.map(({ page }) => page),
         budgets.semanticLinkClassification,
         budgets.linkRelevanceThreshold,
+        depth,
+        (analysis) => {
+          linkAnalysis = analysis;
+          emitProgress('classifying_links');
+        },
       );
       const successfulDepthPages: FollowedPage[] = fetchedDepthPages.map(({ link, page }) => {
         const targetUrl = canonicalizeUrl(page.url) || link.url;
