@@ -4,18 +4,19 @@ import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { promisify } from 'util';
-import { AgentEngine } from '../core/agent.js';
-import type { ChatMessage } from '../core/types.js';
-import { evaluateBenchmarkTask } from './evaluators.js';
-import { setupMockEnvironment } from './mockEnv.js';
-import { BENCHMARK_TEST_CASES, BenchmarkTestCase } from './testCases.js';
-import type { BenchmarkAgentConfig, BenchmarkReport, TestResultTrace } from './types.js';
+import { AgentEngine } from '../../core/agent.js';
+import type { ChatMessage } from '../../core/types.js';
+import { BENCHMARK_TEST_CASES } from '../cases/index.js';
+import type { BenchmarkTestCase } from '../cases/index.js';
+import { evaluateBenchmarkTask } from '../evaluation/evaluators.js';
+import { setupMockEnvironment } from '../fixtures/mockEnvironment.js';
+import type { BenchmarkAgentConfig, BenchmarkReport, TestResultTrace } from '../types.js';
 
 export type { BenchmarkReport, TestResultTrace };
 
 export const BENCHMARK_DOCKER_IMAGE = 'local-model-chat-benchmark:node20';
 const execFileAsync = promisify(execFile);
-const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 let imageBuildPromise: Promise<void> | null = null;
 
 interface ContainerRequest {

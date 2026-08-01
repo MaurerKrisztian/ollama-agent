@@ -112,9 +112,12 @@ local-model-chat/
 │   │       │   ├── BenchmarkView.tsx    # Benchmark dashboard UI
 │   │       │   └── SystemPromptModal.tsx
 │   │       └── types.ts
-│   └── benchmark/          # Benchmark runner + test cases
-│       ├── runner.ts       # AgentBenchmarkRunner + Docker sandbox
-│       └── testCases.ts    # 50 test cases across 13 categories
+│   └── benchmark/          # Extensible benchmark framework
+│       ├── cases/          # Typed suites + explicit registry
+│       ├── evaluation/     # Outcome-based verifiers
+│       ├── fixtures/       # Disposable workspace fixtures
+│       ├── runtime/        # Docker runner + container worker
+│       └── tests/          # Benchmark framework tests
 ├── agent                   # Global CLI wrapper script (bash → local tsx)
 └── package.json
 ```
@@ -259,6 +262,7 @@ curl -X POST http://localhost:3001/api/benchmark/run
 - The Benchmark tab starts with the current agent configuration and supports run-only overrides for model, Ollama URL, temperature, context size, tool-loop limit, thinking, project context, tool-schema profile, and system prompt.
 - The benchmark image is built automatically once per server/CLI process and reused. Build it manually with `npm run benchmark:image` if desired.
 - On Linux, benchmark containers use host networking so the configured Ollama endpoint `http://127.0.0.1:11434` remains reachable unchanged.
+- See [`src/benchmark/README.md`](src/benchmark/README.md) for the short guide and template for adding a benchmark suite.
 
 ---
 

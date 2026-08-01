@@ -2,9 +2,9 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
-import { buildWorkingDirectoryContext } from '../core/workdir-context.js';
-import { setupMockEnvironment } from './mockEnv.js';
-import { BENCHMARK_TEST_CASES } from './testCases.js';
+import { buildWorkingDirectoryContext } from '../../core/workdir-context.js';
+import { BENCHMARK_TEST_CASES } from '../cases/index.js';
+import { setupMockEnvironment } from '../fixtures/mockEnvironment.js';
 
 test('project-context benchmark fixtures advertise skill metadata without full instructions', async () => {
   const mockDir = await setupMockEnvironment();

@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { evaluateBenchmarkTask, evaluateFileState, evaluateJsonValues, evaluateScriptVerification } from './evaluators.js';
-import { setupMockEnvironment } from './mockEnv.js';
-import { BENCHMARK_TEST_CASES } from './testCases.js';
+import { BENCHMARK_TEST_CASES } from '../cases/index.js';
+import { evaluateBenchmarkTask, evaluateFileState, evaluateJsonValues, evaluateScriptVerification } from '../evaluation/evaluators.js';
+import { setupMockEnvironment } from '../fixtures/mockEnvironment.js';
 
 test('every benchmark defines at least one observable outcome verifier', () => {
   for (const testCase of BENCHMARK_TEST_CASES) {

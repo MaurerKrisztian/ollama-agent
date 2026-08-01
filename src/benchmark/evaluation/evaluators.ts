@@ -2,8 +2,8 @@ import { exec } from 'child_process';
 import fs from 'fs/promises';
 import path from 'path';
 import { promisify } from 'util';
-import { BenchmarkTestCase } from './testCases.js';
-import { DirectoryEntriesSpec, EvaluationResult, FileStateSpec, JsonValueSpec } from './types.js';
+import type { BenchmarkTestCase } from '../cases/index.js';
+import type { DirectoryEntriesSpec, EvaluationResult, FileStateSpec, JsonValueSpec } from '../types.js';
 
 const execAsync = promisify(exec);
 

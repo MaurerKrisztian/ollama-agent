@@ -1,7 +1,7 @@
 import fs from 'fs/promises';
+import { BENCHMARK_TEST_CASES } from '../cases/index.js';
+import type { BenchmarkAgentConfig } from '../types.js';
 import { runBenchmarkAttemptInContainer } from './runner.js';
-import { BENCHMARK_TEST_CASES } from './testCases.js';
-import type { BenchmarkAgentConfig } from './types.js';
 
 interface ContainerRequest {
   testId: string;
