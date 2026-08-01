@@ -20,6 +20,7 @@ pnpm-debug.log*
 
 # Test and coverage output
 coverage/
+benchmark_runs/
 
 # Editor and OS files
 .idea/

@@ -203,6 +203,105 @@ code {
   max-width: 100%;
 }
 
+.benchmark-tabs button,
+.benchmark-secondary-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 0;
+  color: var(--text-muted);
+  background: transparent;
+  padding: 10px 14px;
+  cursor: pointer;
+  font-weight: 650;
+}
+
+.benchmark-tabs button.active {
+  color: #fff;
+  border-bottom: 2px solid var(--accent-primary);
+}
+
+.benchmark-tabs button span {
+  min-width: 20px;
+  padding: 1px 6px;
+  border-radius: 10px;
+  color: var(--text-main);
+  background: rgba(255, 255, 255, 0.09);
+  font-size: 0.7rem;
+}
+
+.benchmark-secondary-button {
+  min-height: 39px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  color: var(--text-main);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.benchmark-empty-runs {
+  min-height: 220px;
+  padding: 30px;
+  border-radius: 14px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.benchmark-empty-runs strong { color: var(--text-main); font-size: 1.05rem; }
+.benchmark-ranking, .benchmark-matrix { border-radius: 14px; overflow: hidden; }
+.benchmark-ranking-header { display: flex; align-items: center; gap: 9px; padding: 17px 20px; border-bottom: 1px solid var(--border-color); }
+.benchmark-ranking-header h3 { margin: 0; font-size: 1rem; }
+.benchmark-ranking-header span { margin-left: auto; color: var(--text-muted); font-size: 0.76rem; }
+.benchmark-table-scroll { max-width: 100%; overflow-x: auto; }
+.benchmark-table-scroll table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+.benchmark-table-scroll th { color: var(--text-muted); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.035em; }
+.benchmark-table-scroll th > button { display: inline-flex; align-items: center; gap: 5px; margin: -5px -7px; padding: 5px 7px; border: 0; border-radius: 5px; color: inherit; background: transparent; cursor: pointer; font: inherit; letter-spacing: inherit; text-transform: inherit; }
+.benchmark-table-scroll th > button:hover { color: var(--text-main); background: rgba(255, 255, 255, 0.06); }
+.benchmark-table-scroll th > button.benchmark-sort-active { color: #7dd3fc; }
+.benchmark-table-scroll th > button span { font-size: 0.62rem; }
+.benchmark-table-scroll th, .benchmark-table-scroll td { padding: 12px 14px; text-align: left; border-bottom: 1px solid rgba(148, 163, 184, 0.13); white-space: nowrap; }
+.benchmark-table-scroll tr:last-child td { border-bottom: 0; }
+.benchmark-table-scroll tbody tr:hover { background: rgba(99, 102, 241, 0.06); }
+.benchmark-table-scroll td small, .benchmark-table-scroll th small { display: block; max-width: 260px; margin-top: 3px; overflow: hidden; color: var(--text-dim); font-size: 0.68rem; text-overflow: ellipsis; }
+.benchmark-config-disclosure { border-radius: 14px; overflow: hidden; }
+.benchmark-config-disclosure > summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 13px 16px; cursor: pointer; list-style: none; }
+.benchmark-config-disclosure > summary::-webkit-details-marker { display: none; }
+.benchmark-config-disclosure > summary::after { content: '▾'; color: var(--text-muted); transition: transform 0.15s ease; }
+.benchmark-config-disclosure[open] > summary::after { transform: rotate(180deg); }
+.benchmark-config-summary-title { display: inline-flex; align-items: center; gap: 8px; }
+.benchmark-config-summary-meta { margin-left: auto; color: var(--text-muted); font-size: 0.73rem; }
+.benchmark-config-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 12px; border-top: 1px solid var(--border-color); border-bottom: 1px solid var(--border-color); color: var(--text-muted); font-size: 0.72rem; }
+.benchmark-config-toolbar label { display: inline-flex; align-items: center; gap: 6px; color: var(--text-main); white-space: nowrap; }
+.benchmark-config-table th, .benchmark-config-table td { padding: 7px 10px; }
+.benchmark-config-table td { vertical-align: top; }
+.benchmark-config-table td:first-child { min-width: 160px; }
+.benchmark-config-table code { display: block; min-width: 110px; max-width: 360px; max-height: 76px; overflow: auto; color: #dbeafe; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 0.7rem; line-height: 1.35; white-space: pre-wrap; overflow-wrap: anywhere; }
+.benchmark-config-table tr.benchmark-config-diff td:first-child strong { color: #fbbf24; }
+.benchmark-config-value-0 { background: rgba(56, 189, 248, 0.10); box-shadow: inset 3px 0 #38bdf8; }
+.benchmark-config-value-0 code { color: #bae6fd; }
+.benchmark-config-value-1 { background: rgba(244, 114, 182, 0.10); box-shadow: inset 3px 0 #f472b6; }
+.benchmark-config-value-1 code { color: #fbcfe8; }
+.benchmark-config-value-2 { background: rgba(52, 211, 153, 0.10); box-shadow: inset 3px 0 #34d399; }
+.benchmark-config-value-2 code { color: #a7f3d0; }
+.benchmark-config-value-3 { background: rgba(167, 139, 250, 0.10); box-shadow: inset 3px 0 #a78bfa; }
+.benchmark-config-value-3 code { color: #ddd6fe; }
+.benchmark-table-scroll a, .benchmark-saved-notice a { color: #7dd3fc; text-decoration: none; font-weight: 650; }
+.benchmark-run-actions { display: flex; align-items: center; gap: 10px; }
+.benchmark-run-actions button { display: inline-flex; align-items: center; gap: 4px; padding: 4px 7px; border: 1px solid rgba(248, 113, 113, 0.3); border-radius: 6px; color: #fca5a5; background: rgba(239, 68, 68, 0.08); cursor: pointer; font-size: 0.72rem; }
+.benchmark-run-actions button:hover:not(:disabled) { color: #fff; background: rgba(239, 68, 68, 0.22); }
+.benchmark-run-actions button:disabled { opacity: 0.55; cursor: wait; }
+.benchmark-rank { color: var(--accent-amber); font-weight: 800; }
+.benchmark-pass { color: #34d399; font-weight: 750; }
+.benchmark-fail { color: #fb7185; font-weight: 750; }
+.benchmark-saved-notice { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border: 1px solid rgba(52, 211, 153, 0.28); border-radius: 10px; }
+.benchmark-saved-notice div { min-width: 0; display: flex; flex-direction: column; }
+.benchmark-saved-notice span { color: var(--text-muted); font-size: 0.74rem; overflow-wrap: anywhere; }
+.benchmark-saved-notice a { margin-left: auto; white-space: nowrap; }
+
 /* Glassmorphism Panel */
 .glass-panel {
   background: var(--bg-card);

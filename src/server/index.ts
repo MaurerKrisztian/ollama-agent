@@ -10,6 +10,13 @@ import { TOOL_DEFINITIONS } from '../core/tools.js';
 import { BENCHMARK_TEST_CASES } from '../benchmark/cases/index.js';
 import type { BenchmarkTestCase } from '../benchmark/cases/index.js';
 import { runBenchmarkSuite, runSingleBenchmarkTest } from '../benchmark/runtime/runner.js';
+import {
+  DEFAULT_BENCHMARK_OUTPUT_DIR,
+  BENCHMARK_PROJECT_ROOT,
+  deleteSavedBenchmarkRun,
+  listSavedBenchmarkRuns,
+  saveBenchmarkReport,
+} from '../benchmark/runtime/results.js';
 import type { BenchmarkAgentConfig } from '../benchmark/types.js';
 import { isCommandWhitelisted, DEFAULT_COMMAND_WHITELIST } from '../core/commandWhitelist.js';
 import { handleOpenAiChatCompletions, handleOpenAiModels } from './openaiAdapter.js';
@@ -893,6 +900,56 @@ app.get('/api/benchmark/testcases', (req, res) => {
   res.json({ testCases: BENCHMARK_TEST_CASES });
 });
 
+const parseBenchmarkOutput = (body: Record<string, any>) => ({
+  save: body.saveResults !== false,
+  runName: typeof body.runName === 'string' ? body.runName.trim().slice(0, 100) : '',
+  directory: typeof body.outputDirectory === 'string' && body.outputDirectory.trim()
+    ? path.resolve(body.outputDirectory.trim())
+    : DEFAULT_BENCHMARK_OUTPUT_DIR,
+});
+
+// GET /api/benchmark/runs - Discover portable reports in a benchmark output directory
+app.get('/api/benchmark/runs', async (req, res) => {
+  const directory = typeof req.query.directory === 'string' && req.query.directory.trim()
+    ? path.resolve(req.query.directory.trim())
+    : DEFAULT_BENCHMARK_OUTPUT_DIR;
+  try {
+    const runs = await listSavedBenchmarkRuns(directory);
+    res.json({ success: true, directory, defaultDirectory: DEFAULT_BENCHMARK_OUTPUT_DIR, projectRoot: BENCHMARK_PROJECT_ROOT, runs });
+  } catch (err: any) {
+    res.status(400).json({ success: false, directory, defaultDirectory: DEFAULT_BENCHMARK_OUTPUT_DIR, projectRoot: BENCHMARK_PROJECT_ROOT, error: err.message });
+  }
+});
+
+app.get('/api/benchmark/report', async (req, res) => {
+  const runId = typeof req.query.runId === 'string' ? req.query.runId : '';
+  if (!runId || path.basename(runId) !== runId) {
+    return res.status(400).send('Invalid benchmark run ID.');
+  }
+  const directory = typeof req.query.directory === 'string' && req.query.directory.trim()
+    ? path.resolve(req.query.directory.trim())
+    : DEFAULT_BENCHMARK_OUTPUT_DIR;
+  const htmlPath = path.join(directory, runId, 'index.html');
+  try {
+    await fs.access(htmlPath);
+    res.sendFile(htmlPath);
+  } catch (_) {
+    res.status(404).send('Benchmark report not found.');
+  }
+});
+
+app.delete('/api/benchmark/runs/:runId', async (req, res) => {
+  const directory = typeof req.query.directory === 'string' && req.query.directory.trim()
+    ? path.resolve(req.query.directory.trim())
+    : DEFAULT_BENCHMARK_OUTPUT_DIR;
+  try {
+    const deletedDirectory = await deleteSavedBenchmarkRun(req.params.runId, directory);
+    res.json({ success: true, runId: req.params.runId, deletedDirectory });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
 const parseBenchmarkAgentConfig = (value: unknown): BenchmarkAgentConfig => {
   if (!value || typeof value !== 'object') return {};
   const input = value as Record<string, unknown>;
@@ -927,6 +984,7 @@ app.post('/api/benchmark/run', async (req, res) => {
   const targetHost = req.body.host || agent.getConfig().ollamaHost;
   const benchmarkAgentConfig = parseBenchmarkAgentConfig(req.body.agentConfig);
   const category = req.body.category as string | undefined;
+  const output = parseBenchmarkOutput(req.body);
 
   const tests: BenchmarkTestCase[] = category
     ? BENCHMARK_TEST_CASES.filter((t) => t.category === category)
@@ -934,7 +992,10 @@ app.post('/api/benchmark/run', async (req, res) => {
 
   try {
     const report = await runBenchmarkSuite(targetModel, targetHost, undefined, tests, agent.getOllamaToken(), undefined, undefined, benchmarkAgentConfig);
-    res.json({ success: true, report });
+    const savedRun = output.save
+      ? await saveBenchmarkReport(report, output.directory, { ...benchmarkAgentConfig, model: targetModel, ollamaHost: targetHost }, output.runName)
+      : undefined;
+    res.json({ success: true, report, savedRun });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
   }
@@ -965,6 +1026,7 @@ app.post('/api/benchmark/run-stream', async (req, res) => {
   const targetHost = req.body.host || agent.getConfig().ollamaHost;
   const benchmarkAgentConfig = parseBenchmarkAgentConfig(req.body.agentConfig);
   const category = req.body.category as string | undefined;
+  const output = parseBenchmarkOutput(req.body);
 
   const tests: BenchmarkTestCase[] = category
     ? BENCHMARK_TEST_CASES.filter((t) => t.category === category)
@@ -1004,7 +1066,20 @@ app.post('/api/benchmark/run-stream', async (req, res) => {
       benchmarkAgentConfig,
     );
 
-    sendEvent('benchmark_done', { report });
+    let savedRun;
+    let saveError;
+    if (output.save) {
+      try {
+        savedRun = await saveBenchmarkReport(report, output.directory, {
+          ...benchmarkAgentConfig,
+          model: targetModel,
+          ollamaHost: targetHost,
+        }, output.runName);
+      } catch (err: any) {
+        saveError = err.message;
+      }
+    }
+    sendEvent('benchmark_done', { report, savedRun, saveError });
   } catch (err: any) {
     if (benchmarkController.signal.aborted || err?.name === 'AbortError') {
       sendEvent('cancelled', { message: 'Benchmark stopped.' });

@@ -17,6 +17,10 @@ import {
   CheckCheck,
   RotateCw,
   Square,
+  Trophy,
+  Save,
+  BarChart3,
+  Trash2,
 } from 'lucide-react';
 import { AgentConfig, ContextPruningConfig, OllamaModelInfo, ToolComplexityProfile, ToolSettings } from '../types';
 import { highlightJson } from './JsonEditor';
@@ -101,6 +105,7 @@ export interface BenchmarkTestCaseInfo {
 
 export interface BenchmarkReport {
   timestamp: number;
+  runDate: string;
   model: string;
   mockWorkingDir: string;
   totalTests: number;
@@ -109,6 +114,24 @@ export interface BenchmarkReport {
   accuracyPercentage: number;
   totalDurationMs: number;
   results: TestResultTrace[];
+}
+
+interface SavedBenchmarkRun {
+  runId: string;
+  runName: string;
+  runDate: string;
+  outputDirectory: string;
+  directory: string;
+  reportPath: string;
+  htmlPath: string;
+  model: string;
+  modelConfig: TestResultTrace['agentConfig'];
+  totalTests: number;
+  passCount: number;
+  failCount: number;
+  accuracyPercentage: number;
+  totalDurationMs: number;
+  results: Array<Pick<TestResultTrace, 'testId' | 'testName' | 'category' | 'passed' | 'reason' | 'durationMs'>>;
 }
 
 interface BenchmarkViewProps {
@@ -150,6 +173,35 @@ const getBenchmarkDefaults = (config: AgentConfig, toolSettings: ToolSettings): 
   },
 });
 
+const flattenConfig = (value: Record<string, unknown>, prefix = ''): Record<string, unknown> =>
+  Object.entries(value).reduce<Record<string, unknown>>((flattened, [key, entry]) => {
+    const field = prefix ? `${prefix}.${key}` : key;
+    if (entry && typeof entry === 'object' && !Array.isArray(entry)) {
+      Object.assign(flattened, flattenConfig(entry as Record<string, unknown>, field));
+    } else {
+      flattened[field] = entry;
+    }
+    return flattened;
+  }, {});
+
+const formatConfigValue = (value: unknown): string => {
+  if (value === undefined) return 'Not set';
+  if (typeof value === 'string') return value;
+  return JSON.stringify(value);
+};
+
+const CONFIG_FIELD_ORDER = [
+  'model',
+  'ollamaHost',
+  'temperature',
+  'contextWindow',
+  'maxLoops',
+  'enableThinking',
+  'showWorkingDirInfo',
+  'complexityProfile',
+  'systemPrompt',
+];
+
 export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
   models,
   currentConfig,
@@ -173,6 +225,43 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
   } | null>(null);
   const [expandedTestId, setExpandedTestId] = useState<string | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
+  const [activeTab, setActiveTab] = useState<'runner' | 'compare'>('runner');
+  const [saveResults, setSaveResults] = useState(true);
+  const [runName, setRunName] = useState('');
+  const [outputDirectory, setOutputDirectory] = useState('');
+  const [defaultOutputDirectory, setDefaultOutputDirectory] = useState('');
+  const [projectRoot, setProjectRoot] = useState('');
+  const [outputLocationMode, setOutputLocationMode] = useState<'project' | 'custom'>('project');
+  const [savedRuns, setSavedRuns] = useState<SavedBenchmarkRun[]>([]);
+  const [selectedRunIds, setSelectedRunIds] = useState<string[]>([]);
+  const [runsLoading, setRunsLoading] = useState(false);
+  const [savedRun, setSavedRun] = useState<SavedBenchmarkRun | null>(null);
+  const [showMatchingConfigs, setShowMatchingConfigs] = useState(false);
+  const [deletingRunId, setDeletingRunId] = useState<string | null>(null);
+  const [runSort, setRunSort] = useState<{ key: 'rank' | 'model' | 'duration'; direction: 'asc' | 'desc' }>({ key: 'rank', direction: 'asc' });
+
+  const loadSavedRuns = async (directory?: string) => {
+    setRunsLoading(true);
+    try {
+      const query = directory?.trim() ? `?directory=${encodeURIComponent(directory.trim())}` : '';
+      const response = await fetch(`/api/benchmark/runs${query}`);
+      const data = await response.json();
+      if (!response.ok || !data.success) throw new Error(data.error || 'Could not load benchmark runs.');
+      setOutputDirectory(data.directory);
+      setDefaultOutputDirectory(data.defaultDirectory);
+      setProjectRoot(data.projectRoot || '');
+      setSavedRuns(data.runs || []);
+      setSelectedRunIds((previous) => {
+        const available = new Set<string>((data.runs || []).map((run: SavedBenchmarkRun) => run.runId));
+        const retained = previous.filter((id) => available.has(id));
+        return retained.length ? retained : (data.runs || []).slice(0, 2).map((run: SavedBenchmarkRun) => run.runId);
+      });
+    } catch (err: any) {
+      alert(`Could not load saved benchmarks: ${err.message}`);
+    } finally {
+      setRunsLoading(false);
+    }
+  };
 
   useEffect(() => {
     if (!configDirty) setBenchmarkConfig(getBenchmarkDefaults(currentConfig, toolSettings));
@@ -235,12 +324,12 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
   const [selectedInfoTest, setSelectedInfoTest] = useState<BenchmarkTestCaseInfo | TestResultTrace | null>(null);
 
   useEffect(() => {
-    fetch('/api/benchmark/testcases')
-      .then((res) => res.json())
-      .then((data) => {
+    void Promise.all([
+      fetch('/api/benchmark/testcases').then((res) => res.json()).then((data) => {
         if (data.testCases) setTestCasesInfo(data.testCases);
-      })
-      .catch((err) => console.error('Error fetching benchmark test cases:', err));
+      }),
+      loadSavedRuns(),
+    ]).catch((err) => console.error('Error initializing benchmark view:', err));
   }, []);
 
   useEffect(() => () => benchmarkAbortController.current?.abort(), []);
@@ -269,6 +358,9 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ...benchmarkRequestConfig(),
+          saveResults,
+          runName,
+          ...(outputLocationMode === 'custom' && outputDirectory.trim() ? { outputDirectory: outputDirectory.trim() } : {}),
           ...(selectedCategory !== 'all' ? { category: selectedCategory } : {}),
         }),
         signal: controller.signal,
@@ -319,6 +411,11 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
               });
             } else if (eventType === 'benchmark_done') {
               setReport(eventData.report);
+              if (eventData.savedRun) {
+                setSavedRun(eventData.savedRun);
+                void loadSavedRuns(eventData.savedRun.outputDirectory);
+              }
+              if (eventData.saveError) alert(`Benchmark completed, but saving failed: ${eventData.saveError}`);
             } else if (eventType === 'cancelled') {
               setWasStopped(true);
             } else if (eventType === 'error') {
@@ -387,9 +484,145 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
   const accuracyPercentage = liveResults.length > 0 ? Math.round((passCount / liveResults.length) * 100) : 0;
   const totalDurationMs = liveResults.reduce((sum, r) => sum + r.durationMs, 0);
   const configLocked = isRunning || runningSingleId !== null;
+  const performanceRankById = new Map([...savedRuns]
+    .sort((a, b) => b.accuracyPercentage - a.accuracyPercentage || a.totalDurationMs - b.totalDurationMs || b.runDate.localeCompare(a.runDate))
+    .map((run, index) => [run.runId, index + 1]));
+  const rankedRuns = [...savedRuns].sort((a, b) => {
+    if (runSort.key === 'model') {
+      const comparison = a.model.localeCompare(b.model, undefined, { numeric: true, sensitivity: 'base' });
+      return runSort.direction === 'asc' ? comparison : -comparison;
+    }
+    if (runSort.key === 'duration') {
+      const comparison = a.totalDurationMs - b.totalDurationMs;
+      return runSort.direction === 'asc' ? comparison : -comparison;
+    }
+    return b.accuracyPercentage - a.accuracyPercentage || a.totalDurationMs - b.totalDurationMs || b.runDate.localeCompare(a.runDate);
+  });
+  const comparedRuns = rankedRuns.filter((run) => selectedRunIds.includes(run.runId));
+  const comparedTestIds = Array.from(new Set(comparedRuns.flatMap((run) => run.results.map((result) => result.testId))));
+  const flattenedConfigs = comparedRuns.map((run) => flattenConfig(run.modelConfig as unknown as Record<string, unknown>));
+  const comparedConfigFields = Array.from(new Set(flattenedConfigs.flatMap((config) => Object.keys(config))))
+    .sort((left, right) => {
+      const leftIndex = CONFIG_FIELD_ORDER.indexOf(left);
+      const rightIndex = CONFIG_FIELD_ORDER.indexOf(right);
+      if (leftIndex !== -1 || rightIndex !== -1) {
+        if (leftIndex === -1) return 1;
+        if (rightIndex === -1) return -1;
+        return leftIndex - rightIndex;
+      }
+      return left.localeCompare(right);
+    });
+  const comparedConfigRows = comparedConfigFields.map((field) => {
+    const values = flattenedConfigs.map((config) => formatConfigValue(config[field]));
+    return { field, values, differs: new Set(values).size > 1 };
+  });
+  const configDifferenceCount = comparedConfigRows.filter((row) => row.differs).length;
+
+  const toggleComparedRun = (runId: string) => {
+    setSelectedRunIds((previous) => previous.includes(runId)
+      ? previous.filter((id) => id !== runId)
+      : [...previous, runId]);
+  };
+
+  const toggleRunSort = (key: 'model' | 'duration') => {
+    setRunSort((previous) => previous.key === key
+      ? { key, direction: previous.direction === 'asc' ? 'desc' : 'asc' }
+      : { key, direction: 'asc' });
+  };
+
+  const sortIndicator = (key: 'model' | 'duration') =>
+    runSort.key === key ? (runSort.direction === 'asc' ? '▲' : '▼') : '↕';
+
+  const handleDeleteRun = async (run: SavedBenchmarkRun) => {
+    if (!window.confirm(`Delete benchmark ${run.runId}?\n\nThis permanently removes its report.json and index.html files.`)) return;
+    setDeletingRunId(run.runId);
+    try {
+      const response = await fetch(`/api/benchmark/runs/${encodeURIComponent(run.runId)}?directory=${encodeURIComponent(run.outputDirectory)}`, { method: 'DELETE' });
+      const data = await response.json();
+      if (!response.ok || !data.success) throw new Error(data.error || 'Could not delete benchmark run.');
+      setSavedRuns((previous) => previous.filter((item) => item.runId !== run.runId));
+      setSelectedRunIds((previous) => previous.filter((id) => id !== run.runId));
+      setSavedRun((previous) => previous?.runId === run.runId ? null : previous);
+    } catch (err: any) {
+      alert(`Could not delete benchmark: ${err.message}`);
+    } finally {
+      setDeletingRunId(null);
+    }
+  };
 
   return (
     <div className="benchmark-view" style={{ flex: 1, overflowY: 'auto', padding: '32px 40px', display: 'flex', flexDirection: 'column', gap: '24px' }}>
+      <div className="benchmark-tabs" style={{ display: 'flex', gap: '8px', borderBottom: '1px solid var(--border-color)' }}>
+        <button className={activeTab === 'runner' ? 'active' : ''} onClick={() => setActiveTab('runner')}><Play size={15} /> Runner</button>
+        <button className={activeTab === 'compare' ? 'active' : ''} onClick={() => { setActiveTab('compare'); void loadSavedRuns(outputDirectory); }}><BarChart3 size={15} /> Compare & top list <span>{savedRuns.length}</span></button>
+      </div>
+
+      {activeTab === 'compare' ? (
+        <div className="benchmark-comparison" style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
+          <div className="glass-panel" style={{ padding: '20px', borderRadius: '14px' }}>
+            <div style={{ display: 'flex', gap: '10px', alignItems: 'end', flexWrap: 'wrap' }}>
+              <label style={{ flex: '1 1 420px', display: 'flex', flexDirection: 'column', gap: '6px', color: 'var(--text-muted)', fontSize: '0.8rem' }}>
+                Benchmark directory
+                <input value={outputDirectory} onChange={(event) => setOutputDirectory(event.target.value)} style={{ padding: '10px', borderRadius: '8px', border: '1px solid var(--border-color)', background: '#111827', color: 'var(--text-main)' }} />
+              </label>
+              <button onClick={() => void loadSavedRuns(outputDirectory)} disabled={runsLoading} className="benchmark-secondary-button">
+                {runsLoading ? <Loader2 size={15} className="spin" /> : <RotateCw size={15} />} Refresh
+              </button>
+            </div>
+          </div>
+
+          {rankedRuns.length === 0 ? (
+            <div className="glass-panel benchmark-empty-runs"><Trophy size={28} /><strong>No saved benchmark runs found</strong><span>Complete a suite run with saving enabled, or choose another directory.</span></div>
+          ) : (
+            <>
+              <div className="glass-panel benchmark-ranking">
+                <div className="benchmark-ranking-header"><Trophy size={19} color="var(--accent-amber)" /><h3>Leaderboard</h3><span>{runSort.key === 'rank' ? 'Accuracy first, then fastest duration' : `Sorted by ${runSort.key} (${runSort.direction === 'asc' ? 'ascending' : 'descending'})`}</span></div>
+                <div className="benchmark-table-scroll"><table><thead><tr><th>Compare</th><th>Rank</th><th>Name</th><th><button className={runSort.key === 'model' ? 'benchmark-sort-active' : ''} onClick={() => toggleRunSort('model')}>Model <span>{sortIndicator('model')}</span></button></th><th>Run date</th><th>Score</th><th>Passed</th><th><button className={runSort.key === 'duration' ? 'benchmark-sort-active' : ''} onClick={() => toggleRunSort('duration')}>Duration <span>{sortIndicator('duration')}</span></button></th><th>Actions</th></tr></thead>
+                  <tbody>{rankedRuns.map((run) => <tr key={run.runId}>
+                    <td><input type="checkbox" checked={selectedRunIds.includes(run.runId)} onChange={() => toggleComparedRun(run.runId)} /></td>
+                    <td className="benchmark-rank">#{performanceRankById.get(run.runId)}</td><td><strong>{run.runName || 'Unnamed'}</strong></td><td><strong>{run.model}</strong><small>{run.runId}</small></td>
+                    <td>{new Date(run.runDate).toLocaleString()}</td><td><strong className={run.accuracyPercentage === 100 ? 'benchmark-pass' : ''}>{run.accuracyPercentage}%</strong></td>
+                    <td>{run.passCount}/{run.totalTests}</td><td>{(run.totalDurationMs / 1000).toFixed(2)}s</td>
+                    <td><div className="benchmark-run-actions"><a href={`/api/benchmark/report?directory=${encodeURIComponent(run.outputDirectory)}&runId=${encodeURIComponent(run.runId)}`} target="_blank" rel="noreferrer">Open HTML</a><button onClick={() => void handleDeleteRun(run)} disabled={deletingRunId === run.runId} title="Delete this saved benchmark">{deletingRunId === run.runId ? <Loader2 size={13} className="spin" /> : <Trash2 size={13} />} Delete</button></div></td>
+                  </tr>)}</tbody></table></div>
+              </div>
+
+              {comparedRuns.length > 0 && <div className="glass-panel benchmark-matrix">
+                <div className="benchmark-ranking-header"><BarChart3 size={19} color="var(--accent-primary)" /><h3>Per-test comparison</h3><span>{comparedRuns.length} selected run{comparedRuns.length === 1 ? '' : 's'}</span></div>
+                <div className="benchmark-table-scroll"><table><thead><tr><th>Test</th>{comparedRuns.map((run) => <th key={run.runId}>{run.runName || run.model}<small>{run.runName ? run.model : 'Unnamed run'}</small><small>{run.accuracyPercentage}% passed · {(run.totalDurationMs / 1000).toFixed(2)}s total</small><small>{new Date(run.runDate).toLocaleDateString()}</small></th>)}</tr></thead>
+                  <tbody>{comparedTestIds.map((testId) => {
+                    const label = comparedRuns.flatMap((run) => run.results).find((result) => result.testId === testId)?.testName || testId;
+                    return <tr key={testId}><td><strong>{label}</strong><small>{testId}</small></td>{comparedRuns.map((run) => {
+                      const result = run.results.find((item) => item.testId === testId);
+                      return <td key={run.runId}>{result ? <><span className={result.passed ? 'benchmark-pass' : 'benchmark-fail'}>{result.passed ? 'PASS' : 'FAIL'}</span><small>{result.durationMs}ms</small></> : <span className="muted">—</span>}</td>;
+                    })}</tr>;
+                  })}</tbody></table></div>
+              </div>}
+
+              {comparedRuns.length > 0 && <details className="glass-panel benchmark-config-disclosure">
+                <summary>
+                  <span className="benchmark-config-summary-title"><Cpu size={17} color="var(--accent-teal)" /><strong>Model configuration comparison</strong></span>
+                  <span className="benchmark-config-summary-meta">{configDifferenceCount} difference{configDifferenceCount === 1 ? '' : 's'} · {comparedRuns.length} run{comparedRuns.length === 1 ? '' : 's'}</span>
+                </summary>
+                <div className="benchmark-config-toolbar">
+                  <span>Distinct values use different colors.</span>
+                  <label><input type="checkbox" checked={showMatchingConfigs} onChange={(event) => setShowMatchingConfigs(event.target.checked)} /> Show matching settings</label>
+                </div>
+                <div className="benchmark-table-scroll"><table className="benchmark-config-table"><thead><tr><th>Setting</th>{comparedRuns.map((run) => <th key={run.runId}>{run.runName || run.model}<small>{run.runName ? run.model : 'Unnamed run'} · {new Date(run.runDate).toLocaleDateString()}</small></th>)}</tr></thead>
+                  <tbody>{comparedConfigRows
+                    .filter((row) => showMatchingConfigs || comparedRuns.length < 2 || row.differs)
+                    .map(({ field, values, differs }) => {
+                      const distinctValues = Array.from(new Set(values));
+                      return <tr key={field} className={differs ? 'benchmark-config-diff' : ''}>
+                        <td><strong>{field}</strong></td>
+                        {values.map((value, index) => <td key={comparedRuns[index].runId} className={differs ? `benchmark-config-value benchmark-config-value-${distinctValues.indexOf(value) % 4}` : ''}><code>{value}</code></td>)}
+                      </tr>;
+                    })}</tbody></table></div>
+              </details>}
+            </>
+          )}
+        </div>
+      ) : <>
       {/* Top Banner & Control Panel */}
       <div className="glass-panel benchmark-hero" style={{ padding: '24px', borderRadius: '16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '20px' }}>
         <div className="benchmark-hero-copy">
@@ -563,6 +796,42 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
           </div>
         </div>
       </div>
+
+      <div className="glass-panel benchmark-output-panel" style={{ padding: '18px 20px', borderRadius: '14px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '9px', marginBottom: '12px' }}>
+          <Save size={18} color="var(--accent-teal)" />
+          <div><h3 style={{ margin: 0, fontSize: '0.95rem' }}>Portable result bundle</h3><span style={{ color: 'var(--text-muted)', fontSize: '0.78rem' }}>Each suite run gets a unique folder containing report.json and a standalone index.html.</span></div>
+        </div>
+        <div style={{ display: 'flex', gap: '14px', alignItems: 'end', flexWrap: 'wrap' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-main)', fontSize: '0.82rem', paddingBottom: '9px' }}>
+            <input type="checkbox" checked={saveResults} disabled={configLocked} onChange={(event) => setSaveResults(event.target.checked)} /> Save completed suite runs
+          </label>
+          <label style={{ flex: '1 1 220px', display: 'flex', flexDirection: 'column', gap: '6px', color: 'var(--text-muted)', fontSize: '0.78rem' }}>
+            Benchmark name (optional)
+            <input value={runName} maxLength={100} disabled={configLocked || !saveResults} onChange={(event) => setRunName(event.target.value)} placeholder="e.g. Context pruning experiment" style={{ padding: '9px 10px', borderRadius: '7px', border: '1px solid var(--border-color)', background: '#111827', color: 'var(--text-main)' }} />
+          </label>
+          <label style={{ flex: '0 1 210px', display: 'flex', flexDirection: 'column', gap: '6px', color: 'var(--text-muted)', fontSize: '0.78rem' }}>
+            Save location
+            <select value={outputLocationMode} disabled={configLocked || !saveResults} onChange={(event) => setOutputLocationMode(event.target.value as 'project' | 'custom')} style={{ padding: '9px 10px', borderRadius: '7px', border: '1px solid var(--border-color)', background: '#111827', color: 'var(--text-main)' }}>
+              <option value="project">Project default</option>
+              <option value="custom">Custom directory</option>
+            </select>
+          </label>
+          <label style={{ flex: '1 1 360px', display: 'flex', flexDirection: 'column', gap: '6px', color: 'var(--text-muted)', fontSize: '0.78rem' }}>
+            {outputLocationMode === 'project' ? 'Automatic project output directory' : 'Custom output directory'}
+            <input value={outputLocationMode === 'project' ? defaultOutputDirectory : outputDirectory} readOnly={outputLocationMode === 'project'} disabled={configLocked || !saveResults} onChange={(event) => setOutputDirectory(event.target.value)} placeholder={outputLocationMode === 'project' ? 'Detecting project directory…' : '/path/to/benchmark_runs'} style={{ padding: '9px 10px', borderRadius: '7px', border: '1px solid var(--border-color)', background: outputLocationMode === 'project' ? 'rgba(17, 24, 39, 0.6)' : '#111827', color: 'var(--text-main)' }} />
+            {outputLocationMode === 'project' && <span style={{ color: 'var(--text-dim)', fontSize: '0.7rem' }}>Detected from this installation{projectRoot ? `: ${projectRoot}` : ''}</span>}
+          </label>
+        </div>
+      </div>
+
+      {savedRun && (
+        <div className="glass-panel animate-fade-in benchmark-saved-notice">
+          <CheckCircle2 size={18} color="#34d399" />
+          <div><strong>Benchmark saved{savedRun.runName ? `: ${savedRun.runName}` : ''}</strong><span>{savedRun.directory}</span></div>
+          <a href={`/api/benchmark/report?directory=${encodeURIComponent(savedRun.outputDirectory)}&runId=${encodeURIComponent(savedRun.runId)}`} target="_blank" rel="noreferrer">Open standalone report</a>
+        </div>
+      )}
 
       {wasStopped && !isRunning && (
         <div className="glass-panel animate-fade-in" style={{ padding: '12px 18px', borderRadius: '10px', border: '1px solid rgba(245, 158, 11, 0.35)', color: 'var(--accent-amber)', fontSize: '0.85rem' }}>
@@ -945,6 +1214,7 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
           </div>
         </div>
       )}
+      </>}
     </div>
   );
 };

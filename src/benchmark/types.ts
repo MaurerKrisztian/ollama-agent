@@ -95,6 +95,7 @@ export interface TestResultTrace {
 
 export interface BenchmarkReport {
   timestamp: number;
+  runDate: string;
   model: string;
   mockWorkingDir: string;
   totalTests: number;
@@ -103,4 +104,31 @@ export interface BenchmarkReport {
   accuracyPercentage: number;
   totalDurationMs: number;
   results: TestResultTrace[];
+}
+
+export interface BenchmarkRunBundle {
+  schemaVersion: 1;
+  runId: string;
+  runName?: string;
+  runDate: string;
+  modelConfig: BenchmarkAgentConfig & { model: string; ollamaHost: string };
+  report: BenchmarkReport;
+}
+
+export interface SavedBenchmarkRun {
+  runId: string;
+  runName: string;
+  runDate: string;
+  outputDirectory: string;
+  directory: string;
+  reportPath: string;
+  htmlPath: string;
+  model: string;
+  modelConfig: BenchmarkRunBundle['modelConfig'];
+  totalTests: number;
+  passCount: number;
+  failCount: number;
+  accuracyPercentage: number;
+  totalDurationMs: number;
+  results: Array<Pick<TestResultTrace, 'testId' | 'testName' | 'category' | 'passed' | 'reason' | 'durationMs'>>;
 }

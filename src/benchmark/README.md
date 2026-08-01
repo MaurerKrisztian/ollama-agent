@@ -47,3 +47,23 @@ define at least one observable verifier, such as `expectedResponseSubstrings`,
 `expectedFileJson`, or `verificationScript`.
 
 IDs must be unique across all registered suites. The registry checks this at startup.
+
+## Saved runs
+
+Completed suite runs are saved by default under `benchmark_runs/` in the detected
+project installation root. This path is resolved at runtime, so another clone or
+computer automatically uses its own project path. The Web UI can select a custom
+server-local output directory or disable saving for a run. Each run
+uses a unique, date-prefixed directory:
+
+```text
+benchmark_runs/
+└── 2026-08-01_12-34-56-000-model-name-optional-run-name-abc123/
+    ├── report.json   # Versioned, machine-readable result and effective model config
+    └── index.html    # Self-contained report; no server or external assets required
+```
+
+`report.json` uses the `BenchmarkRunBundle` schema from `benchmark/types.ts` and
+includes `schemaVersion`, `runId`, the optional friendly `runName`, an ISO `runDate`, the effective `modelConfig`,
+and the complete benchmark report and traces. The runner's **Compare & top list**
+tab discovers these bundles from the selected output directory.

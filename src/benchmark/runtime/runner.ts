@@ -298,8 +298,9 @@ export async function runBenchmarkSuite(
     onProgress?.(index + 1, testCases.length, result);
   }
   const passCount = results.filter((result) => result.passed).length;
+  const completedAt = Date.now();
   return {
-    timestamp: Date.now(), model: modelName, mockWorkingDir: 'ephemeral Docker workspace (/workspace)',
+    timestamp: completedAt, runDate: new Date(completedAt).toISOString(), model: modelName, mockWorkingDir: 'ephemeral Docker workspace (/workspace)',
     totalTests: results.length, passCount, failCount: results.length - passCount,
     accuracyPercentage: results.length ? Math.round((passCount / results.length) * 100) : 0,
     totalDurationMs: Date.now() - startTime, results,
