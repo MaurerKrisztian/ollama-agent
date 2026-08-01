@@ -29,6 +29,14 @@ export interface OllamaResponseMetrics {
   evalDurationNs?: number;
 }
 
+export interface OllamaPullProgress {
+  status: string;
+  digest?: string;
+  total?: number;
+  completed?: number;
+  error?: string;
+}
+
 export class OllamaClient {
   private host: string;
   private authToken?: string;
@@ -110,6 +118,57 @@ export class OllamaClient {
       return await res.json();
     } catch (err: any) {
       throw new Error(`Failed to fetch model details for "${modelName}": ${err.message}`);
+    }
+  }
+
+  /** Download a model and report Ollama's streamed progress events. */
+  public async pullModel(
+    modelName: string,
+    onProgress?: (progress: OllamaPullProgress) => void,
+    signal?: AbortSignal
+  ): Promise<void> {
+    const res = await fetch(`${this.host}/api/pull`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...this.getHeaders(),
+      },
+      body: JSON.stringify({ model: modelName, stream: true }),
+      signal,
+    });
+
+    if (!res.ok) {
+      const message = await res.text();
+      throw new Error(`Ollama server returned HTTP ${res.status}${message ? `: ${message}` : ''}`);
+    }
+    if (!res.body) throw new Error('Ollama returned an empty download response.');
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    const consumeLine = (line: string) => {
+      if (!line.trim()) return;
+      const progress = JSON.parse(line) as OllamaPullProgress;
+      onProgress?.(progress);
+      if (progress.error) throw new Error(progress.error);
+    };
+
+    try {
+      while (true) {
+        const { value, done } = await reader.read();
+        buffer += decoder.decode(value, { stream: !done });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        for (const line of lines) consumeLine(line);
+        if (done) break;
+      }
+      consumeLine(buffer);
+    } catch (err: any) {
+      if (err?.name === 'AbortError') throw err;
+      throw new Error(`Failed to pull model "${modelName}": ${err.message}`);
+    } finally {
+      reader.releaseLock();
     }
   }
 

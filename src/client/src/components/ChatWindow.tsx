@@ -849,6 +849,58 @@ const ToolResultCard: React.FC<{
   );
 };
 
+const CopyableCodeBlock: React.FC<{ code: string; language?: string }> = ({ code, language }) => {
+  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'error'>('idle');
+  const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => () => {
+    if (resetTimerRef.current) clearTimeout(resetTimerRef.current);
+  }, []);
+
+  const copyCode = async () => {
+    let copied = false;
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(code);
+        copied = true;
+      }
+    } catch (_) {}
+
+    if (!copied) {
+      const textarea = document.createElement('textarea');
+      textarea.value = code;
+      textarea.setAttribute('readonly', '');
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.select();
+      try {
+        copied = document.execCommand('copy');
+      } catch (_) {}
+      textarea.remove();
+    }
+
+    setCopyState(copied ? 'copied' : 'error');
+    if (resetTimerRef.current) clearTimeout(resetTimerRef.current);
+    resetTimerRef.current = setTimeout(() => setCopyState('idle'), 1800);
+  };
+
+  return (
+    <div className="copyable-code-block">
+      <div className="copyable-code-header">
+        <span>{language || 'Code'}</span>
+        <button type="button" onClick={() => void copyCode()} aria-label="Copy code to clipboard">
+          {copyState === 'copied' ? <Check size={14} /> : <Copy size={14} />}
+          <span aria-live="polite">
+            {copyState === 'copied' ? 'Copied' : copyState === 'error' ? 'Copy failed' : 'Copy'}
+          </span>
+        </button>
+      </div>
+      <pre><code className={language ? `language-${language}` : undefined}>{code}</code></pre>
+    </div>
+  );
+};
+
 const MarkdownContent: React.FC<{ content: string; streaming?: boolean }> = ({
   content,
   streaming = false,
@@ -858,6 +910,14 @@ const MarkdownContent: React.FC<{ content: string; streaming?: boolean }> = ({
       remarkPlugins={[remarkGfm]}
       components={{
         a: ({ children, ...props }) => <a {...props} target="_blank" rel="noreferrer">{children}</a>,
+        pre: ({ children }) => {
+          const child = React.Children.toArray(children).find(React.isValidElement);
+          if (!React.isValidElement(child)) return <pre>{children}</pre>;
+          const props = child.props as { children?: React.ReactNode; className?: string };
+          const code = String(props.children ?? '').replace(/\n$/, '');
+          const language = props.className?.match(/(?:^|\s)language-([^\s]+)/)?.[1];
+          return <CopyableCodeBlock code={code} language={language} />;
+        },
       }}
     >
       {content}

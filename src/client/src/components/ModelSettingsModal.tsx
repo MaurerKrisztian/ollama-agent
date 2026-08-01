@@ -1,38 +1,136 @@
-import React from 'react';
-import { Brain, Cpu, Info, SlidersHorizontal, X } from 'lucide-react';
-import { AgentConfig, OllamaModelInfo, OllamaRunningModelInfo } from '../types';
+import React, { useMemo, useRef, useState } from 'react';
+import { AlertCircle, Brain, CheckCircle2, Cpu, Download, Info, Loader2, Search, SlidersHorizontal, X } from 'lucide-react';
+import { AgentConfig, OllamaModelInfo, OllamaRunningModelInfo, SystemMetrics } from '../types';
 
 interface ModelSettingsModalProps {
   isOpen: boolean;
   config: AgentConfig;
   models: OllamaModelInfo[];
   runningModels: OllamaRunningModelInfo[];
+  systemMetrics: SystemMetrics | null;
   onClose: () => void;
   onSelectModel: (model: string) => void;
   onChangeTemperature: (temperature: number) => void;
   onChangeContextWindow: (contextWindow: number) => void;
   onToggleThinking: (enabled: boolean) => void;
   onOpenModelDetails: () => void;
+  onModelsChanged: () => Promise<void>;
 }
+
+const SUGGESTED_MODELS = [
+  { name: 'qwen3.5:9b', description: 'General-purpose reasoning and coding', diskGb: 6.6, vramGb: 8 },
+  { name: 'gpt-oss:20b', description: 'Open-weight reasoning model', diskGb: 13, vramGb: 16 },
+  { name: 'gemma3:4b', description: 'Compact multimodal model', diskGb: 3.3, vramGb: 4 },
+  { name: 'llama3.2:3b', description: 'Fast general-purpose model', diskGb: 2, vramGb: 3 },
+  { name: 'deepseek-r1:8b', description: 'Reasoning-focused model', diskGb: 5.2, vramGb: 7 },
+  { name: 'qwen2.5-coder:7b', description: 'Code-focused model', diskGb: 4.7, vramGb: 6 },
+  { name: 'mistral:7b', description: 'Efficient general-purpose model', diskGb: 4.1, vramGb: 6 },
+  { name: 'phi4-mini', description: 'Small, capable language model', diskGb: 2.5, vramGb: 4 },
+];
 
 export const ModelSettingsModal: React.FC<ModelSettingsModalProps> = ({
   isOpen,
   config,
   models,
   runningModels,
+  systemMetrics,
   onClose,
   onSelectModel,
   onChangeTemperature,
   onChangeContextWindow,
   onToggleThinking,
   onOpenModelDetails,
+  onModelsChanged,
 }) => {
+  const [downloadOpen, setDownloadOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const [modelName, setModelName] = useState('');
+  const [downloadState, setDownloadState] = useState<'idle' | 'downloading' | 'success' | 'error'>('idle');
+  const [downloadStatus, setDownloadStatus] = useState('');
+  const [downloadPercent, setDownloadPercent] = useState<number | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const installedNames = useMemo(() => new Set(models.flatMap((model) => [model.name, model.name.replace(/:latest$/, '')])), [models]);
+  const searchResults = useMemo(() => {
+    const normalized = query.trim().toLowerCase();
+    return SUGGESTED_MODELS.filter((model) => !normalized || `${model.name} ${model.description}`.toLowerCase().includes(normalized));
+  }, [query]);
+  const gpu = systemMetrics?.gpu;
+  const gpuTotalGb = gpu?.memTotalMb ? gpu.memTotalMb / 1024 : null;
+  const gpuFreeGb = gpu?.memTotalMb ? Math.max(0, gpu.memTotalMb - gpu.memUsedMb) / 1024 : null;
+
+  const getGpuFit = (requiredVramGb: number) => {
+    if (gpuTotalGb === null || gpuFreeGb === null) return { level: 'unknown', label: 'GPU unknown' };
+    if (gpuFreeGb >= requiredVramGb) return { level: 'fits', label: 'Runs fully on GPU' };
+    if (gpuTotalGb >= requiredVramGb) return { level: 'maybe', label: 'Fits after freeing VRAM' };
+    return { level: 'offload', label: 'Needs CPU offload' };
+  };
+
   if (!isOpen) return null;
 
   const loadedModel = runningModels.find((model) => model.name === config.model || model.model === config.model);
   const vramGb = loadedModel?.size_vram
     ? (loadedModel.size_vram / (1024 * 1024 * 1024)).toFixed(2)
     : null;
+
+  const downloadModel = async () => {
+    const requestedModel = modelName.trim();
+    if (!requestedModel || downloadState === 'downloading') return;
+    const controller = new AbortController();
+    abortRef.current = controller;
+    setDownloadState('downloading');
+    setDownloadStatus('Connecting to Ollama…');
+    setDownloadPercent(null);
+
+    try {
+      const response = await fetch('/api/models/pull', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: requestedModel }),
+        signal: controller.signal,
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => null);
+        throw new Error(data?.error || `Download failed with HTTP ${response.status}.`);
+      }
+      if (!response.body) throw new Error('The server returned an empty download response.');
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      const consume = (line: string) => {
+        if (!line.trim()) return;
+        const progress = JSON.parse(line);
+        if (progress.error) throw new Error(progress.error);
+        setDownloadStatus(progress.status || 'Downloading…');
+        setDownloadPercent(
+          Number.isFinite(progress.completed) && Number.isFinite(progress.total) && progress.total > 0
+            ? Math.min(100, Math.round((progress.completed / progress.total) * 100))
+            : null
+        );
+      };
+
+      while (true) {
+        const { value, done } = await reader.read();
+        buffer += decoder.decode(value, { stream: !done });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        for (const line of lines) consume(line);
+        if (done) break;
+      }
+      consume(buffer);
+      await onModelsChanged();
+      await onSelectModel(requestedModel);
+      setDownloadState('success');
+      setDownloadStatus(`${requestedModel} is installed and selected.`);
+      setDownloadPercent(100);
+    } catch (err: any) {
+      setDownloadState('error');
+      setDownloadStatus(err?.name === 'AbortError' ? 'Download cancelled.' : (err.message || 'Download failed.'));
+      setDownloadPercent(null);
+    } finally {
+      abortRef.current = null;
+    }
+  };
 
   return (
     <div className="settings-overlay" onClick={onClose}>
@@ -60,12 +158,102 @@ export const ModelSettingsModal: React.FC<ModelSettingsModalProps> = ({
               <button type="button" className="secondary-button" onClick={onOpenModelDetails}>
                 <Info size={15} /> Inspect specs
               </button>
+              <button type="button" className="secondary-button" onClick={() => setDownloadOpen((open) => !open)}>
+                <Download size={15} /> Download
+              </button>
             </div>
             <div className={`model-status ${loadedModel ? 'loaded' : ''}`}>
               <span />
               {loadedModel ? `Loaded${vramGb ? ` · ${vramGb} GB VRAM` : ''}` : 'Idle · loads on the next prompt'}
             </div>
           </section>
+
+          {downloadOpen && (
+            <section className="model-settings-section model-download-section">
+              <div className="model-download-title">
+                <label htmlFor="model-search"><Download size={17} /> Download a model</label>
+                <span>Suggested models</span>
+              </div>
+              <div className={`model-gpu-summary ${gpuTotalGb !== null ? 'detected' : ''}`}>
+                <Cpu size={15} />
+                {gpu && gpuTotalGb !== null && gpuFreeGb !== null ? (
+                  <span><strong>{gpu.name}</strong> · {gpuFreeGb.toFixed(1)} GB free / {gpuTotalGb.toFixed(1)} GB total VRAM</span>
+                ) : (
+                  <span>No GPU memory information detected. Compatibility cannot be predicted.</span>
+                )}
+              </div>
+              <div className="model-search-field">
+                <Search size={15} />
+                <input
+                  id="model-search"
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder="Search suggestions…"
+                  disabled={downloadState === 'downloading'}
+                />
+              </div>
+              <div className="model-search-results">
+                {searchResults.map((suggestion) => {
+                  const installedModel = models.find((model) =>
+                    model.name === suggestion.name || model.name.replace(/:latest$/, '') === suggestion.name.replace(/:latest$/, '')
+                  );
+                  const installed = Boolean(installedModel) || installedNames.has(suggestion.name) || installedNames.has(suggestion.name.replace(/:latest$/, ''));
+                  const diskSize = installedModel?.size
+                    ? `${(installedModel.size / (1024 ** 3)).toFixed(1)} GB disk`
+                    : `~${suggestion.diskGb} GB disk`;
+                  const gpuFit = getGpuFit(suggestion.vramGb);
+                  return (
+                    <button
+                      key={suggestion.name}
+                      type="button"
+                      className={modelName === suggestion.name ? 'selected' : ''}
+                      onClick={() => setModelName(suggestion.name)}
+                      disabled={downloadState === 'downloading'}
+                    >
+                      <span><strong>{suggestion.name}</strong><small>{suggestion.description}</small></span>
+                      <span className={`model-resource-fit ${gpuFit.level}`}>
+                        <strong>{diskSize}</strong>
+                        <small>~{suggestion.vramGb} GB VRAM</small>
+                        <small>{gpuFit.label}</small>
+                      </span>
+                      {installed && <CheckCircle2 className="model-installed-icon" size={16} aria-label="Installed" />}
+                    </button>
+                  );
+                })}
+                {searchResults.length === 0 && <p>No suggestion matched. Enter any Ollama model name below.</p>}
+              </div>
+              <div className="model-download-controls">
+                <input
+                  value={modelName}
+                  onChange={(event) => setModelName(event.target.value)}
+                  onKeyDown={(event) => { if (event.key === 'Enter') void downloadModel(); }}
+                  placeholder="Model and tag, e.g. qwen3.5:9b"
+                  aria-label="Ollama model name and tag"
+                  disabled={downloadState === 'downloading'}
+                />
+                {downloadState === 'downloading' ? (
+                  <button type="button" className="secondary-button" onClick={() => abortRef.current?.abort()}>Cancel</button>
+                ) : (
+                  <button type="button" className="download-button" onClick={() => void downloadModel()} disabled={!modelName.trim()}>
+                    <Download size={15} /> Download
+                  </button>
+                )}
+              </div>
+              {downloadState !== 'idle' && (
+                <div className={`model-download-progress ${downloadState}`}>
+                  <div>
+                    {downloadState === 'downloading' && <Loader2 size={15} className="spin" />}
+                    {downloadState === 'success' && <CheckCircle2 size={15} />}
+                    {downloadState === 'error' && <AlertCircle size={15} />}
+                    <span>{downloadStatus}</span>
+                    {downloadPercent !== null && <strong>{downloadPercent}%</strong>}
+                  </div>
+                  {downloadPercent !== null && <progress max="100" value={downloadPercent} />}
+                </div>
+              )}
+              <p>Disk and VRAM values are estimates for the listed tag and a moderate context size. Ollama reports the exact download size after a pull begins. Larger context windows need more memory. Models that do not fit fully in VRAM may still run using system RAM and CPU offload. Custom model requirements are unknown until downloaded.</p>
+            </section>
+          )}
 
           <section className="model-settings-section">
             <label htmlFor="context-window">Context window</label>

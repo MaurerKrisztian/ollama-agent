@@ -78,6 +78,13 @@ export const App: React.FC = () => {
     liveSocketRef.current?.emit('models:running:request');
   };
 
+  const refreshModels = async () => {
+    const response = await fetch('/api/models');
+    const data = await response.json();
+    if (!response.ok || !data.success) throw new Error(data.error || 'Could not refresh installed models.');
+    setModels(data.models || []);
+  };
+
   const fetchTerminalSessions = async () => {
     liveSocketRef.current?.emit('terminal:sessions:request');
   };
@@ -756,11 +763,13 @@ export const App: React.FC = () => {
         config={config}
         models={models}
         runningModels={runningModels}
+        systemMetrics={systemMetrics}
         onClose={() => setModelSettingsModalOpen(false)}
         onSelectModel={handleSelectModel}
         onChangeTemperature={handleChangeTemperature}
         onChangeContextWindow={handleChangeContextWindow}
         onToggleThinking={handleToggleThinking}
+        onModelsChanged={refreshModels}
         onOpenModelDetails={() => {
           setModelSettingsModalOpen(false);
           setModelDetailsModalOpen(true);

@@ -66,3 +66,41 @@ test('chatStream retains native Ollama timing and token metrics', async () => {
     global.fetch = originalFetch;
   }
 });
+
+test('pullModel parses streamed progress split across response chunks', async () => {
+  const originalFetch = global.fetch;
+  const encoder = new TextEncoder();
+  global.fetch = async () => new Response(new ReadableStream({
+    start(controller) {
+      controller.enqueue(encoder.encode('{"status":"pulling manifest"}\n{"status":"downloading","total":100,'));
+      controller.enqueue(encoder.encode('"completed":45}\n{"status":"success"}\n'));
+      controller.close();
+    },
+  }), { status: 200 });
+
+  try {
+    const progress: any[] = [];
+    await new OllamaClient().pullModel('fixture:latest', (event) => progress.push(event));
+    assert.deepEqual(progress, [
+      { status: 'pulling manifest' },
+      { status: 'downloading', total: 100, completed: 45 },
+      { status: 'success' },
+    ]);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('pullModel surfaces errors returned inside a progress stream', async () => {
+  const originalFetch = global.fetch;
+  global.fetch = async () => new Response('{"error":"model not found"}\n', { status: 200 });
+
+  try {
+    await assert.rejects(
+      () => new OllamaClient().pullModel('missing:model'),
+      /model not found/
+    );
+  } finally {
+    global.fetch = originalFetch;
+  }
+});

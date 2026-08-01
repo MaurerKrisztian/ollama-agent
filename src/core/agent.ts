@@ -1,6 +1,6 @@
 import { ContextManager } from './context.js';
 import { OllamaClient } from './ollama.js';
-import type { OllamaResponseMetrics } from './ollama.js';
+import type { OllamaPullProgress, OllamaResponseMetrics } from './ollama.js';
 import { getToolDefinitions, ToolExecutor } from './tools.js';
 import { AgentConfig, ChatMessage, OllamaModelInfo, OllamaRunningModelInfo } from './types.js';
 import { buildWorkingDirectoryContext } from './workdir-context.js';
@@ -224,6 +224,14 @@ export class AgentEngine {
   public async getModelDetails(name?: string): Promise<any> {
     const targetModel = name || this.config.model;
     return this.ollamaClient.getModelDetails(targetModel);
+  }
+
+  public async pullModel(
+    name: string,
+    onProgress?: (progress: OllamaPullProgress) => void,
+    signal?: AbortSignal
+  ): Promise<void> {
+    return this.ollamaClient.pullModel(name, onProgress, signal);
   }
 
   public resetChat(): void {

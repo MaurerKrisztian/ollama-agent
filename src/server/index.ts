@@ -202,6 +202,36 @@ app.get('/api/models', async (req, res) => {
   }
 });
 
+// POST /api/models/pull - Download a model while relaying Ollama's NDJSON progress
+app.post('/api/models/pull', async (req, res) => {
+  const model = typeof req.body?.model === 'string' ? req.body.model.trim() : '';
+  if (!model || model.length > 200 || !/^[a-zA-Z0-9][a-zA-Z0-9._/-]*(?::[a-zA-Z0-9][a-zA-Z0-9._-]*)?$/.test(model)) {
+    return res.status(400).json({ success: false, error: 'Enter a valid Ollama model name, for example qwen3.5:9b.' });
+  }
+
+  const controller = new AbortController();
+  req.on('aborted', () => controller.abort());
+  res.on('close', () => {
+    if (!res.writableEnded) controller.abort();
+  });
+  res.status(200);
+  res.setHeader('Content-Type', 'application/x-ndjson');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.flushHeaders();
+
+  try {
+    await agent.pullModel(model, (progress) => {
+      res.write(`${JSON.stringify(progress)}\n`);
+    }, controller.signal);
+    res.end();
+  } catch (err: any) {
+    if (!res.writableEnded) {
+      res.write(`${JSON.stringify({ error: err?.name === 'AbortError' ? 'Download cancelled.' : err.message })}\n`);
+      res.end();
+    }
+  }
+});
+
 // GET /api/models/running - Fetch currently loaded models in VRAM
 app.get('/api/models/running', async (req, res) => {
   try {
