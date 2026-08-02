@@ -20,6 +20,7 @@ export interface AgentSendMessageOptions {
   onToolProgress?: (name: string, progress: any) => void;
   onToolEnd?: (name: string, result: any) => void;
   onMessageAdded?: (message: ChatMessage) => void;
+  onMessageUpdated?: (message: ChatMessage) => void;
   onModelResponse?: (metrics: OllamaResponseMetrics) => void;
   onMaxLoopsReached?: (limit: number) => void;
   signal?: AbortSignal;
@@ -28,9 +29,119 @@ export interface AgentSendMessageOptions {
   userImages?: string[];
   userImageAttachments?: ChatMessage['imageAttachments'];
   selectedSkills?: LoadedProjectSkill[];
+  resumeDeepResearch?: {
+    status?: string;
+  };
 }
 
 export type AgentConfigUpdate = Partial<AgentConfig> & { ollamaToken?: string };
+
+export interface DeepResearchContextDiagnostics {
+  fullCharacters: number;
+  fullEstimatedTokens: number;
+  synthesisCharacters: number;
+  synthesisEstimatedTokens: number;
+  includedSources: number;
+  totalSources: number;
+}
+
+function estimateTokensFromCharacters(value: string): number {
+  return Math.ceil(value.length / 4);
+}
+
+export function buildDeepResearchSynthesisContext(
+  result: any,
+  contextWindow = 16384,
+): { content: string; diagnostics: DeepResearchContextDiagnostics } {
+  const fullContent = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
+  let parsed = result;
+  if (typeof result === 'string') {
+    try {
+      parsed = JSON.parse(result);
+    } catch (_) {
+      return {
+        content: result,
+        diagnostics: {
+          fullCharacters: result.length,
+          fullEstimatedTokens: estimateTokensFromCharacters(result),
+          synthesisCharacters: result.length,
+          synthesisEstimatedTokens: estimateTokensFromCharacters(result),
+          includedSources: 0,
+          totalSources: 0,
+        },
+      };
+    }
+  }
+
+  const allSources = Array.isArray(parsed?.sources) ? parsed.sources : [];
+  const relevantSources = allSources.filter((source: any) => source?.ai_note?.relevant === true);
+  const selectedSources = relevantSources.length > 0 ? relevantSources : allSources;
+  const maxCharacters = Math.max(12_000, Math.min(60_000, Math.floor(contextWindow * 1.5)));
+  const sourceShells = selectedSources.map((source: any) => ({
+    id: source?.id,
+    title: source?.title,
+    url: source?.url,
+    byline: source?.byline,
+    excerpt: source?.excerpt,
+    discovery: source?.discovery,
+    depth: source?.depth,
+    ai_note: source?.ai_note,
+    relevant_links: (Array.isArray(source?.relevant_links) ? source.relevant_links : [])
+      .filter((link: any) => link?.status === 'checked')
+      .map((link: any) => ({
+        title: link?.title,
+        url: link?.url,
+        target_source_id: link?.target_source_id,
+      })),
+    content: '',
+  }));
+  const compact: any = {
+    query: parsed?.query,
+    research_date: parsed?.research_date,
+    status: parsed?.status,
+    searches_completed: parsed?.searches_completed,
+    pages_read: parsed?.pages_read,
+    linked_pages_read: parsed?.linked_pages_read,
+    sources: sourceShells,
+    images: Array.isArray(parsed?.images) ? parsed.images : [],
+    errors: Array.isArray(parsed?.errors) ? parsed.errors : [],
+    note_errors: Array.isArray(parsed?.note_errors) ? parsed.note_errors : [],
+    guidance: parsed?.guidance,
+    context_note:
+      `Compact final-answer evidence packet. Includes ${sourceShells.length} request-relevant source${sourceShells.length === 1 ? '' : 's'} ` +
+      `from ${allSources.length} inspected source${allSources.length === 1 ? '' : 's'}. Full research diagnostics remain available in the UI.`,
+  };
+
+  const shellCharacters = JSON.stringify(compact).length;
+  const contentBudget = Math.max(0, maxCharacters - shellCharacters);
+  const perSourceBudget = sourceShells.length > 0 ? Math.floor(contentBudget / sourceShells.length) : 0;
+  sourceShells.forEach((source: any, index: number) => {
+    const rawContent = String(selectedSources[index]?.content || '');
+    source.content = rawContent.slice(0, perSourceBudget);
+    if (rawContent.length > source.content.length) source.content_truncated_for_synthesis = true;
+  });
+
+  const content = JSON.stringify(compact);
+  return {
+    content,
+    diagnostics: {
+      fullCharacters: fullContent.length,
+      fullEstimatedTokens: estimateTokensFromCharacters(fullContent),
+      synthesisCharacters: content.length,
+      synthesisEstimatedTokens: estimateTokensFromCharacters(content),
+      includedSources: sourceShells.length,
+      totalSources: allSources.length,
+    },
+  };
+}
+
+function deepResearchContinuation(userMessage: string, insufficient: boolean): string {
+  return insufficient
+    ? 'Deep research returned no inspected sources. Do not call more web tools, do not answer from memory, and do not invent facts, citations, links, or images. Briefly answer the exact user request below by explaining that no usable web evidence was found.' +
+        `\n\nOriginal user request:\n${userMessage}`
+    : 'Deep research is complete. Answer the exact user request reproduced below now using only the supplied evidence. Use the per-source ai_note fields to find relevant material efficiently, but treat them as model-generated navigation aids and verify claims against the corresponding source content. Do not ask the user to repeat the topic. Do not call deep_research, web_search, or read_web_page again this turn. Lead with the central conclusion, prefer authoritative or primary sources over listicles and personal blogs, and disclose a partial result when retrieval errors occurred. Do not make claims stronger than the inspected evidence. Cite each factual claim near the sentence it supports with a supplied source URL; a generic source list is not a substitute. Only if images were requested, use exact ![alt](url) syntax with no space between ] and (. Put every supplied image embed consecutively first so the UI creates one gallery; do not insert bullets, captions, headings, or source links between images. After the gallery, list the supplied source-page links. Fulfill the requested count when that many images were supplied; otherwise state the exact available count.' +
+        `\n\nOriginal user request:\n${userMessage}`;
+}
 
 function inferExplicitlyRequestedTools(prompt: string): string[] {
   const normalized = prompt.toLowerCase();
@@ -387,6 +498,44 @@ export class AgentEngine {
     return this.contextManager.rewindToMessage(messageId);
   }
 
+  public async regenerateDeepResearchAnswer(
+    toolMessageId: string,
+    callbacks?: AgentSendMessageOptions,
+  ): Promise<string> {
+    const messages = this.contextManager.getMessages();
+    const toolIndex = messages.findIndex((message) =>
+      message.id === toolMessageId && message.role === 'tool' && message.name === 'deep_research'
+    );
+    if (toolIndex === -1) throw new Error('Deep-research tool result was not found in this session.');
+
+    const toolMessage = messages[toolIndex];
+    const fullContent = toolMessage.displayContent || toolMessage.content;
+    let parsedResult: any;
+    try {
+      parsedResult = JSON.parse(fullContent);
+    } catch (_) {
+      throw new Error('The selected deep-research result is not valid JSON.');
+    }
+    const originalUserMessage = [...messages.slice(0, toolIndex)]
+      .reverse()
+      .find((message) => message.role === 'user');
+    if (!originalUserMessage) throw new Error('The original research request was not found before this tool result.');
+
+    const synthesis = buildDeepResearchSynthesisContext(parsedResult, this.config.contextWindow);
+    const retainedMessages = messages.slice(0, toolIndex + 1).map((message, index) =>
+      index === toolIndex
+        ? { ...message, content: synthesis.content, displayContent: fullContent }
+        : message
+    );
+    this.contextManager.setMessages(retainedMessages);
+    callbacks?.onMessageUpdated?.(retainedMessages[toolIndex]);
+
+    return this.sendMessage(originalUserMessage.content, {
+      ...callbacks,
+      resumeDeepResearch: { status: parsedResult?.status },
+    });
+  }
+
   public async compactContext(): Promise<{ success: boolean; summary?: string; reason?: string; context?: any; message?: ChatMessage }> {
     const messages = this.contextManager.getMessages();
     if (messages.length <= 1) {
@@ -433,16 +582,19 @@ ${conversationText}`;
   }
 
   public async sendMessage(userMessage: string, callbacks?: AgentSendMessageOptions): Promise<string> {
-    // Add User Message to Context
-    const userMsg = this.contextManager.addMessage({
-      role: 'user',
-      content: userMessage,
-      displayContent: callbacks?.userDisplayContent,
-      attachments: callbacks?.userAttachments,
-      images: callbacks?.userImages,
-      imageAttachments: callbacks?.userImageAttachments,
-    });
-    if (callbacks?.onMessageAdded) callbacks.onMessageAdded(userMsg);
+    const resumingDeepResearch = callbacks?.resumeDeepResearch !== undefined;
+    if (!resumingDeepResearch) {
+      // Add User Message to Context
+      const userMsg = this.contextManager.addMessage({
+        role: 'user',
+        content: userMessage,
+        displayContent: callbacks?.userDisplayContent,
+        attachments: callbacks?.userAttachments,
+        images: callbacks?.userImages,
+        imageAttachments: callbacks?.userImageAttachments,
+      });
+      if (callbacks?.onMessageAdded) callbacks.onMessageAdded(userMsg);
+    }
 
     const maxLoopsConfig = this.config.maxLoops ?? 25;
     const isUnlimited = maxLoopsConfig === 0;
@@ -456,6 +608,7 @@ ${conversationText}`;
     const requiredToolCounts = inferRequiredToolCounts(userMessage, requestedTools);
     const requestedImageCount = inferRequestedImageCount(userMessage);
     const executedToolCounts = new Map<string, number>();
+    if (resumingDeepResearch) executedToolCounts.set('deep_research', 1);
     let successfulActionIndex = 0;
     let lastMutationAction = -1;
     let lastReadAction = -1;
@@ -480,19 +633,21 @@ ${conversationText}`;
         } catch (_) {}
       }
     }
-    let continuationReminder: string | null = null;
-    let deepResearchCompleted = false;
-    let deepResearchInsufficient = false;
+    let deepResearchCompleted = resumingDeepResearch;
+    let deepResearchInsufficient = callbacks?.resumeDeepResearch?.status === 'insufficient_evidence';
+    let continuationReminder: string | null = resumingDeepResearch
+      ? deepResearchContinuation(userMessage, deepResearchInsufficient)
+      : null;
 
     while (isUnlimited || maxLoops > 0) {
       callbacks?.signal?.throwIfAborted();
       if (!isUnlimited) maxLoops--;
 
-      const activeTools = this.getActiveTools();
+      const activeTools = deepResearchCompleted ? [] : this.getActiveTools();
       this.contextManager.setTools(activeTools);
 
       let effectiveSystemPrompt = this.contextManager.getEffectiveSystemPrompt(true);
-      if (this.config.showWorkingDirInfo) {
+      if (this.config.showWorkingDirInfo && !deepResearchCompleted) {
         effectiveSystemPrompt += `\n\n${await this.getWorkingDirectoryPromptContext()}`;
       }
       if (callbacks?.selectedSkills?.length) {
@@ -691,6 +846,13 @@ ${conversationText}`;
               `The read_file call failed: ${toolResult.error}\n` +
               `Do not retry that path. Your entire next response must be one native list_directory call for "${parentPath}". ` +
               'Use the returned entries to select the real file path, then read it.';
+          } else if (toolResult?.repeated_web_research === true) {
+            failedToolCalls.add(callFingerprint);
+            continuationReminder =
+              'The web investigation is already complete and all web tools are now unavailable for this turn. ' +
+              'Your next response must be the final answer to the original user request using the supplied deep-research evidence. ' +
+              'Do not emit a tool call, tool-call JSON, a search plan, or a request for more research.' +
+              `\n\nOriginal user request:\n${userMessage}`;
           } else {
             failedToolCalls.add(callFingerprint);
           }
@@ -699,7 +861,11 @@ ${conversationText}`;
             callbacks.onToolEnd(call.name, toolResult);
           }
 
-          const resultStr = typeof toolResult === 'string' ? toolResult : JSON.stringify(toolResult, null, 2);
+          const fullResultStr = typeof toolResult === 'string' ? toolResult : JSON.stringify(toolResult, null, 2);
+          const synthesisResult = call.name === 'deep_research'
+            ? buildDeepResearchSynthesisContext(toolResult, this.config.contextWindow)
+            : null;
+          const resultStr = synthesisResult?.content || fullResultStr;
 
           // Add Tool Result message to Context cleanly
           const toolMsg = this.contextManager.addMessage({
@@ -707,6 +873,7 @@ ${conversationText}`;
             name: call.name,
             tool_call_id: call.id,
             content: resultStr,
+            displayContent: synthesisResult ? fullResultStr : undefined,
           });
           if (callbacks?.onMessageAdded) callbacks.onMessageAdded(toolMsg);
         }
@@ -717,12 +884,8 @@ ${conversationText}`;
             ([toolName, requiredCount]) => (executedToolCounts.get(toolName) || 0) >= requiredCount
           );
         if (workflowCompletedAfterThisCall && !anyToolFailedThisRound && (isUnlimited || maxLoops > 0)) {
-          continuationReminder = deepResearchInsufficient
-            ? 'Deep research returned no inspected sources. Do not call more web tools, do not answer from memory, and do not invent facts, citations, links, or images. Briefly answer the exact user request below by explaining that no usable web evidence was found.' +
-              `\n\nOriginal user request:\n${userMessage}`
-            : deepResearchCompleted
-              ? 'Deep research is complete. Answer the exact user request reproduced below now using only the supplied evidence. Use the per-source ai_note fields to find relevant material efficiently, but treat them as model-generated navigation aids and verify claims against the corresponding source content. Do not ask the user to repeat the topic. Do not call deep_research, web_search, or read_web_page again this turn. Lead with the central conclusion, prefer authoritative or primary sources over listicles and personal blogs, and disclose a partial result when retrieval errors occurred. Do not make claims stronger than the inspected evidence. Cite each factual claim near the sentence it supports with a supplied source URL; a generic source list is not a substitute. Only if images were requested, use exact ![alt](url) syntax with no space between ] and (. Put every supplied image embed consecutively first so the UI creates one gallery; do not insert bullets, captions, headings, or source links between images. After the gallery, list the supplied source-page links. Fulfill the requested count when that many images were supplied; otherwise state the exact available count.' +
-                `\n\nOriginal user request:\n${userMessage}`
+          continuationReminder = deepResearchCompleted
+            ? deepResearchContinuation(userMessage, deepResearchInsufficient)
               :
                 'Review the original request against the successful tool results. A tool type succeeding once does not mean every requested operation is complete. ' +
                 'If any requested change or action is not yet reflected in the tool results, invoke the required tool now using the available schemas. ' +

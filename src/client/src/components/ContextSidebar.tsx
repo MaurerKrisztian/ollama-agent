@@ -554,7 +554,10 @@ export const ContextSidebar: React.FC<ContextSidebarProps> = ({
                           min="1"
                           max="50"
                           value={pruningConfig.webOutputTTLTurns ?? 5}
-                          onChange={(e) => handleUpdatePruning({ webOutputTTLTurns: parseInt(e.target.value, 10) || 5 })}
+                          onChange={(e) => {
+                            const value = Number.parseInt(e.target.value, 10);
+                            handleUpdatePruning({ webOutputTTLTurns: Number.isNaN(value) ? 5 : Math.max(0, value) });
+                          }}
                           style={{ width: '100%', padding: '4px 8px', borderRadius: '4px', background: 'rgba(15, 23, 42, 0.8)', border: '1px solid var(--border-color)', color: '#fff', fontSize: '0.8rem' }}
                         />
                       </div>

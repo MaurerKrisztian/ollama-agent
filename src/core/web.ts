@@ -1,7 +1,7 @@
 import dns from 'node:dns/promises';
 import net from 'node:net';
 import { Readability } from '@mozilla/readability';
-import { JSDOM } from 'jsdom';
+import { JSDOM, VirtualConsole } from 'jsdom';
 import TurndownService from 'turndown';
 
 const USER_AGENT = 'LocalModelChat/1.1 (+https://github.com/local-model-chat)';
@@ -9,6 +9,13 @@ const REQUEST_TIMEOUT_MS = 12_000;
 const MAX_DOWNLOAD_BYTES = 2 * 1024 * 1024;
 const MAX_MARKDOWN_CHARS = 24_000;
 const MAX_REDIRECTS = 4;
+
+// Web pages frequently contain modern or malformed CSS that jsdom does not
+// understand. jsdom reports those non-fatal stylesheet failures to the host
+// console by default, sometimes dumping thousands of lines of CSS. Scripts are
+// not executed here, so page console output and CSS parser diagnostics are not
+// part of the reader's result and should remain isolated from CLI output.
+const PAGE_VIRTUAL_CONSOLE = new VirtualConsole();
 
 type FetchLike = typeof fetch;
 type LookupLike = (hostname: string) => Promise<Array<{ address: string }>>;
@@ -272,7 +279,7 @@ function isSearchChallenge(status: number, html: string): boolean {
 }
 
 function parseDuckDuckGoResults(html: string, searchUrl: string, limit: number): WebSearchResult[] {
-  const document = new JSDOM(html, { url: searchUrl }).window.document;
+  const document = new JSDOM(html, { url: searchUrl, virtualConsole: PAGE_VIRTUAL_CONSOLE }).window.document;
   const results: WebSearchResult[] = [];
   for (const result of document.querySelectorAll('.result')) {
     const anchor = result.querySelector<HTMLAnchorElement>('.result__a');
@@ -289,7 +296,7 @@ function parseDuckDuckGoResults(html: string, searchUrl: string, limit: number):
 }
 
 function parseBingResults(html: string, searchUrl: string, limit: number): WebSearchResult[] {
-  const document = new JSDOM(html, { url: searchUrl }).window.document;
+  const document = new JSDOM(html, { url: searchUrl, virtualConsole: PAGE_VIRTUAL_CONSOLE }).window.document;
   const results: WebSearchResult[] = [];
   for (const result of document.querySelectorAll('li.b_algo')) {
     const anchor = result.querySelector<HTMLAnchorElement>('h2 a[href]');
@@ -312,7 +319,7 @@ function parseBingResults(html: string, searchUrl: string, limit: number): WebSe
 }
 
 function parseYahooResults(html: string, searchUrl: string, limit: number): WebSearchResult[] {
-  const document = new JSDOM(html, { url: searchUrl }).window.document;
+  const document = new JSDOM(html, { url: searchUrl, virtualConsole: PAGE_VIRTUAL_CONSOLE }).window.document;
   const results: WebSearchResult[] = [];
   for (const result of document.querySelectorAll('.dd.algo')) {
     const anchor = result.querySelector<HTMLAnchorElement>('.compTitle a[href]');
@@ -430,7 +437,10 @@ export class WebClient {
       };
     }
 
-    const dom = new JSDOM(text, { url: finalUrl.toString() });
+    const dom = new JSDOM(text, {
+      url: finalUrl.toString(),
+      virtualConsole: PAGE_VIRTUAL_CONSOLE,
+    });
     const links = extractPageLinks(dom.window.document, finalUrl);
     const imageCandidates = extractPageImages(dom.window.document, finalUrl);
     const images = (await Promise.all(imageCandidates.map(async (image) => {

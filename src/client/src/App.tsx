@@ -75,6 +75,58 @@ export const App: React.FC = () => {
   const [terminalSessionsModalOpen, setTerminalSessionsModalOpen] = useState(false);
   const [terminalSidebarOpen, setTerminalSidebarOpen] = useState(false);
   const liveSocketRef = useRef<Socket | null>(null);
+  const activeSessionIdRef = useRef('');
+
+  const applyChatStreamEvent = (eventType: string, eventData: any) => {
+    if (eventType === 'message_added') {
+      setMessages((prev) => {
+        if (prev.some((message) => message.id === eventData.id)) return prev;
+        return [...prev, eventData];
+      });
+    } else if (eventType === 'message_updated') {
+      setMessages((prev) => prev.map((message) => message.id === eventData.id ? eventData : message));
+    } else if (eventType === 'chunk') {
+      setStreamingText((prev) => prev + eventData.chunk);
+    } else if (eventType === 'thinking_chunk') {
+      setStreamingThinking((prev) => prev + eventData.chunk);
+    } else if (eventType === 'context_update') {
+      setContextInfo(eventData);
+    } else if (eventType === 'tool_approval_required') {
+      setPendingApprovalCall({ name: eventData.name, args: eventData.args, diff: eventData.diff });
+    } else if (eventType === 'tool_start') {
+      setPendingApprovalCall(null);
+      setActiveToolCall({ name: eventData.name, args: eventData.args });
+    } else if (eventType === 'tool_progress') {
+      setActiveToolCall((current) => current?.name === eventData.name
+        ? { ...current, progress: eventData.progress }
+        : current);
+    } else if (eventType === 'tool_end') {
+      setActiveToolCall(null);
+      setPendingApprovalCall(null);
+    } else if (eventType === 'done') {
+      setActiveToolCall(null);
+      setPendingApprovalCall(null);
+      setStreamingText('');
+      setStreamingThinking('');
+      setGenerationStatus('completed');
+      setIsGenerating(false);
+    } else if (eventType === 'cancelled') {
+      setActiveToolCall(null);
+      setPendingApprovalCall(null);
+      setStreamingText('');
+      setStreamingThinking('');
+      setGenerationStatus('cancelled');
+      setIsGenerating(false);
+    } else if (eventType === 'error') {
+      setActiveToolCall(null);
+      setPendingApprovalCall(null);
+      setStreamingText('');
+      setStreamingThinking('');
+      setGenerationStatus('error');
+      setIsGenerating(false);
+      alert(`Error: ${eventData.error}`);
+    }
+  };
 
   const requestRunningModels = async () => {
     liveSocketRef.current?.emit('models:running:request');
@@ -121,6 +173,14 @@ export const App: React.FC = () => {
     socket.on('chat:sessions', (data: { sessions?: ChatSessionSummary[]; activeSessionId?: string }) => {
       if (Array.isArray(data.sessions)) setChatSessions(data.sessions);
     });
+    socket.on('chat:stream', (payload: { sessionId?: string; event?: string; data?: any }) => {
+      if (!payload.sessionId || payload.sessionId !== activeSessionIdRef.current || !payload.event) return;
+      if (!['done', 'cancelled', 'error'].includes(payload.event)) {
+        setIsGenerating(true);
+        setGenerationStatus('generating');
+      }
+      applyChatStreamEvent(payload.event, payload.data);
+    });
     socket.on('config:state', (data: { config?: AgentConfig; context?: ContextInfo }) => {
       if (data.config) {
         setConfig((prev) => ({ ...prev, ...data.config }));
@@ -134,6 +194,10 @@ export const App: React.FC = () => {
       socket.disconnect();
     };
   }, []);
+
+  useEffect(() => {
+    activeSessionIdRef.current = activeSessionId;
+  }, [activeSessionId]);
 
   const loadInitialState = async () => {
     try {
@@ -197,8 +261,11 @@ export const App: React.FC = () => {
       if (sessionsRes.ok) {
         const data = await sessionsRes.json();
         const sessions: ChatSessionSummary[] = Array.isArray(data.sessions) ? data.sessions : [];
+        const linkedSessionId = new URLSearchParams(window.location.search).get('session');
         const savedSessionId = sessionStorage.getItem('local-model-chat.activeSessionId');
-        const initialSessionId = sessions.some((session) => session.id === savedSessionId)
+        const initialSessionId = sessions.some((session) => session.id === linkedSessionId)
+          ? linkedSessionId!
+          : sessions.some((session) => session.id === savedSessionId)
           ? savedSessionId!
           : (sessions[0]?.id || data.activeSessionId || '');
         setChatSessions(sessions);
@@ -209,6 +276,8 @@ export const App: React.FC = () => {
             setMessages(activeData.messages || []);
             setContextInfo(activeData.context);
             setActiveSessionId(initialSessionId);
+            setIsGenerating(Boolean(activeData.isGenerating));
+            if (activeData.isGenerating) setGenerationStatus('generating');
             sessionStorage.setItem('local-model-chat.activeSessionId', initialSessionId);
           }
         }
@@ -381,7 +450,11 @@ export const App: React.FC = () => {
     sessionStorage.setItem('local-model-chat.activeSessionId', data.activeSessionId || sessionId);
     setStreamingText('');
     setStreamingThinking('');
-    setGenerationStatus('idle');
+    setIsGenerating(Boolean(data.isGenerating));
+    setGenerationStatus(data.isGenerating ? 'generating' : 'idle');
+    const url = new URL(window.location.href);
+    url.searchParams.set('session', data.activeSessionId || sessionId);
+    window.history.replaceState(null, '', url);
   };
 
   const handleRenameChatSession = async (sessionId: string, title: string) => {
@@ -526,11 +599,7 @@ export const App: React.FC = () => {
     }
   };
 
-  const handleSendMessage = async (
-    userPrompt: string,
-    attachments: TextAttachment[] = [],
-    imageAttachments: import('./types').ImageAttachment[] = []
-  ) => {
+  const runChatStream = async (body: Record<string, unknown>, actionLabel: string) => {
     setIsGenerating(true);
     setGenerationStatus('generating');
     setStreamingText('');
@@ -540,11 +609,12 @@ export const App: React.FC = () => {
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: userPrompt, sessionId: activeSessionId, attachments, imageAttachments }),
+        body: JSON.stringify({ ...body, sessionId: activeSessionId }),
       });
 
       if (!response.ok || !response.body) {
-        throw new Error(`Server response error ${response.status}`);
+        const data = await response.json().catch(() => null);
+        throw new Error(data?.error || `Server response error ${response.status}`);
       }
 
       const reader = response.body.getReader();
@@ -568,56 +638,14 @@ export const App: React.FC = () => {
             const eventType = eventLine[1].trim();
             const eventData = JSON.parse(dataLine[1].trim());
 
-            if (eventType === 'message_added') {
-              setMessages((prev) => {
-                if (prev.some((m) => m.id === eventData.id)) return prev;
-                return [...prev, eventData];
-              });
-            } else if (eventType === 'chunk') {
-              setStreamingText((prev) => prev + eventData.chunk);
-            } else if (eventType === 'thinking_chunk') {
-              setStreamingThinking((prev) => prev + eventData.chunk);
-            } else if (eventType === 'context_update') {
-              setContextInfo(eventData);
-            } else if (eventType === 'tool_approval_required') {
-              setPendingApprovalCall({ name: eventData.name, args: eventData.args, diff: eventData.diff });
-            } else if (eventType === 'tool_start') {
-              setPendingApprovalCall(null);
-              setActiveToolCall({ name: eventData.name, args: eventData.args });
-            } else if (eventType === 'tool_progress') {
-              setActiveToolCall((current) => current?.name === eventData.name
-                ? { ...current, progress: eventData.progress }
-                : current);
-            } else if (eventType === 'tool_end') {
-              setActiveToolCall(null);
-              setPendingApprovalCall(null);
-            } else if (eventType === 'done') {
-              setActiveToolCall(null);
-              setPendingApprovalCall(null);
-              setStreamingText('');
-              setStreamingThinking('');
-              setGenerationStatus('completed');
-            } else if (eventType === 'cancelled') {
-              setActiveToolCall(null);
-              setPendingApprovalCall(null);
-              setStreamingText('');
-              setStreamingThinking('');
-              setGenerationStatus('cancelled');
-            } else if (eventType === 'error') {
-              setActiveToolCall(null);
-              setPendingApprovalCall(null);
-              setStreamingText('');
-              setStreamingThinking('');
-              setGenerationStatus('error');
-              alert(`Error: ${eventData.error}`);
-            }
+            applyChatStreamEvent(eventType, eventData);
           }
         }
       }
     } catch (err: any) {
       setActiveToolCall(null);
       setGenerationStatus('error');
-      alert(`Failed to send message: ${err.message}`);
+      alert(`Failed to ${actionLabel}: ${err.message}`);
     } finally {
       setIsGenerating(false);
       setStreamingText('');
@@ -629,6 +657,20 @@ export const App: React.FC = () => {
         setContextInfo(data);
       }
     }
+  };
+
+  const handleSendMessage = async (
+    userPrompt: string,
+    attachments: TextAttachment[] = [],
+    imageAttachments: import('./types').ImageAttachment[] = []
+  ) => runChatStream({ message: userPrompt, attachments, imageAttachments }, 'send message');
+
+  const handleRegenerateDeepResearch = async (toolMessageId: string) => {
+    setMessages((current) => {
+      const toolIndex = current.findIndex((message) => message.id === toolMessageId);
+      return toolIndex >= 0 ? current.slice(0, toolIndex + 1) : current;
+    });
+    await runChatStream({ regenerateFromToolMessageId: toolMessageId }, 'regenerate the research answer');
   };
 
   const handleCancelGeneration = async () => {
@@ -737,6 +779,7 @@ export const App: React.FC = () => {
             onApproveToolCall={handleApproveToolCall}
             onRejectToolCall={handleRejectToolCall}
             onRewindToMessage={handleRewindToMessage}
+            onRegenerateDeepResearch={handleRegenerateDeepResearch}
             onClearChat={handleNewChat}
             onOpenToolSettings={() => setToolSettingsModalOpen(true)}
             onOpenModelDetails={() => setModelDetailsModalOpen(true)}

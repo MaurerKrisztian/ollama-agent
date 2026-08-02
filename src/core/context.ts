@@ -309,7 +309,8 @@ export class ContextManager {
           ttlTurns = this.pruningConfig.webOutputTTLTurns ?? 5;
         }
 
-        if (ttlTurns !== undefined && userMessagesAfter >= ttlTurns) {
+        // Zero is the explicit "never expire" value used by the UI and CLI.
+        if (ttlTurns !== undefined && ttlTurns > 0 && userMessagesAfter >= ttlTurns) {
           msg.content = `[Context Pruned: Output of '${toolName}' expired after ${userMessagesAfter} user turns to optimize context space.]`;
         }
       }

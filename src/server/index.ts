@@ -8,6 +8,7 @@ import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
 import { Server as SocketIOServer } from 'socket.io';
 import { AgentEngine } from '../core/agent.js';
+import type { AgentSendMessageOptions } from '../core/agent.js';
 import { ContextManager } from '../core/context.js';
 import { BUILTIN_TOOLS, TOOL_DEFINITIONS } from '../core/tools.js';
 import { BENCHMARK_TEST_CASES } from '../benchmark/cases/index.js';
@@ -614,12 +615,61 @@ app.get('/api/messages', (_req, res) => {
 
 // GET /api/chat/sessions - List persisted conversations without their message payloads
 app.get('/api/chat/sessions', (_req, res) => {
-  res.json({ success: true, ...getChatSessionsState() });
+  res.json({
+    success: true,
+    capabilities: { observableChatSessions: true },
+    ...getChatSessionsState(),
+  });
 });
 
 // POST /api/chat/sessions - Save the current conversation and start a new one
 app.post('/api/chat/sessions', (req, res) => {
   const session = chatSessions.create(req.body?.title, false);
+  const requestedConfig = req.body?.agentConfig;
+  if (requestedConfig && typeof requestedConfig === 'object') {
+    const globalConfig = agent.getConfig();
+    const requestedPruning = requestedConfig.pruningConfig && typeof requestedConfig.pruningConfig === 'object'
+      ? requestedConfig.pruningConfig
+      : {};
+    const globalPruning = globalConfig.pruningConfig || agent.getContextManager().getPruningConfig();
+    const sessionEngine = new AgentEngine({
+      ...globalConfig,
+      ollamaToken: agent.getOllamaToken(),
+      model: typeof requestedConfig.model === 'string' && requestedConfig.model.trim()
+        ? requestedConfig.model.trim()
+        : globalConfig.model,
+      ollamaHost: typeof requestedConfig.ollamaHost === 'string' && requestedConfig.ollamaHost.trim()
+        ? requestedConfig.ollamaHost.trim()
+        : globalConfig.ollamaHost,
+      temperature: typeof requestedConfig.temperature === 'number' ? requestedConfig.temperature : globalConfig.temperature,
+      contextWindow: Number.isInteger(requestedConfig.contextWindow) ? requestedConfig.contextWindow : globalConfig.contextWindow,
+      maxLoops: Number.isInteger(requestedConfig.maxLoops) ? requestedConfig.maxLoops : globalConfig.maxLoops,
+      enableThinking: typeof requestedConfig.enableThinking === 'boolean' ? requestedConfig.enableThinking : globalConfig.enableThinking,
+      complexityProfile: requestedConfig.complexityProfile === 'simple' || requestedConfig.complexityProfile === 'medium' || requestedConfig.complexityProfile === 'advanced'
+        ? requestedConfig.complexityProfile
+        : globalConfig.complexityProfile,
+      enabledTools: requestedConfig.enabledTools && typeof requestedConfig.enabledTools === 'object'
+        ? { ...globalConfig.enabledTools, ...requestedConfig.enabledTools }
+        : globalConfig.enabledTools,
+      pruningConfig: {
+        ...globalPruning,
+        enabled: typeof requestedPruning.enabled === 'boolean' ? requestedPruning.enabled : globalPruning.enabled,
+        enableToolTTL: typeof requestedPruning.enableToolTTL === 'boolean'
+          ? requestedPruning.enableToolTTL
+          : globalPruning.enableToolTTL,
+        webOutputTTLTurns: Number.isInteger(requestedPruning.webOutputTTLTurns) && requestedPruning.webOutputTTLTurns >= 0
+          ? requestedPruning.webOutputTTLTurns
+          : globalPruning.webOutputTTLTurns,
+      },
+      showWorkingDirInfo: typeof requestedConfig.showWorkingDirInfo === 'boolean'
+        ? requestedConfig.showWorkingDirInfo
+        : globalConfig.showWorkingDirInfo,
+      systemPrompt: typeof requestedConfig.systemPrompt === 'string' && requestedConfig.systemPrompt.trim()
+        ? requestedConfig.systemPrompt
+        : globalConfig.systemPrompt,
+    });
+    createChatRuntime(session.id, sessionEngine);
+  }
   io.emit('chat:sessions', { sessions: chatSessions.list() });
   res.status(201).json({
     success: true,
@@ -628,6 +678,7 @@ app.post('/api/chat/sessions', (req, res) => {
     context: getSessionContext(session.id),
     sessions: chatSessions.list(),
     activeSessionId: session.id,
+    isGenerating: activeGenerationControllers.has(session.id),
   });
 });
 
@@ -1049,7 +1100,16 @@ app.post('/api/chat/cancel', (req, res) => {
 
 // POST /api/chat - Stream chat completion via Server-Sent Events (SSE)
 app.post('/api/chat', async (req, res) => {
-  const { message, sessionId, attachments = [], imageAttachments = [] } = req.body;
+  const {
+    message: requestedMessage,
+    sessionId,
+    attachments = [],
+    imageAttachments = [],
+    broadcast = false,
+    regenerateFromToolMessageId,
+  } = req.body;
+  const isDeepResearchRegeneration = typeof regenerateFromToolMessageId === 'string';
+  const message = isDeepResearchRegeneration ? '' : requestedMessage;
 
   if (typeof sessionId !== 'string' || !chatSessions.getSession(sessionId)) {
     return res.status(404).json({ error: 'A valid chat session is required.' });
@@ -1058,8 +1118,11 @@ app.post('/api/chat', async (req, res) => {
     return res.status(409).json({ error: 'This chat is already generating.' });
   }
 
-  if (!message || typeof message !== 'string') {
+  if (!isDeepResearchRegeneration && (!message || typeof message !== 'string')) {
     return res.status(400).json({ error: 'Field "message" is required.' });
+  }
+  if (isDeepResearchRegeneration && (attachments.length > 0 || imageAttachments.length > 0)) {
+    return res.status(400).json({ error: 'Attachments cannot be added when regenerating from a deep-research result.' });
   }
   if (!Array.isArray(attachments) || attachments.length > 10) {
     return res.status(400).json({ error: 'Attachments must be an array of at most 10 text files.' });
@@ -1090,7 +1153,7 @@ app.post('/api/chat', async (req, res) => {
     return res.status(400).json({ error: 'Invalid attachment or attachment size limit exceeded (512 KB each, 1 MB total).' });
   }
 
-  if (/^\/skills\s*$/i.test(message)) {
+  if (!isDeepResearchRegeneration && /^\/skills\s*$/i.test(message)) {
     const skills = await listProjectSkills(agent.getConfig().workingDir);
     const content = formatProjectSkillList(skills);
     res.setHeader('Content-Type', 'text/event-stream');
@@ -1151,6 +1214,7 @@ app.post('/api/chat', async (req, res) => {
 
   const sendEvent = (event: string, data: any) => {
     res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    if (broadcast === true) io.emit('chat:stream', { sessionId, event, data });
   };
 
   // Intercept /compact command
@@ -1259,7 +1323,7 @@ app.post('/api/chat', async (req, res) => {
   };
 
   try {
-    const finalContent = await sessionAgent.sendMessage(modelMessage, {
+    const sendCallbacks: AgentSendMessageOptions = {
       userDisplayContent: message,
       userAttachments: attachments,
       userImages: rawImagesBase64,
@@ -1272,7 +1336,12 @@ app.post('/api/chat', async (req, res) => {
         sendEvent('thinking_chunk', { chunk: thinkingChunk });
       },
       onMessageAdded: (msg) => {
+        saveChatSession(sessionId, sessionAgent);
         sendEvent('message_added', msg);
+      },
+      onMessageUpdated: (msg) => {
+        saveChatSession(sessionId, sessionAgent);
+        sendEvent('message_updated', msg);
       },
       onToolStart: (name, args) => {
         sendEvent('tool_start', { name, args });
@@ -1283,11 +1352,17 @@ app.post('/api/chat', async (req, res) => {
       onToolEnd: (name, result) => {
         sendEvent('tool_end', { name, result });
       },
+      onModelResponse: (metrics) => {
+        sendEvent('model_response', { metrics });
+      },
       onMaxLoopsReached: (limit) => {
         sendEvent('max_loops_reached', { maxLoops: limit });
       },
       signal: generationController.signal,
-    });
+    };
+    const finalContent = isDeepResearchRegeneration
+      ? await sessionAgent.regenerateDeepResearchAnswer(regenerateFromToolMessageId, sendCallbacks)
+      : await sessionAgent.sendMessage(modelMessage, sendCallbacks);
 
     sendEvent('context_update', sessionAgent.getContextManager().getContextInfo());
     sendEvent('done', { content: finalContent });

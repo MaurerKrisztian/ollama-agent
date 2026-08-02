@@ -126,6 +126,26 @@ test('Strategy 3: Tool Output TTL & Category-Based Pruning', () => {
   );
 });
 
+test('zero web output TTL disables expiry', () => {
+  const cm = new ContextManager(undefined, undefined, { webOutputTTLTurns: 0 });
+  cm.addMessage({
+    role: 'assistant',
+    content: '',
+    tool_calls: [{ id: 'call_web', name: 'web_search', arguments: { query: 'evidence' } }],
+  });
+  const result = cm.addMessage({
+    role: 'tool',
+    name: 'web_search',
+    tool_call_id: 'call_web',
+    content: 'persistent evidence',
+  });
+  for (let turn = 0; turn < 20; turn++) {
+    cm.addMessage({ role: 'user', content: `Follow-up ${turn}` });
+    cm.addMessage({ role: 'assistant', content: 'Continue.' });
+  }
+  assert.equal(cm.getMessages().find((message) => message.id === result.id)?.content, 'persistent evidence');
+});
+
 test('Disabling pruning preserves all tool outputs intact', () => {
   const cm = new ContextManager(undefined, undefined, { enabled: false });
 

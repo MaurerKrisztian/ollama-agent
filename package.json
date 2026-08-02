@@ -15,6 +15,7 @@
     "build:server": "tsc",
     "start": "node dist/server/index.js",
     "benchmark:image": "docker build --file Dockerfile.benchmark --tag local-model-chat-benchmark:node20 .",
+    "benchmark:browsecomp": "tsx src/benchmark/browsecomp/cli.ts",
     "test": "tsx --test \"src/**/*.test.ts\"",
     "typecheck": "tsc --noEmit"
   },

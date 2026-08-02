@@ -650,16 +650,18 @@ const DeepResearchProgress: React.FC<{ args: Record<string, any>; progress?: any
 };
 
 const FinalAnswerContextPreview: React.FC<{
-  rawContext: string;
+  modelContext: string;
+  fullContext: string;
   sources: any[];
-}> = ({ rawContext, sources }) => {
+}> = ({ modelContext, fullContext, sources }) => {
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [contextView, setContextView] = useState<'relevant' | 'raw'>('relevant');
+  const [contextView, setContextView] = useState<'relevant' | 'model' | 'raw'>('model');
   const notes = sources.map((source) => source.ai_note).filter(Boolean);
   const noteContext = JSON.stringify(notes);
   const noteTokens = Math.ceil(noteContext.length / 4);
-  const totalTokens = Math.ceil(rawContext.length / 4);
+  const modelTokens = Math.ceil(modelContext.length / 4);
+  const fullTokens = Math.ceil(fullContext.length / 4);
   const relevantSources = sources.map((source) => {
     const relevantLinks = (Array.isArray(source.discovered_links) ? source.discovered_links : [])
       .filter((link: any) =>
@@ -686,7 +688,9 @@ const FinalAnswerContextPreview: React.FC<{
       })),
     })),
   }, null, 2);
-  const activeContext = contextView === 'relevant' ? relevantContext : rawContext;
+  const activeContext = contextView === 'relevant'
+    ? relevantContext
+    : contextView === 'model' ? modelContext : fullContext;
 
   const copyContext = async () => {
     try {
@@ -700,7 +704,7 @@ const FinalAnswerContextPreview: React.FC<{
     <>
       <div style={{ display: 'flex', alignItems: 'center', gap: '7px', marginTop: '7px', flexWrap: 'wrap' }}>
         <span style={{ padding: '3px 8px', borderRadius: '999px', border: '1px solid rgba(167, 139, 250, 0.25)', background: 'rgba(124, 58, 237, 0.1)', color: '#ddd6fe', fontFamily: 'var(--font-code)', fontSize: '0.65rem' }}>
-          AI note context: {notes.length} notes · ~{noteTokens.toLocaleString()} tokens
+          Model synthesis payload: ~{modelTokens.toLocaleString()} tokens · {modelContext.length.toLocaleString()} chars
         </span>
         <button
           type="button"
@@ -723,7 +727,7 @@ const FinalAnswerContextPreview: React.FC<{
               <Brain size={16} color="#c4b5fd" />
               <div style={{ minWidth: 0 }}>
                 <strong style={{ display: 'block', color: 'var(--text-main)', fontSize: '0.82rem' }}>Deep-research context for the final answer</strong>
-                <span style={{ color: 'var(--text-muted)', fontSize: '0.68rem' }}>{notes.length} relevance notes · raw payload approximately {totalTokens.toLocaleString()} tokens</span>
+                <span style={{ color: 'var(--text-muted)', fontSize: '0.68rem' }}>model payload ~{modelTokens.toLocaleString()} tokens · full result ~{fullTokens.toLocaleString()} tokens · {notes.length} relevance notes (~{noteTokens.toLocaleString()} tokens)</span>
               </div>
               <button type="button" onClick={copyContext} style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '5px 8px', borderRadius: '5px', border: '1px solid var(--border-color)', background: 'rgba(30, 41, 59, 0.7)', color: copied ? '#5eead4' : 'var(--text-muted)', cursor: 'pointer', fontSize: '0.68rem' }}>
                 {copied ? <Check size={12} /> : <Copy size={12} />} {copied ? 'Copied' : 'Copy'}
@@ -734,11 +738,14 @@ const FinalAnswerContextPreview: React.FC<{
               <button type="button" onClick={() => setContextView('relevant')} style={{ padding: '5px 9px', borderRadius: '6px', border: `1px solid ${contextView === 'relevant' ? 'rgba(167, 139, 250, 0.5)' : 'transparent'}`, background: contextView === 'relevant' ? 'rgba(124, 58, 237, 0.18)' : 'transparent', color: contextView === 'relevant' ? '#ddd6fe' : 'var(--text-muted)', cursor: 'pointer', fontSize: '0.69rem', fontWeight: 650 }}>
                 Relevant notes &amp; links
               </button>
+              <button type="button" onClick={() => setContextView('model')} style={{ padding: '5px 9px', borderRadius: '6px', border: `1px solid ${contextView === 'model' ? 'rgba(45, 212, 191, 0.5)' : 'transparent'}`, background: contextView === 'model' ? 'rgba(20, 184, 166, 0.16)' : 'transparent', color: contextView === 'model' ? '#99f6e4' : 'var(--text-muted)', cursor: 'pointer', fontSize: '0.69rem', fontWeight: 650 }}>
+                Exact model payload
+              </button>
               <button type="button" onClick={() => setContextView('raw')} style={{ padding: '5px 9px', borderRadius: '6px', border: `1px solid ${contextView === 'raw' ? 'rgba(56, 189, 248, 0.5)' : 'transparent'}`, background: contextView === 'raw' ? 'rgba(14, 116, 144, 0.18)' : 'transparent', color: contextView === 'raw' ? '#bae6fd' : 'var(--text-muted)', cursor: 'pointer', fontSize: '0.69rem', fontWeight: 650 }}>
-                Exact raw context
+                Full tool result
               </button>
               <span style={{ marginLeft: 'auto', color: 'var(--text-dim)', fontSize: '0.65rem' }}>
-                {contextView === 'relevant' ? `${relevantSources.length} relevant sources` : `${rawContext.length.toLocaleString()} characters`}
+                {contextView === 'relevant' ? `${relevantSources.length} relevant sources` : `${activeContext.length.toLocaleString()} characters · ~${Math.ceil(activeContext.length / 4).toLocaleString()} tokens`}
               </span>
             </div>
             {contextView === 'relevant' ? (
@@ -783,9 +790,11 @@ const FinalAnswerContextPreview: React.FC<{
             ) : (
               <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
                 <div style={{ padding: '9px 14px', borderBottom: '1px solid rgba(56, 189, 248, 0.12)', color: '#cbd5e1', fontSize: '0.68rem', lineHeight: 1.4 }}>
-                  This is the exact serialized <code>deep_research</code> tool payload. The model also sees system instructions, earlier messages, and the final-answer reminder.
+                  {contextView === 'model'
+                    ? <>This compact evidence packet is placed in the model conversation for final synthesis. The model also sees system instructions, earlier messages, and the final-answer reminder.</>
+                    : <>This is the complete serialized <code>deep_research</code> result retained for debugging and UI inspection. It is not all sent to final synthesis.</>}
                 </div>
-                <pre style={{ flex: 1, minHeight: 0, margin: 0, padding: '14px', overflow: 'auto', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', color: '#dbeafe', background: '#060b16', fontFamily: 'var(--font-code)', fontSize: '0.7rem', lineHeight: 1.45 }}>{rawContext}</pre>
+                <pre style={{ flex: 1, minHeight: 0, margin: 0, padding: '14px', overflow: 'auto', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', color: '#dbeafe', background: '#060b16', fontFamily: 'var(--font-code)', fontSize: '0.7rem', lineHeight: 1.45 }}>{activeContext}</pre>
               </div>
             )}
           </div>
@@ -832,8 +841,9 @@ const DeepResearchResultsView: React.FC<{
   errors?: string[];
   noteErrors?: string[];
   researchBudget?: { searches?: number; primary_pages?: number; follow_up_pages?: number; link_depth?: number; semantic_link_classification?: boolean; link_relevance_threshold?: number; evidence_characters?: number };
-  rawContext: string;
-}> = ({ query, searchesCompleted, searchResultsFound, linkedPagesRead, researchDate, status, sources, images, searchQueries = [], steps = [], errors = [], noteErrors = [], researchBudget, rawContext }) => (
+  modelContext: string;
+  fullContext: string;
+}> = ({ query, searchesCompleted, searchResultsFound, linkedPagesRead, researchDate, status, sources, images, searchQueries = [], steps = [], errors = [], noteErrors = [], researchBudget, modelContext, fullContext }) => (
   <div style={{ marginTop: '10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
     <div style={{ padding: '8px 10px', background: 'rgba(15, 23, 42, 0.6)', borderRadius: '6px', border: '1px solid rgba(56, 189, 248, 0.25)', fontSize: '0.775rem' }}>
       <strong style={{ color: '#38bdf8' }}>Deep research:</strong>{' '}
@@ -846,7 +856,7 @@ const DeepResearchResultsView: React.FC<{
           Budget: {researchBudget.searches ?? searchesCompleted} searches · {researchBudget.primary_pages ?? 'adaptive'} primary pages · {researchBudget.follow_up_pages ?? 'adaptive'} follow-ups · link depth {researchBudget.link_depth ?? 1} · semantic ranking {researchBudget.semantic_link_classification === false ? 'off' : `on (≥${researchBudget.link_relevance_threshold ?? 70})`} · {Number(researchBudget.evidence_characters || 0).toLocaleString()} evidence characters
         </span>
       )}
-      <FinalAnswerContextPreview rawContext={rawContext} sources={sources} />
+      <FinalAnswerContextPreview modelContext={modelContext} fullContext={fullContext} sources={sources} />
     </div>
     <div style={{ display: 'flex', alignItems: 'flex-start', gap: '7px', padding: '8px 10px', borderRadius: '6px', border: '1px solid rgba(99, 102, 241, 0.24)', background: 'rgba(99, 102, 241, 0.08)', color: 'var(--text-muted)', fontSize: '0.71rem', lineHeight: 1.45 }}>
       <Info size={13} style={{ marginTop: '2px', flexShrink: 0, color: '#a5b4fc' }} />
@@ -1305,16 +1315,19 @@ const ToolResultCard: React.FC<{
   message: ChatMessage;
   args: Record<string, any>;
   onOpenFile?: (file: TextAttachment) => void;
-}> = ({ message, args, onOpenFile }) => {
+  isGenerating?: boolean;
+  onRegenerateDeepResearch?: (toolMessageId: string) => void;
+}> = ({ message, args, onOpenFile, isGenerating = false, onRegenerateDeepResearch }) => {
   const [expanded, setExpanded] = useState(false);
   const [viewMode, setViewMode] = useState<'formatted' | 'raw'>('formatted');
 
+  const fullResultContent = message.displayContent || message.content;
   const isPruned = typeof message.content === 'string' && message.content.startsWith('[Context Pruned:');
 
   let parsedContent: any = null;
   if (!isPruned) {
     try {
-      parsedContent = JSON.parse(message.content);
+      parsedContent = JSON.parse(fullResultContent);
     } catch (_) {}
   }
 
@@ -1357,6 +1370,8 @@ const ToolResultCard: React.FC<{
   const isWebSearch = message.name === 'web_search' && parsedContent?.results;
   const isWebPageRead = message.name === 'read_web_page' && parsedContent?.markdown;
   const isDeepResearch = message.name === 'deep_research' && parsedContent?.sources;
+  const synthesisTokenEstimate = Math.ceil(message.content.length / 4);
+  const fullTokenEstimate = Math.ceil(fullResultContent.length / 4);
   const hasFormattedView = isWebSearch || isWebPageRead || isDeepResearch || fileDiff;
 
   const mainColor = isPruned ? '#c084fc' : isFailed ? '#f43f5e' : 'var(--accent-teal)';
@@ -1414,6 +1429,30 @@ const ToolResultCard: React.FC<{
             <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: isPruned ? '#d8b4fe' : isFailed ? '#f87171' : 'var(--text-muted)', fontFamily: 'var(--font-code)', fontSize: '0.75rem' }}>
               {summary}
             </span>
+          )}
+          {isDeepResearch && (
+            <>
+              <span
+                title={`${message.content.length.toLocaleString()} model-payload characters; full result ${fullResultContent.length.toLocaleString()} characters (~${fullTokenEstimate.toLocaleString()} tokens)`}
+                style={{ flexShrink: 0, padding: '2px 6px', borderRadius: '5px', border: '1px solid rgba(45, 212, 191, 0.28)', background: 'rgba(20, 184, 166, 0.1)', color: '#99f6e4', fontFamily: 'var(--font-code)', fontSize: '0.65rem' }}
+              >
+                synthesis ~{synthesisTokenEstimate.toLocaleString()} tokens
+              </span>
+              {onRegenerateDeepResearch && (
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onRegenerateDeepResearch(message.id);
+                  }}
+                  disabled={isGenerating}
+                  title="Delete only messages after this research result and regenerate the final answer without rerunning research"
+                  style={{ flexShrink: 0, display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '3px 7px', borderRadius: '5px', border: '1px solid rgba(99, 102, 241, 0.35)', background: 'rgba(99, 102, 241, 0.12)', color: '#c7d2fe', cursor: isGenerating ? 'not-allowed' : 'pointer', opacity: isGenerating ? 0.45 : 1, fontSize: '0.66rem', fontWeight: 650 }}
+                >
+                  <RotateCcw size={11} /> Regenerate answer
+                </button>
+              )}
+            </>
           )}
           <ChevronDown size={15} style={{ marginLeft: 'auto', flexShrink: 0, transform: expanded ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s ease' }} />
         </div>
@@ -1506,7 +1545,8 @@ const ToolResultCard: React.FC<{
                         errors={parsedContent?.errors || []}
                         noteErrors={parsedContent?.note_errors || []}
                         researchBudget={parsedContent?.research_budget}
-                        rawContext={message.content}
+                        modelContext={message.content}
+                        fullContext={fullResultContent}
                       />
                     )}
                     {!isWebSearch && !isWebPageRead && !isDeepResearch && fileDiff && (
@@ -1956,6 +1996,7 @@ interface ChatWindowProps {
   onApproveToolCall?: () => void;
   onRejectToolCall?: (reason?: string) => void;
   onRewindToMessage?: (messageId: string, promptContent: string) => void;
+  onRegenerateDeepResearch?: (toolMessageId: string) => void;
   onClearChat?: () => void;
   onOpenToolSettings?: () => void;
   onOpenModelDetails?: () => void;
@@ -2063,6 +2104,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   onApproveToolCall,
   onRejectToolCall,
   onRewindToMessage,
+  onRegenerateDeepResearch,
   onClearChat,
   onOpenToolSettings,
   onOpenModelDetails,
@@ -2582,7 +2624,16 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
             const matchingCall = messages
               .flatMap((message) => message.tool_calls || [])
               .find((call) => call.id === msg.tool_call_id);
-            return <ToolResultCard key={msg.id} message={msg} args={matchingCall?.arguments || {}} onOpenFile={openAttachmentViewer} />;
+            return (
+              <ToolResultCard
+                key={msg.id}
+                message={msg}
+                args={matchingCall?.arguments || {}}
+                onOpenFile={openAttachmentViewer}
+                isGenerating={isGenerating}
+                onRegenerateDeepResearch={onRegenerateDeepResearch}
+              />
+            );
           }
 
           return null;

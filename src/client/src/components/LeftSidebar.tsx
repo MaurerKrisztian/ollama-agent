@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   X,
   PlusCircle,
@@ -16,6 +16,8 @@ import {
   Brain,
   Pencil,
   Trash2,
+  Link,
+  Check,
 } from 'lucide-react';
 import { AgentConfig, ChatSessionSummary, SystemMetrics } from '../types';
 
@@ -70,7 +72,37 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
   activeTerminalCount = 0,
   onOpenTerminalSessions,
 }) => {
+  const [copiedSessionId, setCopiedSessionId] = useState<string | null>(null);
+
   if (!isOpen) return null;
+
+  const copySessionLink = async (sessionId: string) => {
+    const url = new URL(window.location.href);
+    url.searchParams.set('session', sessionId);
+    const sessionUrl = url.toString();
+
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(sessionUrl);
+      } else {
+        const textarea = document.createElement('textarea');
+        textarea.value = sessionUrl;
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        const copied = document.execCommand('copy');
+        textarea.remove();
+        if (!copied) throw new Error('Clipboard copy was rejected.');
+      }
+      setCopiedSessionId(sessionId);
+      window.setTimeout(() => {
+        setCopiedSessionId((current) => current === sessionId ? null : current);
+      }, 1800);
+    } catch (_) {
+      window.prompt('Copy this session URL', sessionUrl);
+    }
+  };
 
   const vramUsage = systemMetrics?.gpu && systemMetrics.gpu.memTotalMb > 0
     ? (systemMetrics.gpu.memUsedMb / systemMetrics.gpu.memTotalMb) * 100
@@ -202,6 +234,14 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
                   <span style={{ display: 'block', fontSize: '0.65rem', color: 'var(--text-dim)', marginTop: '2px' }}>
                     {new Date(session.updatedAt).toLocaleDateString()} · {session.messageCount} messages
                   </span>
+                </button>
+                <button
+                  onClick={() => void copySessionLink(session.id)}
+                  title={copiedSessionId === session.id ? 'Session link copied' : 'Copy session link'}
+                  aria-label={copiedSessionId === session.id ? `Session link copied for ${session.title}` : `Copy link for ${session.title}`}
+                  style={{ border: 0, background: 'none', color: copiedSessionId === session.id ? 'var(--accent-teal)' : 'var(--text-dim)', padding: '5px', cursor: 'pointer' }}
+                >
+                  {copiedSessionId === session.id ? <Check size={13} /> : <Link size={13} />}
                 </button>
                 <button
                   onClick={() => {

@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { AgentEngine } from './agent.js';
+import { AgentEngine, buildDeepResearchSynthesisContext } from './agent.js';
 
 test('deep-research relevance notes allow up to 2,000 words for highly relevant sources', async () => {
   const agent = new AgentEngine();
@@ -538,6 +538,167 @@ test('deep research continuation repeats the original request after a large tool
   } finally {
     await fs.rm(workspace, { recursive: true, force: true });
   }
+});
+
+test('deep research removes web tool schemas before final synthesis', async () => {
+  const agent = new AgentEngine({ showWorkingDirInfo: false, maxLoops: 0 });
+  const requests: any[] = [];
+  let callIndex = 0;
+  (agent as any).ollamaClient.chatStream = async (request: any) => {
+    requests.push(request);
+    callIndex++;
+    if (callIndex === 1) {
+      return {
+        content: '',
+        tool_calls: [{ id: 'research', name: 'deep_research', arguments: { query: 'obscure fact' } }],
+      };
+    }
+    return { content: 'Explanation: Supported by the inspected evidence.\n\nExact Answer: Example\n\nConfidence: 80%', tool_calls: [] };
+  };
+  agent.getToolExecutor().executeTool = async () => ({
+    status: 'complete',
+    sources: [{ id: 'S1', title: 'Evidence', url: 'https://example.com', content: 'Example' }],
+    images: [],
+    errors: [],
+  });
+
+  const response = await agent.sendMessage('Deep research this obscure fact.');
+
+  assert.match(response, /Exact Answer: Example/);
+  assert.equal(requests[0].tools.some((tool: any) => tool.name === 'deep_research'), true);
+  assert.equal(requests[1].tools.some((tool: any) => ['deep_research', 'web_search', 'read_web_page'].includes(tool.name)), false);
+});
+
+test('deep research keeps full diagnostics for display but sends compact evidence to synthesis', () => {
+  const result = {
+    query: 'obscure fact',
+    status: 'complete',
+    sources: [
+      {
+        id: 'S1',
+        title: 'Relevant source',
+        url: 'https://example.com/relevant',
+        content: 'useful evidence '.repeat(8_000),
+        ai_note: { source_id: 'S1', relevant: true, note: 'Useful evidence', key_points: ['Fact'], limitations: null },
+        discovered_links: Array.from({ length: 100 }, (_, index) => ({ url: `https://example.com/${index}`, reason: 'debug metadata' })),
+      },
+      {
+        id: 'S2',
+        title: 'Irrelevant source',
+        url: 'https://example.com/irrelevant',
+        content: 'irrelevant '.repeat(8_000),
+        ai_note: { source_id: 'S2', relevant: false, note: 'Wrong subject', key_points: [], limitations: null },
+      },
+    ],
+    images: [],
+    errors: [],
+  };
+
+  const compact = buildDeepResearchSynthesisContext(result, 16_384);
+  const parsed = JSON.parse(compact.content);
+
+  assert.equal(parsed.sources.length, 1);
+  assert.equal(parsed.sources[0].id, 'S1');
+  assert.equal('discovered_links' in parsed.sources[0], false);
+  assert.ok(compact.diagnostics.synthesisEstimatedTokens < compact.diagnostics.fullEstimatedTokens);
+  assert.ok(compact.content.length < 30_000);
+});
+
+test('deep research answer can regenerate from its retained tool checkpoint without rerunning research', async () => {
+  const agent = new AgentEngine({ showWorkingDirInfo: false, contextWindow: 16_384, maxLoops: 0 });
+  const context = agent.getContextManager();
+  context.addMessage({ role: 'user', content: 'Deep research the example.' });
+  context.addMessage({
+    role: 'assistant',
+    content: '',
+    tool_calls: [{ id: 'research-call', name: 'deep_research', arguments: { query: 'the example' } }],
+  });
+  const fullResult = JSON.stringify({
+    query: 'the example',
+    status: 'complete',
+    sources: [{
+      id: 'S1',
+      title: 'Evidence',
+      url: 'https://example.com',
+      content: 'Grounded evidence '.repeat(5_000),
+      ai_note: { source_id: 'S1', relevant: true, note: 'Grounded evidence', key_points: ['Example'], limitations: null },
+    }],
+    images: [],
+    errors: [],
+  }, null, 2);
+  const toolMessage = context.addMessage({
+    role: 'tool',
+    name: 'deep_research',
+    tool_call_id: 'research-call',
+    content: fullResult,
+  });
+  context.addMessage({ role: 'assistant', content: 'Old incorrect answer.' });
+
+  const requests: any[] = [];
+  (agent as any).ollamaClient.chatStream = async (request: any) => {
+    requests.push(request);
+    return { content: 'New grounded answer.', tool_calls: [] };
+  };
+  let executedTools = 0;
+  agent.getToolExecutor().executeTool = async () => {
+    executedTools++;
+    return {};
+  };
+
+  let updatedCheckpoint: any = null;
+  const response = await agent.regenerateDeepResearchAnswer(toolMessage.id, {
+    onMessageUpdated: (message) => { updatedCheckpoint = message; },
+  });
+  const messages = context.getMessages();
+  const retainedTool = messages.find((message) => message.id === toolMessage.id)!;
+
+  assert.equal(response, 'New grounded answer.');
+  assert.equal(executedTools, 0);
+  assert.equal(messages.some((message) => message.content === 'Old incorrect answer.'), false);
+  assert.equal(retainedTool.displayContent, fullResult);
+  assert.ok(retainedTool.content.length < fullResult.length);
+  assert.equal(updatedCheckpoint?.id, toolMessage.id);
+  assert.equal(updatedCheckpoint?.content, retainedTool.content);
+  assert.deepEqual(requests[0].tools, []);
+  assert.match(requests[0].messages.at(-1)?.content || '', /Deep research is complete/);
+});
+
+test('a post-research web call receives a forced final-answer reminder', async () => {
+  const agent = new AgentEngine({ showWorkingDirInfo: false, maxLoops: 0 });
+  const requests: any[] = [];
+  let callIndex = 0;
+  (agent as any).ollamaClient.chatStream = async (request: any) => {
+    requests.push(request);
+    callIndex++;
+    if (callIndex === 1) {
+      return {
+        content: '',
+        tool_calls: [{ id: 'research', name: 'deep_research', arguments: { query: 'obscure fact' } }],
+      };
+    }
+    if (callIndex === 2) {
+      // Simulates a model emitting a remembered tool call even after its schema
+      // has been removed from the available tool definitions.
+      return {
+        content: '',
+        tool_calls: [{ id: 'retry', name: 'web_search', arguments: { query: 'obscure fact again' } }],
+      };
+    }
+    return { content: 'Exact Answer: Example', tool_calls: [] };
+  };
+  agent.getToolExecutor().executeTool = async () => ({
+    status: 'complete',
+    sources: [{ id: 'S1', title: 'Evidence', url: 'https://example.com', content: 'Example' }],
+    images: [],
+    errors: [],
+  });
+
+  const response = await agent.sendMessage('Deep research this obscure fact.');
+  const forcedReminder = requests[2].messages.at(-1)?.content || '';
+
+  assert.equal(response, 'Exact Answer: Example');
+  assert.match(forcedReminder, /web investigation is already complete/);
+  assert.match(forcedReminder, /must be the final answer/);
 });
 
 test('maxLoops: 0 allows unlimited tool call iterations without loop exhaustion', async () => {

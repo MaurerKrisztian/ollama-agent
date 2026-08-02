@@ -21,6 +21,7 @@ pnpm-debug.log*
 # Test and coverage output
 coverage/
 benchmark_runs/
+.cache/browsecomp/
 
 # Editor and OS files
 .idea/

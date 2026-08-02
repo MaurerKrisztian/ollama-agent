@@ -99,6 +99,31 @@ test('web page reader extracts article content as Markdown', async () => {
   assert.doesNotMatch(page.markdown, /Navigation noise/);
 });
 
+test('web page reader suppresses non-fatal stylesheet parser noise', async () => {
+  const html = `
+    <html><head><style>
+      .block {
+        @media (max-width: 767px) { color: red; }
+      }
+    </style></head><body><article><h1>Readable page</h1><p>Useful content remains available.</p></article></body></html>
+  `;
+  const client = new WebClient(
+    async () => new Response(html, { headers: { 'content-type': 'text/html' } }),
+    publicLookup,
+  );
+  const originalConsoleError = console.error;
+  const errors: unknown[][] = [];
+  console.error = (...args: unknown[]) => errors.push(args);
+
+  try {
+    const page = await client.readPage('https://example.com/css-noise');
+    assert.match(page.markdown, /Useful content remains available/);
+    assert.deepEqual(errors, []);
+  } finally {
+    console.error = originalConsoleError;
+  }
+});
+
 test('web page reader returns bounded navigable page links', async () => {
   const html = `
     <html><body><article>

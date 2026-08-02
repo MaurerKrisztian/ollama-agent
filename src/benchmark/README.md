@@ -1,5 +1,91 @@
 # Benchmark architecture
 
+## BrowseComp web-search benchmark
+
+The repository includes a standalone runner for OpenAI's BrowseComp benchmark. It
+downloads and caches the official encrypted dataset, creates a fresh agent for every
+question, requires the agent to invoke `deep_research`, and grades the response with
+the official BrowseComp judge prompt through an Ollama model.
+
+Start with a small run:
+
+```bash
+npm run benchmark:browsecomp -- --model qwen3.5:9b --count 20
+```
+
+When the app server is running on `http://127.0.0.1:3001`, each question is
+created as an isolated chat session and the CLI prints a link immediately. Open
+that link to follow thinking tokens, answer tokens, tool calls, research phases,
+and tool results live in the normal chat UI. For a Vite development client, set
+its browser-facing origin separately:
+
+```bash
+npm run benchmark:browsecomp -- \
+  --model qwen3.5:9b \
+  --host http://127.0.0.1:11435 \
+  --count 1 \
+  --ui-server http://127.0.0.1:3001 \
+  --ui-url http://127.0.0.1:3000
+```
+
+If the app server is unavailable, the runner reports that live observation is
+disabled and falls back to its direct execution path. Pass `--no-ui-session` to
+select direct execution explicitly.
+
+To test the model's own iterative browsing loop without the bundled
+`deep_research` orchestration tool, pass `--no-deep-research` (or its
+`--no-deep-search` alias). This disables `deep_research` and enables
+`web_search` plus `read_web_page`:
+
+```bash
+npm run benchmark:browsecomp -- \
+  --model qwen3.6:latest \
+  --host http://127.0.0.1:11435 \
+  --context-window 65536 \
+  --max-loops 0 \
+  --no-thinking \
+  --no-deep-research \
+  --web-search-ttl 0 \
+  --count 1
+```
+
+`--web-search-ttl 0` disables expiry of `web_search`, `read_web_page`, and
+`deep_research` outputs. `--disable-web-ttl` is an equivalent shorthand.
+
+To grade a manual answer for one deterministically selected task, use
+`--manual-answer`. This skips agent generation and all web tools, invokes only
+the configured Ollama judge, and labels the result's retrieval mode as `manual`:
+
+```bash
+npm run benchmark:browsecomp -- \
+  --grader-model qwen3.6:latest \
+  --host http://127.0.0.1:11435 \
+  --count 1 \
+  --seed 1 \
+  --manual-answer "First Last"
+```
+
+Useful options include `--grader-model`, `--seed`, `--concurrency`, `--no-thinking`,
+`--ui-server`, `--ui-url`, `--dataset`, and `--output`. Run with `--help` for the complete list. To continue an
+interrupted run, reuse its output path and configuration:
+
+```bash
+npm run benchmark:browsecomp -- \
+  --model qwen3.5:9b \
+  --count 20 \
+  --output benchmark_runs/browsecomp/my-run.jsonl \
+  --resume
+```
+
+The JSONL file is checkpointed after every question. A neighboring
+`.summary.json` file reports accuracy, failures, judge parse failures, and average
+duration. Saved records include candidate responses, tool statistics, source URLs,
+and token/timing metrics, but never decrypted reference answers or question text.
+
+The default subset shuffle is deterministic for this runner, but it is not Python's
+`random.Random(0)` ordering used by `simple-evals`. Use the complete 1,266-question
+set when comparing a score directly with published full-dataset results.
+
 The benchmark code is split by responsibility:
 
 ```text
