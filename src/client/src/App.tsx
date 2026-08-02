@@ -81,6 +81,7 @@ export const App: React.FC = () => {
   const [terminalSessions, setTerminalSessions] = useState<TerminalSessionInfo[]>([]);
   const [terminalSessionsModalOpen, setTerminalSessionsModalOpen] = useState(false);
   const [terminalSidebarOpen, setTerminalSidebarOpen] = useState(false);
+  const [activeGenerationsCount, setActiveGenerationsCount] = useState<number>(0);
   const liveSocketRef = useRef<Socket | null>(null);
   const activeSessionIdRef = useRef('');
 
@@ -115,7 +116,7 @@ export const App: React.FC = () => {
       setPendingApprovalCall(null);
       setStreamingText('');
       setStreamingThinking('');
-      setGenerationStatus('completed');
+      setGenerationStatus('idle');
       setIsGenerating(false);
     } else if (eventType === 'cancelled') {
       setActiveToolCall(null);
@@ -153,7 +154,7 @@ export const App: React.FC = () => {
       body: JSON.stringify({ model }),
     });
     const data = await response.json();
-    if (!response.ok || !data.success) throw new Error(data.error || 'Could not unload the model.');
+    if (!response.ok || !data.success) throw new Error(data.error || 'Failed to release model RAM/VRAM.');
     setRunningModels(data.runningModels || []);
   };
 
@@ -171,14 +172,15 @@ export const App: React.FC = () => {
   };
 
   useEffect(() => {
-    const socket = io();
+    const socket = io({ transports: ['websocket', 'polling'] });
     liveSocketRef.current = socket;
     socket.on('system:metrics', (metrics: SystemMetrics) => setSystemMetrics(metrics));
     socket.on('system:metrics:error', () => setSystemMetrics(null));
     socket.on('terminal:sessions', (sessions: TerminalSessionInfo[]) => setTerminalSessions(sessions));
     socket.on('models:running', (activeModels: OllamaRunningModelInfo[]) => setRunningModels(activeModels));
-    socket.on('chat:sessions', (data: { sessions?: ChatSessionSummary[]; activeSessionId?: string }) => {
+    socket.on('chat:sessions', (data: { sessions?: ChatSessionSummary[]; activeSessionId?: string; activeGenerationsCount?: number }) => {
       if (Array.isArray(data.sessions)) setChatSessions(data.sessions);
+      if (typeof data.activeGenerationsCount === 'number') setActiveGenerationsCount(data.activeGenerationsCount);
     });
     socket.on('chat:stream', (payload: { sessionId?: string; event?: string; data?: any }) => {
       if (!payload.sessionId || payload.sessionId !== activeSessionIdRef.current || !payload.event) return;
@@ -701,6 +703,28 @@ export const App: React.FC = () => {
     await runChatStream({ regenerateFromToolMessageId: toolMessageId }, 'regenerate the research answer');
   };
 
+  const handleCancelAllGenerations = async () => {
+    try {
+      const response = await fetch('/api/chat/cancel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ all: true }),
+      });
+      if (!response.ok && response.status !== 409) {
+        throw new Error(`Server response error ${response.status}`);
+      }
+      setGenerationStatus('idle');
+      setIsGenerating(false);
+      setActiveToolCall(null);
+      setPendingApprovalCall(null);
+      setStreamingText('');
+      setStreamingThinking('');
+    } catch (err: any) {
+      setGenerationStatus('error');
+      alert(`Failed to cancel generations: ${err.message}`);
+    }
+  };
+
   const handleCancelGeneration = async () => {
     try {
       const response = await fetch('/api/chat/cancel', {
@@ -741,6 +765,8 @@ export const App: React.FC = () => {
         activeView={activeView}
         isGenerating={isGenerating}
         modelLoadElapsed={modelLoadElapsed}
+        activeGenerationsCount={activeGenerationsCount}
+        onCancelAllGenerations={handleCancelAllGenerations}
         onSelectView={setActiveView}
         onToggleSidebar={() => setSidebarOpen((prev) => !prev)}
         onSelectModel={handleSelectModel}
@@ -797,6 +823,7 @@ export const App: React.FC = () => {
             isGenerating={isGenerating}
             isModelLoaded={isActiveModelLoaded}
             modelLoadElapsed={modelLoadElapsed}
+            activeGenerationsCount={activeGenerationsCount}
             generationStatus={generationStatus}
             pendingApprovalCall={pendingApprovalCall}
             isSubmittingToolApproval={isSubmittingToolApproval}

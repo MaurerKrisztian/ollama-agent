@@ -229,8 +229,13 @@ const getChatSessionsState = () => {
     sessions: chatSessions.list(),
     activeSessionId: activeId,
     isGenerating: activeGenerationControllers.has(activeId),
+    activeGenerationsCount: activeGenerationControllers.size,
     activeToolState: activeToolStates.get(activeId) || null,
   };
+};
+
+const broadcastChatSessions = () => {
+  io.emit('chat:sessions', getChatSessionsState());
 };
 
 // GET /api/models - Fetch models from current or specified Ollama host
@@ -1116,20 +1121,38 @@ app.post('/api/chat/tool-settings', (req, res) => {
   });
 });
 
-// POST /api/chat/cancel - Abort the active Ollama generation
+// POST /api/chat/cancel - Abort active Ollama generations
 app.post('/api/chat/cancel', (req, res) => {
   const sessionId = typeof req.body?.sessionId === 'string' ? req.body.sessionId : '';
+  if (req.body?.all || !sessionId) {
+    let cancelledCount = 0;
+    for (const [id, controller] of activeGenerationControllers.entries()) {
+      controller.abort();
+      cancelledCount++;
+      const pendingApprovalResolve = pendingApprovalResolves.get(id);
+      if (pendingApprovalResolve) {
+        pendingApprovalResolve({ decision: 'reject', reason: 'Generation cancelled by user' });
+        pendingApprovalResolves.delete(id);
+      }
+    }
+    activeGenerationControllers.clear();
+    broadcastChatSessions();
+    return res.json({ success: true, cancelledCount });
+  }
+
   const activeGenerationController = activeGenerationControllers.get(sessionId);
   if (!activeGenerationController) {
     return res.status(409).json({ success: false, error: 'No active generation.' });
   }
 
   activeGenerationController.abort();
+  activeGenerationControllers.delete(sessionId);
   const pendingApprovalResolve = pendingApprovalResolves.get(sessionId);
   if (pendingApprovalResolve) {
     pendingApprovalResolve({ decision: 'reject', reason: 'Generation cancelled by user' });
     pendingApprovalResolves.delete(sessionId);
   }
+  broadcastChatSessions();
   res.json({ success: true });
 });
 
@@ -1225,6 +1248,7 @@ app.post('/api/chat', async (req, res) => {
 
   const generationController = new AbortController();
   activeGenerationControllers.set(sessionId, generationController);
+  broadcastChatSessions();
   const sessionRuntime = getChatRuntime(sessionId);
   try {
     await sessionRuntime.ready;
@@ -1419,7 +1443,7 @@ app.post('/api/chat', async (req, res) => {
     activeToolStates.delete(sessionId);
     if (activeGenerationControllers.get(sessionId) === generationController) activeGenerationControllers.delete(sessionId);
     saveChatSession(sessionId, sessionAgent);
-    io.emit('chat:sessions', { sessions: chatSessions.list() });
+    broadcastChatSessions();
     res.end();
   }
 });
@@ -1644,8 +1668,7 @@ app.post('/api/benchmark/run-single', async (req, res) => {
 
   try {
     const attemptsPerCase = parseBenchmarkAttempts(req.body.attemptsPerCase);
-    const userParallelism = req.body.parallelism !== undefined ? parseBenchmarkParallelism(req.body.parallelism) : 1;
-    const parallelism = Math.max(userParallelism, attemptsPerCase);
+    const parallelism = req.body.parallelism !== undefined ? parseBenchmarkParallelism(req.body.parallelism) : 1;
     const testCase = BENCHMARK_TEST_CASES.find((candidate) => candidate.id === testId);
     if (!testCase) {
       if (isStream) {

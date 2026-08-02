@@ -1,5 +1,6 @@
 import { execFile, spawn } from 'child_process';
 import fs from 'fs/promises';
+import fsSync from 'fs';
 import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -281,7 +282,8 @@ export async function runBenchmarkAttemptInContainer(
   try {
     const emitStep = (step: any) => {
       try {
-        process.stdout.write(`BENCHMARK_STEP:${JSON.stringify(step)}\n`);
+        const line = `BENCHMARK_STEP:${JSON.stringify(step)}\n`;
+        fsSync.writeSync(1, line);
       } catch {}
     };
     let liveContentBuffer = '';
@@ -321,7 +323,15 @@ export async function runBenchmarkAttemptInContainer(
         timing.promptTokens += metrics.promptEvalCount ?? 0;
         timing.generatedTokens += metrics.evalCount ?? 0;
         const tokensPerSec = metrics.evalDurationNs ? ((metrics.evalCount || 0) / (metrics.evalDurationNs / 1e9)).toFixed(1) : undefined;
-        emitStep({ type: 'metrics', promptTokens: metrics.promptEvalCount, generatedTokens: metrics.evalCount, tokensPerSec, timestamp: Date.now() });
+        emitStep({
+          type: 'metrics',
+          promptTokens: timing.promptTokens,
+          generatedTokens: timing.generatedTokens,
+          turnPromptTokens: metrics.promptEvalCount,
+          turnGeneratedTokens: metrics.evalCount,
+          tokensPerSec,
+          timestamp: Date.now(),
+        });
       },
     });
     responseContent = lastAssistantContent || aggregateResponse;
@@ -408,9 +418,31 @@ export async function runBenchmarkCase(
       try {
         attemptSignal.throwIfAborted();
         onAttemptStart?.(attempt, attemptsPerCase);
-        const trace = await runSingleBenchmarkTest(testCase.id, modelName, ollamaHost, ollamaToken, attemptSignal, agentConfig, onStep);
+        if (onStep) {
+          onStep({
+            type: 'attempt_start',
+            attempt,
+            totalAttempts: attemptsPerCase,
+            text: `🚀 [Attempt ${attempt}/${attemptsPerCase}] Starting test attempt...`,
+            timestamp: Date.now(),
+          });
+        }
+        const trace = await runSingleBenchmarkTest(testCase.id, modelName, ollamaHost, ollamaToken, attemptSignal, agentConfig, (step) => {
+          if (onStep) {
+            onStep({ ...step, attempt, totalAttempts: attemptsPerCase });
+          }
+        });
         trace.attemptNumber = attempt;
         attempts[attempt - 1] = trace;
+        if (onStep) {
+          onStep({
+            type: 'attempt_complete',
+            attempt,
+            totalAttempts: attemptsPerCase,
+            text: `${trace.passed ? '✅' : '❌'} [Attempt ${attempt}/${attemptsPerCase}] Attempt finished in ${(trace.durationMs / 1000).toFixed(1)}s (${trace.passed ? 'PASSED' : 'FAILED'})`,
+            timestamp: Date.now(),
+          });
+        }
       } catch (error) {
         if (firstError === undefined) firstError = error;
         attemptController.abort();

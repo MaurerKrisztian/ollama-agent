@@ -736,6 +736,11 @@ ${conversationText}`;
         tools: activeTools,
         onChunk: callbacks?.onChunk,
         onThinkingChunk: callbacks?.onThinkingChunk,
+        onToolCallChunk: (calls) => {
+          for (const call of calls) {
+            callbacks?.onToolStart?.(call.name, call.arguments);
+          }
+        },
         signal: callbacks?.signal,
       });
       if (res.metrics) callbacks?.onModelResponse?.(res.metrics);

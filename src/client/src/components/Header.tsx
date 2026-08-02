@@ -13,6 +13,7 @@ import {
   Zap,
   FolderOpen,
   Brain,
+  Square,
   SlidersHorizontal,
 } from 'lucide-react';
 import { AgentConfig, ContextInfo, OllamaModelInfo, OllamaRunningModelInfo, SystemMetrics, ollamaModelNamesMatch } from '../types';
@@ -46,6 +47,8 @@ interface HeaderProps {
   onToggleLeftSidebar?: () => void;
   activeTerminalCount?: number;
   onOpenTerminalSessions?: () => void;
+  activeGenerationsCount?: number;
+  onCancelAllGenerations?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -57,6 +60,8 @@ export const Header: React.FC<HeaderProps> = ({
   activeView,
   isGenerating,
   modelLoadElapsed = 0,
+  activeGenerationsCount = 0,
+  onCancelAllGenerations,
   onSelectView,
   onToggleSidebar,
   onSelectModel,

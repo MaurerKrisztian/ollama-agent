@@ -2456,6 +2456,7 @@ interface ChatWindowProps {
   isGenerating: boolean;
   isModelLoaded: boolean;
   modelLoadElapsed: number;
+  activeGenerationsCount?: number;
   generationStatus: 'idle' | 'generating' | 'completed' | 'cancelled' | 'error';
   pendingApprovalCall?: PendingApprovalCall | null;
   isSubmittingToolApproval?: boolean;
@@ -2564,6 +2565,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   isGenerating,
   isModelLoaded,
   modelLoadElapsed,
+  activeGenerationsCount,
   generationStatus,
   pendingApprovalCall,
   isSubmittingToolApproval = false,
@@ -3215,12 +3217,18 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
             <Loader2 size={18} className="spin" style={{ flexShrink: 0 }} />
             <div style={{ minWidth: 0, flex: 1 }}>
               <span style={{ fontWeight: 600, display: 'block' }}>
-                {isModelLoaded ? 'Agent is thinking…' : `⚡ Loading Model Weights into GPU VRAM… ${modelLoadElapsed}s`}
+                {!isModelLoaded
+                  ? `⚡ Loading Model Weights into GPU VRAM… ${modelLoadElapsed}s`
+                  : (activeGenerationsCount && activeGenerationsCount > 1)
+                  ? `⏳ Request Queued (${activeGenerationsCount} Active Server Tasks)`
+                  : 'Agent is thinking…'}
               </span>
               <span style={{ fontSize: '0.775rem', color: 'var(--text-muted)' }}>
-                {isModelLoaded
-                  ? 'Preparing the response. Token streaming will start shortly.'
-                  : 'Ollama is initializing model weights. Progress is indeterminate because Ollama does not report bytes loaded.'}
+                {!isModelLoaded
+                  ? 'Ollama is initializing model weights. Progress is indeterminate because Ollama does not report bytes loaded.'
+                  : (activeGenerationsCount && activeGenerationsCount > 1)
+                  ? `Server has ${activeGenerationsCount} active generation tasks. Your request is queued & waiting for GPU turn…`
+                  : 'Preparing the response. Token streaming will start shortly.'}
               </span>
               {!isModelLoaded && (
                 <div

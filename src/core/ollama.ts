@@ -17,6 +17,7 @@ export interface OllamaChatOptions {
   tools?: ToolDefinition[];
   onChunk?: (chunk: string) => void;
   onThinkingChunk?: (thinkingChunk: string) => void;
+  onToolCallChunk?: (toolCalls: Array<{ id: string; name: string; arguments: Record<string, any> }>) => void;
   signal?: AbortSignal;
 }
 
@@ -471,6 +472,9 @@ export class OllamaClient {
                 name: tc.function?.name || tc.name,
                 arguments: tc.function?.arguments || tc.arguments || {},
               }));
+              if (options.onToolCallChunk && toolCallsResult) {
+                options.onToolCallChunk(toolCallsResult);
+              }
             }
           }
         } catch (_) {

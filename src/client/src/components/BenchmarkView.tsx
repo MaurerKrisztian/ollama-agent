@@ -549,8 +549,9 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
               setLiveMetrics(null);
               setLiveSteps((prev) => [...prev.slice(-24), { timestamp: Date.now(), type: 'start', text: `🚀 Starting Test: ${eventData.test.name}` }]);
             } else if (eventType === 'test_step') {
+              const attemptPrefix = eventData.attempt && eventData.totalAttempts > 1 ? `[Attempt ${eventData.attempt}/${eventData.totalAttempts}] ` : '';
               if (eventData.type === 'llm_start') {
-                setLiveSteps((prev) => [...prev.slice(-24), { timestamp: eventData.timestamp || Date.now(), type: 'llm_start', text: `🤖 Ollama LLM Inference started for ${eventData.model || 'model'} (Evaluating prompt tokens...)` }]);
+                setLiveSteps((prev) => [...prev.slice(-100), { timestamp: eventData.timestamp || Date.now(), type: 'llm_start', text: `${attemptPrefix}🤖 Ollama LLM Inference started for ${eventData.model || 'model'} (Evaluating prompt tokens...)` }]);
               } else if (eventData.type === 'chunk') {
                 setLiveStreamingText(eventData.snippet || '');
               } else if (eventData.type === 'thinking_chunk') {
@@ -563,12 +564,14 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
                 });
               } else if (eventData.type === 'tool_start') {
                 setLiveActiveTool(eventData.name);
-                setLiveSteps((prev) => [...prev.slice(-24), { timestamp: eventData.timestamp || Date.now(), type: eventData.type, text: `🛠️ Executing Tool: ${eventData.name}`, detail: eventData.args ? JSON.stringify(eventData.args) : undefined }]);
+                setLiveSteps((prev) => [...prev.slice(-100), { timestamp: eventData.timestamp || Date.now(), type: eventData.type, text: `${attemptPrefix}🛠️ Executing Tool: ${eventData.name}`, detail: eventData.args ? JSON.stringify(eventData.args) : undefined }]);
               } else if (eventData.type === 'tool_end') {
                 setLiveActiveTool(null);
-                setLiveSteps((prev) => [...prev.slice(-24), { timestamp: eventData.timestamp || Date.now(), type: eventData.type, text: `✅ Finished Tool: ${eventData.name}`, detail: eventData.resultSnippet }]);
+                setLiveSteps((prev) => [...prev.slice(-100), { timestamp: eventData.timestamp || Date.now(), type: eventData.type, text: `${attemptPrefix}✅ Finished Tool: ${eventData.name}`, detail: eventData.resultSnippet }]);
               } else if (eventData.type === 'assistant_message') {
-                setLiveSteps((prev) => [...prev.slice(-24), { timestamp: eventData.timestamp || Date.now(), type: eventData.type, text: `💬 Model Turn Completed` }]);
+                setLiveSteps((prev) => [...prev.slice(-100), { timestamp: eventData.timestamp || Date.now(), type: eventData.type, text: `${attemptPrefix}💬 Model Turn Completed` }]);
+              } else if (eventData.type === 'attempt_start' || eventData.type === 'attempt_complete') {
+                setLiveSteps((prev) => [...prev.slice(-100), { timestamp: eventData.timestamp || Date.now(), type: eventData.type, text: eventData.text }]);
               }
             } else if (eventType === 'test_complete') {
               setLiveStreamingText('');
@@ -673,8 +676,9 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
             if (eventType === 'test_start') {
               setLiveSteps((prev) => [...prev.slice(-24), { timestamp: Date.now(), type: 'start', text: `🐳 Docker Sandbox active for ${eventData.test.name}` }]);
             } else if (eventType === 'test_step') {
+              const attemptPrefix = eventData.attempt && eventData.totalAttempts > 1 ? `[Attempt ${eventData.attempt}/${eventData.totalAttempts}] ` : '';
               if (eventData.type === 'llm_start') {
-                setLiveSteps((prev) => [...prev.slice(-24), { timestamp: eventData.timestamp || Date.now(), type: 'llm_start', text: `🤖 Ollama LLM Inference started for ${eventData.model || 'model'} (Evaluating prompt tokens...)` }]);
+                setLiveSteps((prev) => [...prev.slice(-100), { timestamp: eventData.timestamp || Date.now(), type: 'llm_start', text: `${attemptPrefix}🤖 Ollama LLM Inference started for ${eventData.model || 'model'} (Evaluating prompt tokens...)` }]);
               } else if (eventData.type === 'chunk') {
                 setLiveStreamingText(eventData.snippet || '');
               } else if (eventData.type === 'thinking_chunk') {
@@ -687,12 +691,14 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
                 });
               } else if (eventData.type === 'tool_start') {
                 setLiveActiveTool(eventData.name);
-                setLiveSteps((prev) => [...prev.slice(-24), { timestamp: eventData.timestamp || Date.now(), type: eventData.type, text: `🛠️ Executing Tool: ${eventData.name}`, detail: eventData.args ? JSON.stringify(eventData.args) : undefined }]);
+                setLiveSteps((prev) => [...prev.slice(-100), { timestamp: eventData.timestamp || Date.now(), type: eventData.type, text: `${attemptPrefix}🛠️ Executing Tool: ${eventData.name}`, detail: eventData.args ? JSON.stringify(eventData.args) : undefined }]);
               } else if (eventData.type === 'tool_end') {
                 setLiveActiveTool(null);
-                setLiveSteps((prev) => [...prev.slice(-24), { timestamp: eventData.timestamp || Date.now(), type: eventData.type, text: `✅ Finished Tool: ${eventData.name}`, detail: eventData.resultSnippet }]);
+                setLiveSteps((prev) => [...prev.slice(-100), { timestamp: eventData.timestamp || Date.now(), type: eventData.type, text: `${attemptPrefix}✅ Finished Tool: ${eventData.name}`, detail: eventData.resultSnippet }]);
               } else if (eventData.type === 'assistant_message') {
-                setLiveSteps((prev) => [...prev.slice(-24), { timestamp: eventData.timestamp || Date.now(), type: eventData.type, text: `💬 Model Turn Completed` }]);
+                setLiveSteps((prev) => [...prev.slice(-100), { timestamp: eventData.timestamp || Date.now(), type: eventData.type, text: `${attemptPrefix}💬 Model Turn Completed` }]);
+              } else if (eventData.type === 'attempt_start' || eventData.type === 'attempt_complete') {
+                setLiveSteps((prev) => [...prev.slice(-100), { timestamp: eventData.timestamp || Date.now(), type: eventData.type, text: eventData.text }]);
               }
             } else if (eventType === 'test_complete') {
               setLiveStreamingText('');
@@ -1294,40 +1300,67 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
       )}
 
       {/* Live Stream / Single Test Active Run Status Card */}
-      {(isRunning || runningSingleId !== null) && (
-        <div
-          className="glass-panel animate-fade-in"
-          style={{
-            padding: '20px 24px',
-            borderRadius: '14px',
-            border: '1px solid rgba(245, 158, 11, 0.4)',
-            background: 'rgba(245, 158, 11, 0.05)',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '14px',
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-              <Loader2 size={22} className="spin" color="#f59e0b" />
-              <div>
-                <h4 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 700, color: 'var(--text-main)' }}>
-                  {runningSingleId ? '1-by-1 Single Test Execution Active' : `Benchmark Suite Run Active (${progress ? `${progress.current}/${progress.total}` : 'Initializing'})`}
-                </h4>
-                <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                  Executing model tool calls, execution flow & system assertions in isolated Docker container
+      {(isRunning || runningSingleId !== null) && (() => {
+        const isSingle = Boolean(runningSingleId);
+        const passedCount = isSingle
+          ? liveSteps.filter((s) => s.type === 'attempt_complete' && s.text.includes('PASSED')).length
+          : liveResults.filter((r) => r.passed).length;
+        const failedCount = isSingle
+          ? liveSteps.filter((s) => s.type === 'attempt_complete' && s.text.includes('FAILED')).length
+          : liveResults.filter((r) => !r.passed).length;
+        const completedCount = isSingle
+          ? passedCount + failedCount
+          : liveResults.length;
+        const totalCount = isSingle
+          ? (attemptsPerCase || 1)
+          : (progress?.total || testCasesInfo.length || 1);
+        const remainingCount = Math.max(0, totalCount - completedCount);
+
+        return (
+          <div
+            className="glass-panel animate-fade-in"
+            style={{
+              padding: '20px 24px',
+              borderRadius: '14px',
+              border: '1px solid rgba(245, 158, 11, 0.4)',
+              background: 'rgba(245, 158, 11, 0.05)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '14px',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <Loader2 size={22} className="spin" color="#f59e0b" />
+                <div>
+                  <h4 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 700, color: 'var(--text-main)' }}>
+                    {isSingle ? '1-by-1 Single Test Execution Active' : `Benchmark Suite Run Active (${progress ? `${progress.current}/${progress.total}` : 'Initializing'})`}
+                  </h4>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '4px', flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: '0.78rem', color: '#34d399', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                      ✅ {passedCount} Passed
+                    </span>
+                    <span style={{ fontSize: '0.78rem', color: '#f87171', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                      ❌ {failedCount} Failed
+                    </span>
+                    <span style={{ fontSize: '0.78rem', color: '#fbbf24', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                      ⏳ {remainingCount} Remaining
+                    </span>
+                    <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                      ({isSingle ? `${completedCount}/${totalCount} attempts` : `${completedCount}/${totalCount} tests`})
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Live Elapsed Timer Badge */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'rgba(15, 23, 42, 0.8)', padding: '6px 16px', borderRadius: '20px', border: '1px solid rgba(245, 158, 11, 0.35)' }}>
+                <Clock size={15} color="#f59e0b" />
+                <span style={{ fontFamily: 'var(--font-code)', fontSize: '0.9rem', fontWeight: 700, color: '#fbbf24' }}>
+                  {(elapsedMs / 1000).toFixed(1)}s elapsed
                 </span>
               </div>
-            </div>
-
-            {/* Live Elapsed Timer Badge */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'rgba(15, 23, 42, 0.8)', padding: '6px 16px', borderRadius: '20px', border: '1px solid rgba(245, 158, 11, 0.35)' }}>
-              <Clock size={15} color="#f59e0b" />
-              <span style={{ fontFamily: 'var(--font-code)', fontSize: '0.9rem', fontWeight: 700, color: '#fbbf24' }}>
-                {(elapsedMs / 1000).toFixed(1)}s elapsed
-              </span>
-            </div>
-          </div>
+            </div>;
 
           {/* Active Test Metadata & Prompt Preview */}
           {(() => {
@@ -1462,7 +1495,8 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
             </div>
           )}
         </div>
-      )}
+      );
+    })()}
 
       {/* Live Scorecards */}
       {liveResults.length > 0 && (
