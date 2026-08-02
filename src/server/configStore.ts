@@ -18,6 +18,7 @@ export interface PersistedConfig {
   enableThinking: boolean;
   classifierModel?: string;
   complexityProfile: 'simple' | 'medium' | 'advanced';
+  preventRepeatedCalls: boolean;
   enabledTools: Record<string, boolean>;
 }
 
@@ -31,8 +32,9 @@ export function getInitialPersistedConfig(): PersistedConfig {
   let terminalMode: 'confirm' | 'auto' = 'confirm';
   let fileEditMode: 'confirm' | 'auto' = 'confirm';
   let enableThinking = true;
+  let preventRepeatedCalls = true;
   let complexityProfile: 'simple' | 'medium' | 'advanced' = 'simple';
-  let enabledTools = Object.fromEntries(BUILTIN_TOOLS.map((tool) => [tool.name, true]));
+  let enabledTools = Object.fromEntries(BUILTIN_TOOLS.map((tool) => [tool.name, tool.name !== 'apply_patch']));
 
   try {
     if (fsSync.existsSync(CONFIG_FILE_PATH)) {
@@ -65,13 +67,18 @@ export function getInitialPersistedConfig(): PersistedConfig {
       if (typeof parsed.enableThinking === 'boolean') {
         enableThinking = parsed.enableThinking;
       }
+      if (typeof parsed.preventRepeatedCalls === 'boolean') {
+        preventRepeatedCalls = parsed.preventRepeatedCalls;
+      }
       if (parsed.complexityProfile === 'simple' || parsed.complexityProfile === 'medium' || parsed.complexityProfile === 'advanced') {
         complexityProfile = parsed.complexityProfile;
       }
       if (parsed.enabledTools && typeof parsed.enabledTools === 'object' && !Array.isArray(parsed.enabledTools)) {
         enabledTools = Object.fromEntries(BUILTIN_TOOLS.map((tool) => [
           tool.name,
-          parsed.enabledTools[tool.name] !== false,
+          parsed.enabledTools[tool.name] !== undefined
+            ? Boolean(parsed.enabledTools[tool.name])
+            : tool.name !== 'apply_patch',
         ]));
       }
     }
@@ -84,7 +91,7 @@ export function getInitialPersistedConfig(): PersistedConfig {
   if (process.env.OLLAMA_MODEL) model = process.env.OLLAMA_MODEL;
   if (process.env.OLLAMA_CLASSIFIER_MODEL) classifierModel = process.env.OLLAMA_CLASSIFIER_MODEL;
 
-  return { workingDir, ollamaHost, ollamaToken, model, classifierModel, allowedCommands, terminalMode, fileEditMode, enableThinking, complexityProfile, enabledTools };
+  return { workingDir, ollamaHost, ollamaToken, model, classifierModel, allowedCommands, terminalMode, fileEditMode, enableThinking, preventRepeatedCalls, complexityProfile, enabledTools };
 }
 
 export function savePersistedConfig(updatedConfig: Record<string, any>): void {

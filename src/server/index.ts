@@ -76,7 +76,7 @@ function getInitialPersistedConfig(): {
   let fileEditMode: 'confirm' | 'auto' = 'confirm';
   let enableThinking = true;
   let complexityProfile: 'simple' | 'medium' | 'advanced' = 'simple';
-  let enabledTools = Object.fromEntries(BUILTIN_TOOLS.map((tool) => [tool.name, true]));
+  let enabledTools = Object.fromEntries(BUILTIN_TOOLS.map((tool) => [tool.name, tool.name !== 'apply_patch']));
 
   try {
     if (fsSync.existsSync(CONFIG_FILE_PATH)) {
@@ -115,7 +115,9 @@ function getInitialPersistedConfig(): {
       if (parsed.enabledTools && typeof parsed.enabledTools === 'object' && !Array.isArray(parsed.enabledTools)) {
         enabledTools = Object.fromEntries(BUILTIN_TOOLS.map((tool) => [
           tool.name,
-          parsed.enabledTools[tool.name] !== false,
+          parsed.enabledTools[tool.name] !== undefined
+            ? Boolean(parsed.enabledTools[tool.name])
+            : tool.name !== 'apply_patch',
         ]));
       }
     }
@@ -1074,7 +1076,7 @@ app.post('/api/chat/tool-approval', (req, res) => {
 
 // POST /api/chat/tool-settings - Update tool approval preferences & max loops & thinking
 app.post('/api/chat/tool-settings', (req, res) => {
-  const { terminalMode, fileEditMode, allowedCommands, maxLoops, enableThinking, complexityProfile, enabledTools } = req.body;
+  const { terminalMode, fileEditMode, allowedCommands, maxLoops, enableThinking, preventRepeatedCalls, complexityProfile, enabledTools } = req.body;
   if (terminalMode === 'confirm' || terminalMode === 'auto') {
     terminalRequireConfirm = terminalMode === 'confirm';
   }
@@ -1090,13 +1092,18 @@ app.post('/api/chat/tool-settings', (req, res) => {
   if (typeof enableThinking === 'boolean') {
     for (const engine of getConfigurableEngines()) engine.updateConfig({ enableThinking });
   }
+  if (typeof preventRepeatedCalls === 'boolean') {
+    for (const engine of getConfigurableEngines()) engine.updateConfig({ preventRepeatedCalls });
+  }
   if (complexityProfile === 'simple' || complexityProfile === 'medium' || complexityProfile === 'advanced') {
     for (const engine of getConfigurableEngines()) engine.updateConfig({ complexityProfile });
   }
   if (enabledTools && typeof enabledTools === 'object' && !Array.isArray(enabledTools)) {
     const sanitizedEnabledTools = Object.fromEntries(BUILTIN_TOOLS.map((tool) => [
       tool.name,
-      enabledTools[tool.name] !== false,
+      enabledTools[tool.name] !== undefined
+        ? Boolean(enabledTools[tool.name])
+        : tool.name !== 'apply_patch',
     ]));
     for (const engine of getConfigurableEngines()) engine.updateConfig({ enabledTools: sanitizedEnabledTools });
   }
@@ -1106,6 +1113,7 @@ app.post('/api/chat/tool-settings', (req, res) => {
     terminalMode: terminalRequireConfirm ? 'confirm' : 'auto',
     fileEditMode: fileEditRequireConfirm ? 'confirm' : 'auto',
     enableThinking: agent.getConfig().enableThinking,
+    preventRepeatedCalls: agent.getConfig().preventRepeatedCalls,
     complexityProfile: agent.getConfig().complexityProfile,
     enabledTools: agent.getConfig().enabledTools,
   });
@@ -1334,14 +1342,12 @@ app.post('/api/chat', async (req, res) => {
         };
       }
     }
-    if ((name === 'edit_file' || name === 'replace_file') && fileEditRequireConfirm) {
-      const diff = await executor.previewFileDiff(name, args);
-      // An edit without a valid preview cannot change the file. Execute it
-      // immediately so the tool error is returned to the model for correction
-      // instead of asking the user to approve a guaranteed no-op.
-      if (!diff) {
-        return originalExecuteTool(name, args, onProgress);
-      }
+    if (['edit_file', 'replace_file', 'create_file', 'apply_patch'].includes(name) && fileEditRequireConfirm) {
+      let diff: FileDiff | undefined = undefined;
+      try {
+        diff = await executor.previewFileDiff(name, args);
+      } catch (_) {}
+
       sendEvent('tool_approval_required', { name, args, diff });
       const { decision, reason } = await new Promise<ApprovalDecisionPayload>((resolve) => {
         pendingApprovalResolves.set(sessionId, resolve);

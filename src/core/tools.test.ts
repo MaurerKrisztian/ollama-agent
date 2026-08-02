@@ -6,6 +6,8 @@ import test from 'node:test';
 import { ToolExecutor, getToolDefinitions } from './tools.js';
 import { categorizeError } from './types.js';
 import { stripAnsiCodes } from './terminalManager.js';
+import { buildPatchFileDiff } from './tools/fileTools.js';
+
 
 async function withWorkspace(run: (workspace: string, executor: ToolExecutor) => Promise<void>) {
   const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'local-model-chat-tools-'));
@@ -16,14 +18,96 @@ async function withWorkspace(run: (workspace: string, executor: ToolExecutor) =>
   }
 }
 
-test('read_file returns raw content without display line numbers', async () => {
+test('read_file returns content formatted with 1-indexed line numbers', async () => {
   await withWorkspace(async (workspace, executor) => {
     await fs.writeFile(path.join(workspace, 'app.js'), 'const value = 1;\nconst next = 2;\n');
 
     const result = await executor.executeTool('read_file', { relative_path: 'app.js' });
 
-    assert.equal(result.content, 'const value = 1;\nconst next = 2;\n');
+    assert.match(result.content, /Showing lines 1 to 3 of 3 in app\.js/);
+    assert.match(result.content, /1: const value = 1;/);
+    assert.match(result.content, /2: const next = 2;/);
     assert.equal(result.line_count, 3);
+  });
+});
+
+test('read_file supports start_line and end_line slice ranges', async () => {
+  await withWorkspace(async (workspace, executor) => {
+    await fs.writeFile(path.join(workspace, 'app.js'), 'line 1\nline 2\nline 3\nline 4\nline 5\n');
+
+    const result = await executor.executeTool('read_file', {
+      relative_path: 'app.js',
+      start_line: 2,
+      end_line: 4,
+    });
+
+    assert.match(result.content, /Showing lines 2 to 4 of 6 in app\.js/);
+    assert.match(result.content, /2: line 2/);
+    assert.match(result.content, /3: line 3/);
+    assert.match(result.content, /4: line 4/);
+    assert.doesNotMatch(result.content, /1: line 1/);
+    assert.doesNotMatch(result.content, /5: line 5/);
+  });
+});
+
+test('edit_file supports start_line and end_line range bounded edits', async () => {
+  await withWorkspace(async (workspace, executor) => {
+    await fs.writeFile(path.join(workspace, 'web.js'), 'const name = "first";\nconst name = "target";\nconst name = "last";\n');
+
+    const result = await executor.executeTool('edit_file', {
+      relative_path: 'web.js',
+      start_line: 2,
+      end_line: 2,
+      target_text: 'const name = "target";',
+      replacement_text: 'const name = "updated";',
+    });
+
+    assert.equal(result.success, true);
+    const updated = await fs.readFile(path.join(workspace, 'web.js'), 'utf-8');
+    assert.equal(updated, 'const name = "first";\nconst name = "updated";\nconst name = "last";\n');
+  });
+});
+
+test('edit_file replaces line range directly when target_text is omitted', async () => {
+  await withWorkspace(async (workspace, executor) => {
+    await fs.writeFile(
+      path.join(workspace, 'verbose.ts'),
+      'line 1\nline 2\nline 3\nline 4\nline 5\n'
+    );
+
+    const result = await executor.executeTool('edit_file', {
+      relative_path: 'verbose.ts',
+      start_line: 2,
+      end_line: 4,
+      replacement_text: 'line updated',
+    });
+
+    assert.equal(result.success, true);
+    const updated = await fs.readFile(path.join(workspace, 'verbose.ts'), 'utf-8');
+    assert.equal(updated, 'line 1\nline updated\nline 5\n');
+  });
+});
+
+test('previewFileDiff generates diff preview for edit_file when target_text is omitted', async () => {
+  await withWorkspace(async (workspace, executor) => {
+    await fs.writeFile(
+      path.join(workspace, 'range_test.ts'),
+      'line 1\nline 2\nline 3\nline 4\nline 5\n'
+    );
+
+    const diff = await executor.previewFileDiff('edit_file', {
+      relative_path: 'range_test.ts',
+      start_line: 2,
+      end_line: 4,
+      replacement_text: 'line updated',
+    });
+
+    assert.ok(diff);
+    assert.equal(diff?.path, 'range_test.ts');
+    const removed = diff?.lines.filter((l) => l.type === 'remove');
+    const added = diff?.lines.filter((l) => l.type === 'add');
+    assert.equal(removed?.length, 3);
+    assert.equal(added?.length, 1);
   });
 });
 
@@ -284,3 +368,95 @@ test('getToolDefinitions generates single schema profile based on complexity lev
   assert.ok(advGrep.parameters.properties.whole_word);
   assert.ok(advGrep.parameters.properties.context_lines);
 });
+
+test('apply_patch applies unified diff patch with context matching', async () => {
+  await withWorkspace(async (workspace, executor) => {
+    const initialContent = 'line 1\nline 2\nconst count = 0;\nline 4\nline 5\n';
+    await fs.writeFile(path.join(workspace, 'index.ts'), initialContent);
+
+    const patchText = `@@ -2,3 +2,3 @@
+ line 2
+-const count = 0;
++const count = 1;
+ line 4`;
+
+    const result = await executor.executeTool('apply_patch', {
+      relative_path: 'index.ts',
+      patch: patchText,
+    });
+
+    assert.equal(result.success, true);
+    const updated = await fs.readFile(path.join(workspace, 'index.ts'), 'utf-8');
+    assert.equal(updated, 'line 1\nline 2\nconst count = 1;\nline 4\nline 5\n');
+  });
+});
+
+test('apply_patch handles 4B model artifacts like unescaped newlines and omitted context space prefixes', async () => {
+  await withWorkspace(async (workspace, executor) => {
+    const initialContent =
+      '// Web pages frequently contain modern or malformed CSS that jsdom does not\n// understand. jsdom reports those non-fatal stylesheet failures to the host\n// console by default, sometimes dumping thousands of lines of CSS. Scripts are\n// not executed here, so page console output and CSS parser diagnostics are not\n// part of the reader\'s result and should remain isolated from CLI output.\n';
+    await fs.writeFile(path.join(workspace, 'text.txt'), initialContent);
+
+    const patchFrom4BModel =
+      '// Web pages frequently contain modern or malformed CSS that jsdom does not\\n// understand. jsdom reports those non-fatal stylesheet failures to the host\\n// console by default, sometimes dumping thousands of lines of CSS. Scripts are\\n// not executed here, so page console output and CSS parser diagnostics are not\\n// part of the reader\'s result and should remain isolated from CLI output.\\n+ // not executed here test edit, so page console output and CSS2 parser diagnostics are not';
+
+    const result = await executor.executeTool('apply_patch', {
+      relative_path: 'text.txt',
+      patch: patchFrom4BModel,
+    });
+
+    assert.equal(result.success, true);
+    const updated = await fs.readFile(path.join(workspace, 'text.txt'), 'utf-8');
+    assert.match(updated, /CSS2 parser diagnostics are not/);
+  });
+});
+
+test('buildPatchFileDiff produces hunk-level context and edit lines instead of replacing the whole file', () => {
+  const original = 'line 1\nline 2\nconst count = 0;\nline 4\nline 5\n';
+  const patch = `@@ -2,3 +2,3 @@
+ line 2
+-const count = 0;
++const count = 1;
+ line 4`;
+
+  const diff = buildPatchFileDiff('index.ts', original, patch);
+  assert.equal(diff.path, 'index.ts');
+  const removed = diff.lines.filter((l) => l.type === 'remove');
+  const added = diff.lines.filter((l) => l.type === 'add');
+  const context = diff.lines.filter((l) => l.type === 'context');
+
+  assert.equal(removed.length, 1);
+  assert.equal(removed[0].content, 'const count = 0;');
+  assert.equal(added.length, 1);
+  assert.equal(added[0].content, 'const count = 1;');
+  assert.ok(context.length >= 2);
+});
+
+test('buildPatchFileDiff handles multi-hunk patch diffs correctly', () => {
+  const original = 'line 1\nfunction foo() {}\nline 3\nline 4\nfunction bar() {}\nline 6\n';
+  const patch = `@@ -1,3 +1,3 @@
+ line 1
+-function foo() {}
++function foo2() {}
+ line 3
+@@ -4,3 +4,3 @@
+ line 4
+-function bar() {}
++function bar2() {}
+ line 6`;
+
+  const diff = buildPatchFileDiff('web.ts', original, patch);
+  const removed = diff.lines.filter((l) => l.type === 'remove');
+  const added = diff.lines.filter((l) => l.type === 'add');
+
+  assert.equal(removed.length, 2);
+  assert.equal(added.length, 2);
+  assert.equal(removed[0].content, 'function foo() {}');
+  assert.equal(added[0].content, 'function foo2() {}');
+  assert.equal(removed[1].content, 'function bar() {}');
+  assert.equal(added[1].content, 'function bar2() {}');
+});
+
+
+
+

@@ -110,8 +110,11 @@ export class ContextManager {
         ? 'RULE 2: When you need to inspect or modify code, ALWAYS issue a runtime-native structured tool call immediately.'
         : 'RULE 2: When you need to inspect or modify code, ALWAYS output the `<tool_call>` block immediately.',
       'RULE 3 (Line Deletion): To remove/delete lines of code or text from a file, set `replacement_text` to an empty string `""`.',
-      'RULE 3b (Literal Edits): edit_file target_text is always exact literal text, never a regex. Do not use patterns such as [0-9]+, .*, ^, or $. Use separate edit_file calls for changes that are not contiguous in the file.',
+      'RULE 3b (Literal Edits & Line Ranges): read_file outputs 1-indexed line numbers formatted as `<line_number>: <line_content>`. When calling edit_file, specify optional start_line and end_line range to locate the edit. target_text must be exact literal text without the display line numbers or colons. Set replacement_text to "" to delete target_text.',
       'RULE 3c (Broad Rewrites): For restyling, full rewrites, or many non-contiguous changes, read the existing file and then use replace_file with the complete new content instead of forcing a large edit_file match.',
+      ...(this.tools.some((tool) => tool.name === 'apply_patch')
+        ? ['RULE 3d (Patch Editing): You can use apply_patch to modify files using standard unified diff format strings (including context lines starting with a space, removals starting with -, and additions starting with +).']
+        : []),
       'RULE 4 (Clean Function Rewriting): When rewriting a function, class, or code block, include the COMPLETE existing code block in `target_text` (from header to closing brace `}`) so the entire block is replaced cleanly without leaving orphaned lines.',
       useNativeTools
         ? 'RULE 5 (Multi-Step Workflows): Complete multi-step tool workflows fully. Immediately issue the next runtime-native structured tool call without asking for confirmation.'
@@ -291,7 +294,7 @@ export class ContextManager {
           list.push({ msgIndex, toolCallId: msg.tool_call_id });
           readFileResponsesByPath.set(filePath, list);
         }
-      } else if (['edit_file', 'replace_file', 'create_file'].includes(toolName)) {
+      } else if (['edit_file', 'replace_file', 'create_file', 'apply_patch'].includes(toolName)) {
         const filePath = toolArgs.relative_path || toolArgs.path || toolArgs.file;
         if (filePath) {
           mutations.push({ path: filePath, toolName, msgIndex });

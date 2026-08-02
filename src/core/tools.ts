@@ -8,6 +8,8 @@ import type { DeepResearchNoteGenerator, DeepResearchSemanticClassifier, DeepRes
 import { McpClientManager } from './mcp.js';
 import { TerminalSessionManager, stripAnsiCodes } from './terminalManager.js';
 import { LspManager } from './lsp.js';
+import { applyUnifiedDiff, buildPatchFileDiff } from './tools/fileTools.js';
+
 
 type DiffLine = {
   type: 'context' | 'add' | 'remove' | 'meta';
@@ -106,7 +108,7 @@ function stripCopiedLineNumbers(text: string): string {
   return text
     .split('\n')
     .map((line) => {
-      const numberedLine = line.match(/^\s*\d+:\s?(.*)$/);
+      const numberedLine = line.match(/^\s*\d+[\s|:]\s?(.*)$/);
       return numberedLine ? numberedLine[1] : line;
     })
     .join('\n');
@@ -135,6 +137,7 @@ export const TOOL_GROUP_METADATA: Record<string, { group: string; groupColor: st
   replace_file:            { group: '📁 File System',       groupColor: 'var(--accent-primary)', groupDescription: 'Workspace file inspection, creation, text editing, complete rewrites, directory listing, and grep searching.' },
   create_file:             { group: '📁 File System',       groupColor: 'var(--accent-primary)', groupDescription: 'Workspace file inspection, creation, text editing, complete rewrites, directory listing, and grep searching.' },
   grep_search:             { group: '📁 File System',       groupColor: 'var(--accent-primary)', groupDescription: 'Workspace file inspection, creation, text editing, complete rewrites, directory listing, and grep searching.' },
+  apply_patch:             { group: '📁 File System',       groupColor: 'var(--accent-primary)', groupDescription: 'Workspace file inspection, creation, text editing, complete rewrites, directory listing, and grep searching.' },
   grep_replace:            { group: '📁 File System',       groupColor: 'var(--accent-primary)', groupDescription: 'Workspace file inspection, creation, text editing, complete rewrites, directory listing, and grep searching.' },
   web_search:              { group: '🌐 Web Research',      groupColor: '#38bdf8',               groupDescription: 'Public web search engine queries, automated HTML-to-Markdown extraction, and deep multi-source research.' },
   read_web_page:           { group: '🌐 Web Research',      groupColor: '#38bdf8',               groupDescription: 'Public web search engine queries, automated HTML-to-Markdown extraction, and deep multi-source research.' },
@@ -172,13 +175,21 @@ export const BUILTIN_TOOLS: ToolDefinition[] = [
   },
   {
     name: 'read_file',
-    description: 'Read the raw contents of a text file within the working directory.',
+    description: 'Read the contents of a text file with 1-indexed line numbers. Omit start_line and end_line to view the entire file.',
     parameters: {
       type: 'object',
       properties: {
         relative_path: {
           type: 'string',
           description: 'Relative path to the file from current working directory.',
+        },
+        start_line: {
+          type: 'number',
+          description: 'Optional 1-indexed start line number to view.',
+        },
+        end_line: {
+          type: 'number',
+          description: 'Optional 1-indexed end line number to view.',
         },
       },
       required: ['relative_path'],
@@ -186,7 +197,7 @@ export const BUILTIN_TOOLS: ToolDefinition[] = [
   },
   {
     name: 'edit_file',
-    description: 'Partially edit a text or code file by literal text replacement. target_text must be exact text that exists in the latest read_file output, without display line numbers or regex patterns. Use separate edit_file calls for non-contiguous changes.',
+    description: 'Partially edit a text or code file by replacing target_text, OR by specifying start_line and end_line to replace that line range directly without providing target_text. Target text must not include display line numbers.',
     parameters: {
       type: 'object',
       properties: {
@@ -194,16 +205,24 @@ export const BUILTIN_TOOLS: ToolDefinition[] = [
           type: 'string',
           description: 'Relative path to the file from current working directory.',
         },
+        start_line: {
+          type: 'number',
+          description: 'Optional 1-indexed start line number of the target block.',
+        },
+        end_line: {
+          type: 'number',
+          description: 'Optional 1-indexed end line number of the target block.',
+        },
         target_text: {
           type: 'string',
-          description: 'Exact literal text currently present in the file. This is not a regex: do not use patterns such as [0-9]+, .*, ^, or $.',
+          description: 'Optional literal text to replace. Omit target_text if start_line and end_line are provided to replace the entire line range.',
         },
         replacement_text: {
           type: 'string',
-          description: 'The new text content to substitute in place of target_text. Use empty string "" to delete target_text.',
+          description: 'The new text content to substitute in place of target_text or line range. Use empty string "" to delete lines.',
         },
       },
-      required: ['relative_path', 'target_text', 'replacement_text'],
+      required: ['relative_path', 'replacement_text'],
     },
   },
   {
@@ -240,6 +259,24 @@ export const BUILTIN_TOOLS: ToolDefinition[] = [
         },
       },
       required: ['relative_path', 'content'],
+    },
+  },
+  {
+    name: 'apply_patch',
+    description: 'Apply a standard unified diff patch to modify a text or code file. The patch string should include unified diff format lines (- for removal, + for addition, space for context).',
+    parameters: {
+      type: 'object',
+      properties: {
+        relative_path: {
+          type: 'string',
+          description: 'Relative path to the file from current working directory.',
+        },
+        patch: {
+          type: 'string',
+          description: 'The unified diff patch content to apply.',
+        },
+      },
+      required: ['relative_path', 'patch'],
     },
   },
   {
@@ -816,14 +853,16 @@ export class ToolExecutor {
 
     if (
       name !== 'edit_file' &&
-      name !== 'replace_file'
+      name !== 'replace_file' &&
+      name !== 'apply_patch'
     ) {
       return undefined;
     }
     if (
       !args.relative_path ||
-      (name === 'edit_file' && (args.target_text === undefined || args.replacement_text === undefined)) ||
-      (name === 'replace_file' && args.content === undefined)
+      (name === 'edit_file' && args.replacement_text === undefined) ||
+      (name === 'replace_file' && args.content === undefined) ||
+      (name === 'apply_patch' && !args.patch)
     ) {
       return undefined;
     }
@@ -846,9 +885,34 @@ export class ToolExecutor {
         if (content === args.content) return undefined;
         return buildEditedFileDiff(actualRelativePath, content, content, args.content);
       }
-      const targetText = stripCopiedLineNumbers(args.target_text);
-      const replacementText = stripCopiedLineNumbers(args.replacement_text);
-      const match = this.findMatchingTargetCode(content, targetText);
+      if (name === 'apply_patch') {
+        const patchResult = applyUnifiedDiff(content, args.patch);
+        if (!patchResult.success || !patchResult.updatedContent || patchResult.updatedContent === content) {
+          return undefined;
+        }
+        return buildPatchFileDiff(actualRelativePath, content, args.patch);
+      }
+      if (name !== 'edit_file') return undefined;
+      if (args.replacement_text === undefined) return undefined;
+      let match: string | null = null;
+      const replacementText = stripCopiedLineNumbers(args.replacement_text || '');
+      const numStart = args.start_line !== undefined && args.start_line !== null ? Number(args.start_line) : undefined;
+      const numEnd = args.end_line !== undefined && args.end_line !== null ? Number(args.end_line) : undefined;
+      const hasRange = typeof numStart === 'number' && !isNaN(numStart) && numStart > 0 &&
+                       typeof numEnd === 'number' && !isNaN(numEnd) && numEnd >= numStart;
+
+      if ((args.target_text === undefined || args.target_text === '') && hasRange) {
+        const lines = content.replace(/\r\n/g, '\n').split('\n');
+        const sIdx = Math.max(0, Math.floor(numStart!) - 1);
+        const eIdx = Math.min(lines.length, Math.floor(numEnd!));
+        if (sIdx < eIdx) {
+          match = lines.slice(sIdx, eIdx).join('\n');
+        }
+      }
+      if (!match && args.target_text !== undefined) {
+        const targetText = stripCopiedLineNumbers(args.target_text);
+        match = this.findMatchingTargetCode(content, targetText, args.start_line, args.end_line);
+      }
       if (!match) return undefined;
       return buildEditedFileDiff(
         actualRelativePath,
@@ -882,8 +946,31 @@ export class ToolExecutor {
   /**
    * Smart code target resolution logic: matches exact string first, then falls back to tab/space/line-ending insensitive matching
    */
-  private findMatchingTargetCode(content: string, targetText: string): string | null {
-    if (content.includes(targetText)) return targetText;
+  private findMatchingTargetCode(
+    content: string,
+    targetText: string,
+    startLine?: number | string,
+    endLine?: number | string,
+  ): string | null {
+    let searchContent = content;
+
+    const numStart = startLine !== undefined && startLine !== null ? Number(startLine) : undefined;
+    const numEnd = endLine !== undefined && endLine !== null ? Number(endLine) : undefined;
+
+    if (typeof numStart === 'number' && !isNaN(numStart) && numStart > 0) {
+      const lines = content.replace(/\r\n/g, '\n').split('\n');
+      const startIdx = Math.max(0, Math.floor(numStart) - 1);
+      const endIdx = typeof numEnd === 'number' && !isNaN(numEnd) && numEnd >= numStart
+        ? Math.min(lines.length, Math.floor(numEnd))
+        : lines.length;
+      
+      const boundedLines = lines.slice(startIdx, endIdx);
+      if (boundedLines.length > 0) {
+        searchContent = boundedLines.join('\n');
+      }
+    }
+
+    if (searchContent.includes(targetText)) return targetText;
 
     const normContent = content.replace(/\r\n/g, '\n');
     const normTarget = targetText.replace(/\r\n/g, '\n');
@@ -1221,11 +1308,28 @@ export class ToolExecutor {
             return { error: `File "${actualRelativePath}" exceeds 500KB limit.` };
           }
           const rawContent = await fs.readFile(filePath, 'utf-8');
+          const lines = rawContent.split('\n');
+          const totalLines = lines.length;
+
+          let startLine = typeof args.start_line === 'number' && args.start_line > 0 ? Math.floor(args.start_line) : 1;
+          let endLine = typeof args.end_line === 'number' && args.end_line >= startLine ? Math.floor(args.end_line) : totalLines;
+          startLine = Math.min(startLine, totalLines);
+          endLine = Math.min(endLine, totalLines);
+
+          const selectedLines = lines.slice(startLine - 1, endLine);
+          const numberedContent = selectedLines
+            .map((line, idx) => `${startLine + idx}: ${line}`)
+            .join('\n');
+
+          const headerNote = `Showing lines ${startLine} to ${endLine} of ${totalLines} in ${actualRelativePath}. Please note that any changes targeting original code should remove the line number, colon, and leading space.`;
 
           return {
             file_path: actualRelativePath,
-            content: rawContent,
-            line_count: rawContent.split('\n').length,
+            content: `${headerNote}\n\n${numberedContent}`,
+            raw_content: rawContent,
+            start_line: startLine,
+            end_line: endLine,
+            line_count: totalLines,
             size_bytes: stats.size,
           };
         } catch (err: any) {
@@ -1234,9 +1338,17 @@ export class ToolExecutor {
       }
 
       case 'edit_file': {
-        const { relative_path, target_text, replacement_text } = args;
-        if (!relative_path || target_text === undefined || replacement_text === undefined) {
-          return { error: 'Parameters relative_path, target_text, and replacement_text are required.' };
+        const { relative_path, target_text, replacement_text, start_line, end_line } = args;
+        if (!relative_path || replacement_text === undefined) {
+          return { error: 'Parameters relative_path and replacement_text are required.' };
+        }
+        const numStart = start_line !== undefined && start_line !== null ? Number(start_line) : undefined;
+        const numEnd = end_line !== undefined && end_line !== null ? Number(end_line) : undefined;
+        const hasRange = typeof numStart === 'number' && !isNaN(numStart) && numStart > 0 &&
+                         typeof numEnd === 'number' && !isNaN(numEnd) && numEnd >= numStart;
+
+        if (target_text === undefined && !hasRange) {
+          return { error: 'Either target_text or start_line and end_line range must be provided.' };
         }
         let filePath = path.resolve(this.workingDir, relative_path);
         let actualRelativePath = relative_path;
@@ -1258,13 +1370,26 @@ export class ToolExecutor {
             return { error: `Path "${actualRelativePath}" is a directory, not a file.` };
           }
           const content = await fs.readFile(filePath, 'utf-8');
-          const cleanTargetText = normalizeModelText(target_text);
           const cleanReplacementText = normalizeModelText(replacement_text);
-          const matchToReplace = this.findMatchingTargetCode(content, cleanTargetText);
+          let matchToReplace: string | null = null;
+
+          if ((target_text === undefined || target_text === '') && hasRange) {
+            const lines = content.replace(/\r\n/g, '\n').split('\n');
+            const sIdx = Math.max(0, Math.floor(numStart!) - 1);
+            const eIdx = Math.min(lines.length, Math.floor(numEnd!));
+            if (sIdx < eIdx) {
+              matchToReplace = lines.slice(sIdx, eIdx).join('\n');
+            }
+          }
+
+          if (!matchToReplace && target_text !== undefined) {
+            const cleanTargetText = normalizeModelText(target_text);
+            matchToReplace = this.findMatchingTargetCode(content, cleanTargetText, start_line, end_line);
+          }
 
           if (!matchToReplace) {
             return {
-              error: `Literal target_text "${target_text}" was not found in file "${actualRelativePath}". No changes were made. target_text does not support regex. Copy exact text from the latest read_file result (without line-number prefixes), and use separate edit_file calls for non-contiguous changes.`,
+              error: `Could not find target content to edit in "${actualRelativePath}". Specify valid target_text or valid start_line and end_line bounds.`,
               file_path: actualRelativePath,
               changed: false,
             };
@@ -1355,6 +1480,63 @@ export class ToolExecutor {
           };
         } catch (err: any) {
           return { error: `Failed to create file: ${err.message}` };
+        }
+      }
+
+      case 'apply_patch': {
+        const { relative_path, patch } = args;
+        if (!relative_path || !patch) {
+          return { error: 'Parameters relative_path and patch are required.' };
+        }
+        let filePath = path.resolve(this.workingDir, relative_path);
+        let actualRelativePath = relative_path;
+
+        try {
+          await fs.stat(filePath);
+        } catch (_) {
+          const foundPath = await this.findFileRecursive(this.workingDir, path.basename(relative_path));
+          if (foundPath) {
+            filePath = foundPath;
+            actualRelativePath = path.relative(this.workingDir, foundPath);
+          }
+        }
+
+        try {
+          const stats = await fs.stat(filePath);
+          if (stats.isDirectory()) {
+            return { error: `Path "${actualRelativePath}" is a directory, not a file.` };
+          }
+          const originalContent = await fs.readFile(filePath, 'utf-8');
+          const patchResult = applyUnifiedDiff(originalContent, patch);
+
+          if (!patchResult.success) {
+            return {
+              error: patchResult.error || `Failed to apply patch to file "${actualRelativePath}".`,
+              file_path: actualRelativePath,
+              changed: false,
+            };
+          }
+
+          const updatedContent = patchResult.updatedContent!;
+          if (updatedContent === originalContent) {
+            return {
+              error: `Patch produced no change to "${actualRelativePath}".`,
+              file_path: actualRelativePath,
+              changed: false,
+            };
+          }
+
+          await fs.writeFile(filePath, updatedContent, 'utf-8');
+
+          return {
+            success: true,
+            file_path: actualRelativePath,
+            message: `Successfully applied patch to ${actualRelativePath}.`,
+            size_bytes: Buffer.byteLength(updatedContent, 'utf-8'),
+            diff: buildPatchFileDiff(actualRelativePath, originalContent, patch),
+          };
+        } catch (err: any) {
+          return { error: `Failed to apply patch to file: ${err.message}` };
         }
       }
 

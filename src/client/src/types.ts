@@ -33,6 +33,7 @@ export interface ToolSettings {
   maxLoops?: number;
   complexityProfile?: ToolComplexityProfile;
   enableThinking?: boolean;
+  preventRepeatedCalls?: boolean;
   enabledTools: {
     list_directory: boolean;
     read_file: boolean;
@@ -41,6 +42,7 @@ export interface ToolSettings {
     create_file: boolean;
     grep_search: boolean;
     grep_replace?: boolean;
+    apply_patch?: boolean;
     execute_command: boolean;
     web_search: boolean;
     read_web_page: boolean;

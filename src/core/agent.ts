@@ -706,8 +706,8 @@ ${conversationText}`;
     let successfulActionIndex = 0;
     let lastMutationAction = -1;
     let lastReadAction = -1;
-    const failedToolCalls = new Set<string>();
-    const executedCallFingerprintsThisTurn = new Set<string>();
+    const failedToolCalls = new Map<string, number>();
+    const executedCallFingerprintsThisTurn = new Map<string, number>();
     const filesReadThisTurn = new Set<string>();
     for (const msg of this.contextManager.getMessages()) {
       if (msg.role === 'assistant' && msg.tool_calls) {
@@ -893,10 +893,11 @@ ${conversationText}`;
                   'Deep research has already completed for this turn. Use its supplied sources, image URLs, and source-page links to answer now; do not start another web-search loop.',
                 repeated_web_research: true,
               }
-              : executedCallFingerprintsThisTurn.has(callFingerprint) || failedToolCalls.has(callFingerprint)
+              : (this.config.preventRepeatedCalls !== false &&
+                  ((executedCallFingerprintsThisTurn.get(callFingerprint) || 0) + (failedToolCalls.get(callFingerprint) || 0) >= 2))
             ? {
                 error:
-                  `Refusing to repeat an identical ${call.name} call with the exact same arguments in the same turn. ` +
+                  `Refusing to repeat an identical ${call.name} call after 2 identical attempts. ` +
                   'The result for this call is already in conversation history. Change arguments or select a different tool.',
                 repeated_call: true,
               }
@@ -907,7 +908,10 @@ ${conversationText}`;
                 callbacks?.signal,
               );
 
-          executedCallFingerprintsThisTurn.add(callFingerprint);
+          executedCallFingerprintsThisTurn.set(
+            callFingerprint,
+            (executedCallFingerprintsThisTurn.get(callFingerprint) || 0) + 1
+          );
 
           if (call.name === 'web_search' && toolResult && Array.isArray(toolResult.results) && toolResult.results.length > 0) {
             const isNavigationalUrlRequest =
@@ -962,13 +966,13 @@ ${conversationText}`;
               executedToolCounts.set('edit_file', (executedToolCounts.get('edit_file') || 0) + 1);
             }
           } else if (call.name === 'edit_file' || call.name === 'replace_file') {
-            failedToolCalls.add(callFingerprint);
+            failedToolCalls.set(callFingerprint, (failedToolCalls.get(callFingerprint) || 0) + 1);
             continuationReminder =
               `The ${call.name} call failed and made no changes: ${toolResult.error}\n` +
               'Do not repeat the same call. Reread the file and retry with a smaller exact literal target_text, or use replace_file with the complete new content for broad/non-contiguous changes. ' +
               'Do not ask the user to provide content that is already in the tool results.';
           } else if (call.name === 'read_file') {
-            failedToolCalls.add(callFingerprint);
+            failedToolCalls.set(callFingerprint, (failedToolCalls.get(callFingerprint) || 0) + 1);
             const requestedPath = String(call.arguments.relative_path || '');
             const parentPath = requestedPath.includes('/')
               ? requestedPath.slice(0, requestedPath.lastIndexOf('/')) || '.'
@@ -978,14 +982,14 @@ ${conversationText}`;
               `Do not retry that path. Your entire next response must be one native list_directory call for "${parentPath}". ` +
               'Use the returned entries to select the real file path, then read it.';
           } else if (toolResult?.repeated_web_research === true) {
-            failedToolCalls.add(callFingerprint);
+            failedToolCalls.set(callFingerprint, (failedToolCalls.get(callFingerprint) || 0) + 1);
             continuationReminder =
               'The web investigation is already complete and all web tools are now unavailable for this turn. ' +
               'Your next response must be the final answer to the original user request using the supplied deep-research evidence. ' +
               'Do not emit a tool call, tool-call JSON, a search plan, or a request for more research.' +
               `\n\nOriginal user request:\n${userMessage}`;
           } else {
-            failedToolCalls.add(callFingerprint);
+            failedToolCalls.set(callFingerprint, (failedToolCalls.get(callFingerprint) || 0) + 1);
           }
 
           if (callbacks?.onToolEnd) {

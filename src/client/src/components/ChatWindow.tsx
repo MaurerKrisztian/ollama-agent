@@ -1698,16 +1698,28 @@ const PrettierInvocationView: React.FC<{ name: string; args: Record<string, any>
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-main)', fontFamily: 'var(--font-code)' }}>
             <FileText size={14} color="var(--accent-teal)" />
             <span>{args.relative_path}</span>
+            {args.start_line != null && (
+              <span style={{ color: 'var(--accent-amber)', fontSize: '0.75rem', fontWeight: 600 }}>
+                (Lines {String(args.start_line)}{args.end_line != null && String(args.end_line) !== String(args.start_line) ? `–${args.end_line}` : ''})
+              </span>
+            )}
           </div>
         )}
-        {args.target_text !== undefined && (
+        {args.target_text !== undefined ? (
           <div>
             <div style={{ fontSize: '0.725rem', fontWeight: 600, color: '#f87171', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Target Text (To Replace):</div>
             <pre style={{ margin: 0, padding: '8px 12px', background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: '6px', fontFamily: 'var(--font-code)', fontSize: '0.775rem', color: '#fca5a5', whiteSpace: 'pre-wrap', maxHeight: '180px', overflowY: 'auto' }}>
               {args.target_text}
             </pre>
           </div>
-        )}
+        ) : (args.start_line != null ? (
+          <div>
+            <div style={{ fontSize: '0.725rem', fontWeight: 600, color: '#f87171', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Target Lines (To Replace):</div>
+            <div style={{ padding: '8px 12px', background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: '6px', fontFamily: 'var(--font-code)', fontSize: '0.775rem', color: '#fca5a5', fontWeight: 600 }}>
+              Lines {String(args.start_line)}{args.end_line != null && String(args.end_line) !== String(args.start_line) ? ` to ${args.end_line}` : ''}
+            </div>
+          </div>
+        ) : null)}
         {args.replacement_text !== undefined && (
           <div>
             <div style={{ fontSize: '0.725rem', fontWeight: 600, color: '#4ade80', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Replacement Text:</div>

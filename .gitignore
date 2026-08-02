@@ -1,6 +1,6 @@
 # Dependencies
 node_modules/
-
+tmp/
 # Build output
 dist/
 src/client/dist/

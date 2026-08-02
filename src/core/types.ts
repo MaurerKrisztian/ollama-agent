@@ -133,6 +133,7 @@ export interface AgentConfig {
   complexityProfile?: ToolComplexityProfile;
   pruningConfig?: ContextPruningConfig;
   enableThinking?: boolean;
+  preventRepeatedCalls?: boolean;
   enabledTools?: Record<string, boolean>;
 }
 

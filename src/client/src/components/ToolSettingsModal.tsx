@@ -25,6 +25,10 @@ export const TOOL_DESCRIPTIONS: Record<string, { description: string; parameters
     description: 'Create a new text or code file in the working directory.',
     parameters: { relative_path: 'string', content: 'string' },
   },
+  apply_patch: {
+    description: 'Apply a standard unified diff patch to modify a text or code file.',
+    parameters: { relative_path: 'string', patch: 'string' },
+  },
   grep_search: {
     description: 'Advanced workspace codebase search with regex, case-sensitivity, whole-word boundaries, file extension filtering, surrounding context lines, match highlighting (>>>match<<<), and result pagination limits.',
     parameters: {
@@ -715,7 +719,7 @@ export const ToolSettingsModal: React.FC<ToolSettingsModalProps> = ({
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <Brain size={18} color="#c084fc" />
                 <span style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--text-main)' }}>
-                  Model Reasoning & Thinking (`think`)
+                  Model Reasoning / Thinking
                 </span>
               </div>
               <span
@@ -724,17 +728,17 @@ export const ToolSettingsModal: React.FC<ToolSettingsModalProps> = ({
                   fontWeight: 700,
                   fontFamily: 'var(--font-code)',
                   color: settings.enableThinking !== false ? '#c084fc' : 'var(--text-muted)',
-                  background: settings.enableThinking !== false ? 'rgba(168, 85, 247, 0.15)' : 'rgba(15, 23, 42, 0.4)',
+                  background: settings.enableThinking !== false ? 'rgba(192, 132, 252, 0.15)' : 'rgba(148, 163, 184, 0.15)',
                   padding: '2px 8px',
                   borderRadius: '6px',
-                  border: `1px solid ${settings.enableThinking !== false ? 'rgba(168, 85, 247, 0.3)' : 'var(--border-color)'}`,
+                  border: `1px solid ${settings.enableThinking !== false ? 'rgba(192, 132, 252, 0.3)' : 'rgba(148, 163, 184, 0.3)'}`,
                 }}
               >
                 {settings.enableThinking !== false ? 'Enabled' : 'Disabled'}
               </span>
             </div>
             <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', lineHeight: 1.5, marginBottom: '12px' }}>
-              Enables reasoning/thinking mode for supported Ollama models (e.g. DeepSeek R1, Qwen 2.5/3.5). Thinking steps will be streamed and displayed in chat as collapsible thinking cards.
+              Allows reasoning models (e.g. Qwen 2.5/3.5, DeepSeek R1) to output thinking steps before generating actions or answers.
             </p>
             <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '0.825rem', color: 'var(--text-main)', fontWeight: 500 }}>
               <input
@@ -745,7 +749,47 @@ export const ToolSettingsModal: React.FC<ToolSettingsModalProps> = ({
                 }}
                 style={{ accentColor: '#c084fc', cursor: 'pointer' }}
               />
-              <span>Enable Model Thinking / Reasoning</span>
+              <span>Enable reasoning & thinking output</span>
+            </label>
+          </div>
+
+          {/* Section 3.6: Prevent Repeated Tool Calls */}
+          <div className="tool-settings-section" style={{ background: 'rgba(15, 23, 42, 0.6)', padding: '16px', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
+            <div className="tool-settings-section-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <ShieldAlert size={18} color="var(--accent-amber)" />
+                <span style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--text-main)' }}>
+                  Prevent Repeated Tool Calls
+                </span>
+              </div>
+              <span
+                style={{
+                  fontSize: '0.8rem',
+                  fontWeight: 700,
+                  fontFamily: 'var(--font-code)',
+                  color: settings.preventRepeatedCalls !== false ? 'var(--accent-amber)' : 'var(--text-muted)',
+                  background: settings.preventRepeatedCalls !== false ? 'rgba(245, 158, 11, 0.15)' : 'rgba(148, 163, 184, 0.15)',
+                  padding: '2px 8px',
+                  borderRadius: '6px',
+                  border: `1px solid ${settings.preventRepeatedCalls !== false ? 'rgba(245, 158, 11, 0.3)' : 'rgba(148, 163, 184, 0.3)'}`,
+                }}
+              >
+                {settings.preventRepeatedCalls !== false ? 'Max 2 Attempts' : 'Disabled'}
+              </span>
+            </div>
+            <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', lineHeight: 1.5, marginBottom: '12px' }}>
+              Allows up to 2 identical tool calls with exact same parameters before blocking repeated attempts. Turn off if you want to allow unlimited retries.
+            </p>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '0.825rem', color: 'var(--text-main)', fontWeight: 500 }}>
+              <input
+                type="checkbox"
+                checked={settings.preventRepeatedCalls !== false}
+                onChange={(e) => {
+                  onUpdateSettings({ ...settings, preventRepeatedCalls: e.target.checked });
+                }}
+                style={{ accentColor: 'var(--accent-amber)', cursor: 'pointer' }}
+              />
+              <span>Prevent repeated identical calls (Max 2 identical calls allowed)</span>
             </label>
           </div>
 

@@ -807,3 +807,15 @@ test('agent uses configured classifierModel for deep research link classificatio
   agent.updateConfig({ classifierModel: 'llama3.2:1b' });
   assert.equal(agent.getConfig().classifierModel, 'llama3.2:1b');
 });
+
+test('agent configures preventRepeatedCalls preference correctly', () => {
+  const agent = new AgentEngine();
+  assert.equal(agent.getConfig().preventRepeatedCalls, undefined);
+
+  agent.updateConfig({ preventRepeatedCalls: false });
+  assert.equal(agent.getConfig().preventRepeatedCalls, false);
+
+  agent.updateConfig({ preventRepeatedCalls: true });
+  assert.equal(agent.getConfig().preventRepeatedCalls, true);
+});
+

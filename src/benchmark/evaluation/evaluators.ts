@@ -113,11 +113,28 @@ async function evaluateDirectoryEntries(
 export async function evaluateBenchmarkTask(
   testCase: BenchmarkTestCase,
   workingDir: string,
-  _actualToolsCalled: Array<{ name: string; args: Record<string, any> }>,
+  actualToolsCalled: Array<{ name: string; args: Record<string, any> }>,
   responseContent: string,
   toolResults: Array<{ name: string; result: any }> = []
 ): Promise<EvaluationResult> {
   const checks: Array<{ name: string; result: EvaluationResult }> = [];
+
+  if (testCase.expectedToolSequence?.length) {
+    const actualNames = actualToolsCalled.map((t) => t.name);
+    const expectedSeq = testCase.expectedToolSequence;
+    let seqIdx = 0;
+    for (const tool of actualNames) {
+      if (seqIdx < expectedSeq.length && tool === expectedSeq[seqIdx]) {
+        seqIdx++;
+      }
+    }
+    checks.push({
+      name: 'tool_sequence',
+      result: seqIdx === expectedSeq.length
+        ? { passed: true, reason: `Tool sequence matched: ${expectedSeq.join(' -> ')}.` }
+        : { passed: false, reason: `Tool sequence mismatch. Expected [${expectedSeq.join(', ')}], but only found [${actualNames.join(', ')}].` },
+    });
+  }
 
   if (testCase.verificationScript) {
     checks.push({ name: 'verification_script', result: await evaluateScriptVerification(workingDir, testCase.verificationScript) });
