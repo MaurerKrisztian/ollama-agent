@@ -1265,6 +1265,7 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
         const totalCount = isSingle
           ? (attemptsPerCase || 1)
           : (progress?.total || testCasesInfo.length || 1);
+        const attemptsCount = attemptsPerCase || 1;
         const remainingCount = Math.max(0, totalCount - completedCount);
 
         return (
@@ -1398,7 +1399,7 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
               </div>
 
               {/* Attempt Filter Tabs (Sticky Top) */}
-              {totalCount > 1 && (
+              {attemptsCount > 1 && (
                 <div style={{ display: 'flex', gap: '6px', paddingTop: '2px', overflowX: 'auto' }}>
                   <button
                     type="button"
@@ -1416,7 +1417,7 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
                   >
                     All Attempts
                   </button>
-                  {Array.from({ length: totalCount }, (_, idx) => {
+                  {Array.from({ length: attemptsCount }, (_, idx) => {
                     const attNum = idx + 1;
                     const attPassed = liveSteps.some((s) => s.attempt === attNum && s.type === 'attempt_complete' && s.text.includes('PASSED'));
                     const attFailed = liveSteps.some((s) => s.attempt === attNum && s.type === 'attempt_complete' && s.text.includes('FAILED'));
