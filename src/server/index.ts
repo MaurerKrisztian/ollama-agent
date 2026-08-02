@@ -62,6 +62,7 @@ function getInitialPersistedConfig(): {
   terminalMode: 'confirm' | 'auto';
   fileEditMode: 'confirm' | 'auto';
   enableThinking: boolean;
+  classifierModel?: string;
   complexityProfile: 'simple' | 'medium' | 'advanced';
   enabledTools: Record<string, boolean>;
 } {
@@ -69,6 +70,7 @@ function getInitialPersistedConfig(): {
   let ollamaHost = process.env.OLLAMA_HOST || 'http://127.0.0.1:11434';
   let ollamaToken = process.env.OLLAMA_TOKEN;
   let model = process.env.OLLAMA_MODEL || 'qwen3.5:9b';
+  let classifierModel: string | undefined = undefined;
   let allowedCommands = [...DEFAULT_COMMAND_WHITELIST];
   let terminalMode: 'confirm' | 'auto' = 'confirm';
   let fileEditMode: 'confirm' | 'auto' = 'confirm';
@@ -91,6 +93,9 @@ function getInitialPersistedConfig(): {
       }
       if (parsed.model && typeof parsed.model === 'string') {
         model = parsed.model;
+      }
+      if (parsed.classifierModel && typeof parsed.classifierModel === 'string') {
+        classifierModel = parsed.classifierModel;
       }
       if (Array.isArray(parsed.allowedCommands)) {
         allowedCommands = parsed.allowedCommands;
@@ -121,8 +126,9 @@ function getInitialPersistedConfig(): {
   if (process.env.OLLAMA_HOST) ollamaHost = process.env.OLLAMA_HOST;
   if (process.env.OLLAMA_TOKEN !== undefined) ollamaToken = process.env.OLLAMA_TOKEN;
   if (process.env.OLLAMA_MODEL) model = process.env.OLLAMA_MODEL;
+  if (process.env.OLLAMA_CLASSIFIER_MODEL) classifierModel = process.env.OLLAMA_CLASSIFIER_MODEL;
 
-  return { workingDir, ollamaHost, ollamaToken, model, allowedCommands, terminalMode, fileEditMode, enableThinking, complexityProfile, enabledTools };
+  return { workingDir, ollamaHost, ollamaToken, model, classifierModel, allowedCommands, terminalMode, fileEditMode, enableThinking, complexityProfile, enabledTools };
 }
 
 function savePersistedConfig(updatedConfig: Record<string, any>) {
@@ -144,6 +150,7 @@ const initialConfig = getInitialPersistedConfig();
 // Initialize shared Agent Engine
 const agent = new AgentEngine({
   model: initialConfig.model,
+  classifierModel: initialConfig.classifierModel,
   ollamaHost: initialConfig.ollamaHost,
   ollamaToken: initialConfig.ollamaToken,
   workingDir: initialConfig.workingDir,
@@ -545,7 +552,7 @@ app.get('/api/directories', async (req, res) => {
 
 // POST /api/config - Update configuration
 app.post('/api/config', (req, res) => {
-  const { model, systemPrompt, workingDir, showWorkingDirInfo, ollamaHost, ollamaToken, temperature, contextWindow, maxLoops } = req.body;
+  const { model, classifierModel, systemPrompt, workingDir, showWorkingDirInfo, ollamaHost, ollamaToken, temperature, contextWindow, maxLoops } = req.body;
 
   if (ollamaHost !== undefined) {
     try {
@@ -563,7 +570,7 @@ app.post('/api/config', (req, res) => {
     }
   }
 
-  const configUpdate = { model, systemPrompt, workingDir, showWorkingDirInfo, ollamaHost, ollamaToken, temperature, contextWindow, maxLoops };
+  const configUpdate = { model, classifierModel, systemPrompt, workingDir, showWorkingDirInfo, ollamaHost, ollamaToken, temperature, contextWindow, maxLoops };
   for (const engine of getConfigurableEngines()) engine.updateConfig(configUpdate);
 
   const currentConfig = agent.getConfig();
@@ -572,6 +579,7 @@ app.post('/api/config', (req, res) => {
     ollamaHost: currentConfig.ollamaHost,
     ollamaToken: agent.getOllamaToken(),
     model: currentConfig.model,
+    classifierModel: currentConfig.classifierModel,
   });
 
   io.emit('config:state', getConfigState());

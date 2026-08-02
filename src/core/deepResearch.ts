@@ -75,6 +75,12 @@ export interface DeepResearchRelevantLink {
   confirmation: DeepResearchLinkConfirmation;
   confirmation_score: number | null;
   confirmation_reason: string | null;
+  anchor_text?: string;
+  surrounding_text?: string | null;
+  text_before?: string | null;
+  text_after?: string | null;
+  heading?: string | null;
+  section?: string | null;
 }
 
 export interface DeepResearchDiscoveredLink extends Omit<DeepResearchRelevantLink, 'status'> {
@@ -1084,6 +1090,12 @@ export class DeepResearchRunner {
           confirmation: attempt?.confirmation || (relevant && existingTargetId ? 'confirmed_relevant' : 'not_checked'),
           confirmation_score: attempt?.confirmationDecision?.relevance_score ?? null,
           confirmation_reason: attempt?.confirmationDecision?.reason || null,
+          anchor_text: link.title,
+          surrounding_text: link.surroundingText ? link.surroundingText.slice(0, 600) : null,
+          text_before: link.textBefore || null,
+          text_after: link.textAfter || null,
+          heading: link.heading || null,
+          section: link.section || null,
         }];
       });
       const relevantLinks = discoveredLinks.filter((link) => link.classification === 'relevant');

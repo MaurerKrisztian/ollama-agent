@@ -10,6 +10,7 @@ interface ModelSettingsModalProps {
   systemMetrics: SystemMetrics | null;
   onClose: () => void;
   onSelectModel: (model: string) => void;
+  onChangeClassifierModel?: (classifierModel: string) => void;
   onChangeTemperature: (temperature: number) => void;
   onChangeContextWindow: (contextWindow: number) => void;
   onToggleThinking: (enabled: boolean) => void;
@@ -37,6 +38,7 @@ export const ModelSettingsModal: React.FC<ModelSettingsModalProps> = ({
   systemMetrics,
   onClose,
   onSelectModel,
+  onChangeClassifierModel,
   onChangeTemperature,
   onChangeContextWindow,
   onToggleThinking,
@@ -299,6 +301,23 @@ export const ModelSettingsModal: React.FC<ModelSettingsModalProps> = ({
               <option value={262144}>256k (Max)</option>
             </select>
             <p>Controls how much conversation and workspace context the model can receive.</p>
+          </section>
+
+          <section className="model-settings-section">
+            <label htmlFor="classifier-model">Fast Link Classifier Model (Deep Research)</label>
+            <select
+              id="classifier-model"
+              value={config.classifierModel || ''}
+              onChange={(event) => onChangeClassifierModel?.(event.target.value)}
+            >
+              <option value="">Same as main model ({config.model})</option>
+              {models.map((m) => (
+                <option key={m.name} value={m.name}>
+                  {m.name} (Installed)
+                </option>
+              ))}
+            </select>
+            <p>Optional smaller, faster model (e.g., qwen2.5:0.5b or llama3.2:1b) to classify and rank links concurrently during Deep Research.</p>
           </section>
 
           <section className="model-settings-section">

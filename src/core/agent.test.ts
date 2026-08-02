@@ -799,3 +799,11 @@ test('agent defaults to 25 maximum tool-call iterations', () => {
   const agent = new AgentEngine();
   assert.equal(agent.getConfig().maxLoops, 25);
 });
+
+test('agent uses configured classifierModel for deep research link classification when set', () => {
+  const agent = new AgentEngine({ model: 'main-model:latest', classifierModel: 'qwen2.5:0.5b' });
+  assert.equal(agent.getConfig().classifierModel, 'qwen2.5:0.5b');
+
+  agent.updateConfig({ classifierModel: 'llama3.2:1b' });
+  assert.equal(agent.getConfig().classifierModel, 'llama3.2:1b');
+});

@@ -123,6 +123,7 @@ export type ToolComplexityProfile = 'simple' | 'medium' | 'advanced';
 export interface AgentConfig {
   ollamaHost: string;
   model: string;
+  classifierModel?: string;
   temperature: number;
   systemPrompt: string;
   workingDir: string;

@@ -326,6 +326,7 @@ export class AgentEngine {
     this.config = {
       ollamaHost: config?.ollamaHost || 'http://127.0.0.1:11434',
       model: config?.model || 'qwen3.5:9b',
+      classifierModel: config?.classifierModel,
       temperature: config?.temperature !== undefined ? config.temperature : 0.2,
       systemPrompt:
         config?.systemPrompt ||
@@ -384,9 +385,10 @@ export class AgentEngine {
   }
 
   private async classifyDeepResearchLinks(request: DeepResearchSemanticRequest, signal?: AbortSignal): Promise<DeepResearchSemanticDecision[]> {
+    const modelToUse = this.config.classifierModel?.trim() || this.config.model;
     const result = await this.ollamaClient.chatStream({
       host: this.config.ollamaHost,
-      model: this.config.model,
+      model: modelToUse,
       temperature: 0,
       contextWindow: this.config.contextWindow,
       enableThinking: false,

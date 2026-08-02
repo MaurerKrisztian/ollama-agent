@@ -758,6 +758,242 @@ const DeepResearchProgress: React.FC<{ args: Record<string, any>; progress?: any
   );
 };
 
+const RankedLinkInspectorView: React.FC<{ links: any[] }> = ({ links }) => {
+  const [query, setQuery] = useState('');
+  const [sortBy, setSortBy] = useState<'score' | 'domain' | 'provenance'>('score');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'relevant' | 'uncertain' | 'not_relevant'>('all');
+  const [expandedContexts, setExpandedContexts] = useState<Set<string>>(new Set());
+
+  const toggleContext = (url: string) => {
+    setExpandedContexts((prev) => {
+      const next = new Set(prev);
+      if (next.has(url)) next.delete(url);
+      else next.add(url);
+      return next;
+    });
+  };
+
+  const filteredLinks = useMemo(() => {
+    let result = links.filter((link) => {
+      const q = query.trim().toLowerCase();
+      if (q) {
+        const text = `${link.title} ${link.url} ${link.parent_title} ${link.reason} ${link.anchor_text || ''} ${link.surrounding_text || ''}`.toLowerCase();
+        if (!text.includes(q)) return false;
+      }
+      if (statusFilter === 'relevant' && link.classification !== 'relevant' && link.relevance_score < 70) return false;
+      if (statusFilter === 'uncertain' && (link.classification !== 'uncertain' || link.relevance_score < 40 || link.relevance_score >= 70)) return false;
+      if (statusFilter === 'not_relevant' && link.classification !== 'not_relevant' && link.relevance_score >= 40) return false;
+      return true;
+    });
+
+    return result.sort((a, b) => {
+      if (sortBy === 'score') return b.relevance_score - a.relevance_score;
+      if (sortBy === 'domain') {
+        let domainA = a.url;
+        let domainB = b.url;
+        try { domainA = new URL(a.url).hostname; } catch (_) {}
+        try { domainB = new URL(b.url).hostname; } catch (_) {}
+        return domainA.localeCompare(domainB);
+      }
+      if (sortBy === 'provenance') return (a.parent_title || '').localeCompare(b.parent_title || '');
+      return 0;
+    });
+  }, [links, query, sortBy, statusFilter]);
+
+  return (
+    <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', background: '#060b16' }}>
+      <div style={{ padding: '10px 14px', borderBottom: '1px solid rgba(56, 189, 248, 0.16)', display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', background: 'rgba(15, 23, 42, 0.6)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flex: 1, minWidth: '200px', background: 'rgba(30, 41, 59, 0.6)', border: '1px solid rgba(147, 197, 253, 0.2)', borderRadius: '6px', padding: '4px 8px' }}>
+          <Search size={13} color="#94a3b8" />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search links, domains, page text, AI reasons..."
+            style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', color: '#f8fafc', fontSize: '0.72rem' }}
+          />
+          {query && <X size={12} color="#94a3b8" style={{ cursor: 'pointer' }} onClick={() => setQuery('')} />}
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '0.7rem' }}>
+          <span style={{ color: 'var(--text-muted)' }}>Sort by:</span>
+          <select
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value as any)}
+            style={{ background: 'rgba(30, 41, 59, 0.8)', border: '1px solid rgba(147, 197, 253, 0.25)', color: '#bae6fd', padding: '4px 7px', borderRadius: '5px', fontSize: '0.69rem', outline: 'none' }}
+          >
+            <option value="score">Relevance Score (High → Low)</option>
+            <option value="domain">Base Domain (A-Z)</option>
+            <option value="provenance">Parent Source (A-Z)</option>
+          </select>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+          {(['all', 'relevant', 'uncertain', 'not_relevant'] as const).map((filter) => {
+            const active = statusFilter === filter;
+            const label = filter === 'all' ? `All (${links.length})` : filter === 'relevant' ? 'Relevant (≥70)' : filter === 'uncertain' ? 'Uncertain (40-69)' : 'Not Relevant (<40)';
+            return (
+              <button
+                key={filter}
+                type="button"
+                onClick={() => setStatusFilter(filter)}
+                style={{
+                  padding: '3px 8px',
+                  borderRadius: '999px',
+                  border: `1px solid ${active ? '#38bdf8' : 'rgba(148, 163, 184, 0.2)'}`,
+                  background: active ? 'rgba(56, 189, 248, 0.16)' : 'transparent',
+                  color: active ? '#38bdf8' : 'var(--text-muted)',
+                  fontSize: '0.65rem',
+                  fontWeight: active ? 650 : 400,
+                  cursor: 'pointer',
+                }}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div style={{ flex: 1, minHeight: 0, padding: '14px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        {filteredLinks.length === 0 ? (
+          <div style={{ padding: '24px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.75rem', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
+            No discovered links matched your search or status filter.
+          </div>
+        ) : (
+          filteredLinks.map((item, index) => {
+            const isRel = item.relevance_score >= 70 || item.classification === 'relevant';
+            const isUnc = !isRel && (item.relevance_score >= 40 || item.classification === 'uncertain');
+            const scoreColor = isRel ? '#2dd4bf' : isUnc ? '#facc15' : '#fb7185';
+            const scoreBg = isRel ? 'rgba(45, 212, 191, 0.12)' : isUnc ? 'rgba(250, 204, 21, 0.12)' : 'rgba(251, 113, 133, 0.12)';
+            const scoreBorder = isRel ? 'rgba(45, 212, 191, 0.3)' : isUnc ? 'rgba(250, 204, 21, 0.3)' : 'rgba(251, 113, 133, 0.3)';
+
+            let confirmationLabel = 'Skipped (Low Relevance)';
+            let confirmationColor = 'var(--text-dim)';
+            if (item.confirmation === 'confirmed_relevant') {
+              confirmationLabel = 'Followed & Confirmed';
+              confirmationColor = '#2dd4bf';
+            } else if (item.status === 'checked') {
+              confirmationLabel = 'Followed Link';
+              confirmationColor = '#60a5fa';
+            } else if (item.status === 'failed') {
+              confirmationLabel = 'Fetch Failed';
+              confirmationColor = '#f87171';
+            } else if (item.confirmation === 'low_relevance') {
+              confirmationLabel = 'Checked: Low Relevance';
+              confirmationColor = '#fbbf24';
+            }
+
+            const hasContext = Boolean(item.surrounding_text || item.heading || item.section || item.anchor_text);
+            const isExpanded = expandedContexts.has(item.url);
+
+            return (
+              <div
+                key={`${item.url}-${index}`}
+                style={{
+                  padding: '10px 12px',
+                  borderRadius: '8px',
+                  border: '1px solid rgba(147, 197, 253, 0.14)',
+                  background: 'rgba(15, 23, 42, 0.6)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '6px',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap' }}>
+                  <a
+                    href={item.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{ display: 'flex', alignItems: 'center', gap: '7px', color: '#7dd3fc', fontWeight: 650, fontSize: '0.76rem', textDecoration: 'none', minWidth: 0, overflow: 'hidden' }}
+                    onMouseEnter={(e) => { e.currentTarget.style.textDecoration = 'underline'; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.textDecoration = 'none'; }}
+                  >
+                    <WebsiteFavicon url={item.url} size={15} />
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.title}</span>
+                  </a>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span style={{ padding: '2px 7px', borderRadius: '999px', background: scoreBg, border: `1px solid ${scoreBorder}`, color: scoreColor, fontSize: '0.64rem', fontWeight: 700 }}>
+                      Score {item.relevance_score}/100 · {item.classification}
+                    </span>
+                    <span style={{ padding: '2px 7px', borderRadius: '999px', background: 'rgba(30, 41, 59, 0.7)', border: '1px solid rgba(148, 163, 184, 0.2)', color: confirmationColor, fontSize: '0.62rem' }}>
+                      {confirmationLabel}
+                    </span>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '0.66rem', color: 'var(--text-muted)' }}>
+                  <span style={{ color: 'var(--text-dim)' }}>Discovered on:</span>
+                  <a
+                    href={item.parent_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{ color: '#93c5fd', textDecoration: 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '350px' }}
+                    onMouseEnter={(e) => { e.currentTarget.style.textDecoration = 'underline'; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.textDecoration = 'none'; }}
+                  >
+                    {item.parent_title}
+                  </a>
+                  <span style={{ marginLeft: 'auto', color: 'var(--text-dim)' }}>Depth {item.depth}</span>
+                </div>
+
+                {item.reason && (
+                  <div style={{ padding: '6px 9px', borderRadius: '5px', background: 'rgba(15, 23, 42, 0.4)', border: '1px solid rgba(56, 189, 248, 0.1)', color: '#cbd5e1', fontSize: '0.68rem', lineHeight: 1.4 }}>
+                    <strong style={{ color: '#38bdf8', fontSize: '0.64rem', display: 'block', marginBottom: '2px' }}>AI Decision Reason:</strong>
+                    {item.reason}
+                  </div>
+                )}
+
+                {hasContext && (
+                  <div>
+                    <button
+                      type="button"
+                      onClick={() => toggleContext(item.url)}
+                      style={{ background: 'transparent', border: 'none', color: '#93c5fd', fontSize: '0.66rem', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '4px', padding: 0, marginTop: '2px' }}
+                    >
+                      {isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                      {isExpanded ? 'Hide Page Context' : 'View Link Context (Surrounding Page Text)'}
+                    </button>
+
+                    {isExpanded && (
+                      <div style={{ marginTop: '5px', padding: '8px 10px', borderRadius: '6px', background: 'rgba(2, 6, 23, 0.7)', border: '1px solid rgba(147, 197, 253, 0.18)', fontSize: '0.67rem', color: '#cbd5e1', lineHeight: 1.45 }}>
+                        {item.anchor_text && (
+                          <div style={{ marginBottom: '4px' }}>
+                            <strong style={{ color: '#93c5fd' }}>Anchor Text:</strong> <span style={{ color: '#f8fafc' }}>"{item.anchor_text}"</span>
+                          </div>
+                        )}
+                        {(item.heading || item.section) && (
+                          <div style={{ marginBottom: '4px', color: '#94a3b8' }}>
+                            <strong style={{ color: '#93c5fd' }}>Section / Heading:</strong> {item.heading || item.section}
+                          </div>
+                        )}
+                        {item.surrounding_text && (
+                          <div>
+                            <strong style={{ color: '#93c5fd', display: 'block', marginBottom: '2px' }}>Surrounding Page Text:</strong>
+                            <p style={{ margin: 0, fontStyle: 'italic', color: '#94a3b8', background: 'rgba(15, 23, 42, 0.5)', padding: '6px 8px', borderRadius: '4px', border: '1px solid rgba(255, 255, 255, 0.05)', whiteSpace: 'pre-wrap' }}>
+                              "{item.surrounding_text}"
+                            </p>
+                          </div>
+                        )}
+                        {(item.text_before || item.text_after) && (
+                          <div style={{ marginTop: '4px', color: '#94a3b8', fontSize: '0.65rem' }}>
+                            {item.text_before && <div><strong style={{ color: '#93c5fd' }}>Text Before Link:</strong> "{item.text_before}"</div>}
+                            {item.text_after && <div style={{ marginTop: '2px' }}><strong style={{ color: '#93c5fd' }}>Text After Link:</strong> "{item.text_after}"</div>}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })
+        )}
+      </div>
+    </div>
+  );
+};
+
 const FinalAnswerContextPreview: React.FC<{
   modelContext: string;
   fullContext: string;
@@ -765,12 +1001,64 @@ const FinalAnswerContextPreview: React.FC<{
 }> = ({ modelContext, fullContext, sources }) => {
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [contextView, setContextView] = useState<'relevant' | 'model' | 'raw'>('model');
+  const [contextView, setContextView] = useState<'relevant' | 'ranked_links' | 'model' | 'raw'>('model');
   const notes = sources.map((source) => source.ai_note).filter(Boolean);
   const noteContext = JSON.stringify(notes);
   const noteTokens = Math.ceil(noteContext.length / 4);
   const modelTokens = Math.ceil(modelContext.length / 4);
   const fullTokens = Math.ceil(fullContext.length / 4);
+
+  const allDiscoveredLinks = useMemo(() => {
+    const list: Array<{
+      url: string;
+      title: string;
+      site_name?: string;
+      parent_title: string;
+      parent_url: string;
+      depth: number;
+      relevance_score: number;
+      classification: 'relevant' | 'uncertain' | 'not_relevant';
+      confidence?: number;
+      reason: string;
+      confirmation?: string;
+      confirmation_reason?: string;
+      status: string;
+      anchor_text?: string;
+      surrounding_text?: string | null;
+      heading?: string | null;
+      section?: string | null;
+    }> = [];
+
+    for (const source of sources) {
+      if (Array.isArray(source.discovered_links)) {
+        for (const link of source.discovered_links) {
+          list.push({
+            url: link.url,
+            title: link.title || link.site_name || link.url,
+            site_name: link.site_name,
+            parent_title: source.title || source.url,
+            parent_url: source.url,
+            depth: link.depth ?? 1,
+            relevance_score: link.relevance_score ?? 0,
+            classification: link.classification || (link.relevance_score >= 70 ? 'relevant' : link.relevance_score >= 40 ? 'uncertain' : 'not_relevant'),
+            confidence: link.confidence,
+            reason: link.reason || '',
+            confirmation: link.confirmation,
+            confirmation_reason: link.confirmation_reason,
+            status: link.status || 'not_checked',
+            anchor_text: link.anchor_text || link.title,
+            surrounding_text: link.surrounding_text || null,
+            text_before: link.text_before || null,
+            text_after: link.text_after || null,
+            heading: link.heading || null,
+            section: link.section || null,
+          });
+        }
+      }
+    }
+    return list;
+  }, [sources]);
+
   const relevantSources = sources.map((source) => {
     const relevantLinks = (Array.isArray(source.discovered_links) ? source.discovered_links : [])
       .filter((link: any) =>
@@ -779,6 +1067,7 @@ const FinalAnswerContextPreview: React.FC<{
       );
     return { source, relevantLinks };
   }).filter(({ source, relevantLinks }) => source.ai_note?.relevant || relevantLinks.length > 0);
+
   const relevantContext = JSON.stringify({
     relevant_sources: relevantSources.map(({ source, relevantLinks }) => ({
       source_id: source.id,
@@ -843,9 +1132,12 @@ const FinalAnswerContextPreview: React.FC<{
               </button>
               <button type="button" onClick={() => setOpen(false)} aria-label="Close context preview" style={{ display: 'grid', placeItems: 'center', width: '28px', height: '28px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer' }}><X size={15} /></button>
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 14px', borderBottom: '1px solid rgba(167, 139, 250, 0.16)', background: 'rgba(124, 58, 237, 0.07)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 14px', borderBottom: '1px solid rgba(167, 139, 250, 0.16)', background: 'rgba(124, 58, 237, 0.07)', flexWrap: 'wrap' }}>
               <button type="button" onClick={() => setContextView('relevant')} style={{ padding: '5px 9px', borderRadius: '6px', border: `1px solid ${contextView === 'relevant' ? 'rgba(167, 139, 250, 0.5)' : 'transparent'}`, background: contextView === 'relevant' ? 'rgba(124, 58, 237, 0.18)' : 'transparent', color: contextView === 'relevant' ? '#ddd6fe' : 'var(--text-muted)', cursor: 'pointer', fontSize: '0.69rem', fontWeight: 650 }}>
                 Relevant notes &amp; links
+              </button>
+              <button type="button" onClick={() => setContextView('ranked_links')} style={{ padding: '5px 9px', borderRadius: '6px', border: `1px solid ${contextView === 'ranked_links' ? 'rgba(56, 189, 248, 0.5)' : 'transparent'}`, background: contextView === 'ranked_links' ? 'rgba(14, 116, 144, 0.2)' : 'transparent', color: contextView === 'ranked_links' ? '#bae6fd' : 'var(--text-muted)', cursor: 'pointer', fontSize: '0.69rem', fontWeight: 650 }}>
+                Ranked Links &amp; AI Decisions ({allDiscoveredLinks.length})
               </button>
               <button type="button" onClick={() => setContextView('model')} style={{ padding: '5px 9px', borderRadius: '6px', border: `1px solid ${contextView === 'model' ? 'rgba(45, 212, 191, 0.5)' : 'transparent'}`, background: contextView === 'model' ? 'rgba(20, 184, 166, 0.16)' : 'transparent', color: contextView === 'model' ? '#99f6e4' : 'var(--text-muted)', cursor: 'pointer', fontSize: '0.69rem', fontWeight: 650 }}>
                 Exact model payload
@@ -854,10 +1146,12 @@ const FinalAnswerContextPreview: React.FC<{
                 Full tool result
               </button>
               <span style={{ marginLeft: 'auto', color: 'var(--text-dim)', fontSize: '0.65rem' }}>
-                {contextView === 'relevant' ? `${relevantSources.length} relevant sources` : `${activeContext.length.toLocaleString()} characters · ~${Math.ceil(activeContext.length / 4).toLocaleString()} tokens`}
+                {contextView === 'relevant' ? `${relevantSources.length} relevant sources` : contextView === 'ranked_links' ? `${allDiscoveredLinks.length} discovered links` : `${activeContext.length.toLocaleString()} characters · ~${Math.ceil(activeContext.length / 4).toLocaleString()} tokens`}
               </span>
             </div>
-            {contextView === 'relevant' ? (
+            {contextView === 'ranked_links' ? (
+              <RankedLinkInspectorView links={allDiscoveredLinks} />
+            ) : contextView === 'relevant' ? (
               <div style={{ flex: 1, minHeight: 0, padding: '14px', overflow: 'auto', background: '#060b16', display: 'flex', flexDirection: 'column', gap: '10px' }}>
                 <div style={{ color: '#cbd5e1', fontSize: '0.7rem', lineHeight: 1.45 }}>
                   This filtered view shows relevant AI notes and relevant links for readability. Use “Exact raw context” to see the complete serialized payload actually placed in the model conversation.

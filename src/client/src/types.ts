@@ -10,6 +10,7 @@ export interface ContextPruningConfig {
 export interface AgentConfig {
   ollamaHost: string;
   model: string;
+  classifierModel?: string;
   temperature: number;
   systemPrompt: string;
   workingDir: string;

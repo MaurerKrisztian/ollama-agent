@@ -346,6 +346,15 @@ export const App: React.FC = () => {
     });
   };
 
+  const handleChangeClassifierModel = async (classifierModel: string) => {
+    setConfig((prev) => ({ ...prev, classifierModel }));
+    await fetch('/api/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ classifierModel }),
+    });
+  };
+
   const handleChangeWorkingDir = async (newDir: string): Promise<boolean> => {
     try {
       const res = await fetch('/api/config', {
@@ -842,6 +851,7 @@ export const App: React.FC = () => {
         systemMetrics={systemMetrics}
         onClose={() => setModelSettingsModalOpen(false)}
         onSelectModel={handleSelectModel}
+        onChangeClassifierModel={handleChangeClassifierModel}
         onChangeTemperature={handleChangeTemperature}
         onChangeContextWindow={handleChangeContextWindow}
         onToggleThinking={handleToggleThinking}
