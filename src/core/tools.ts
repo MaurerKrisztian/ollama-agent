@@ -368,13 +368,19 @@ export const BUILTIN_TOOLS: ToolDefinition[] = [
   },
   {
     name: 'web_search',
-    description: 'Search the public web. Returns a short list of result titles, URLs, and snippets. Use read_web_page on a result URL to inspect its contents.',
+    description: 'Search the public web. Returns a short list of result titles, URLs, and snippets. IMPORTANT: Search snippets are brief previews only. You MUST inspect relevant result URLs using read_web_page to get full page content before running additional searches. Do NOT call web_search repeatedly without reading pages.',
     parameters: {
       type: 'object',
       properties: {
         query: {
           type: 'string',
           description: 'Short web search query.',
+        },
+        num_results: {
+          type: 'number',
+          description: 'Number of results to return (5–25, default 5).',
+          minimum: 5,
+          maximum: 25,
         },
       },
       required: ['query'],
@@ -1457,8 +1463,14 @@ export class ToolExecutor {
       case 'web_search': {
         if (!args.query) return { error: 'Parameter query is required.' };
         try {
-          const results = await this.webClient.search(args.query, undefined, signal);
-          return { query: args.query, result_count: results.length, results };
+          const numResults = typeof args.num_results === 'number' ? args.num_results : undefined;
+          const results = await this.webClient.search(args.query, numResults, signal);
+          return {
+            query: args.query,
+            result_count: results.length,
+            results,
+            instruction: 'Search snippets above are brief previews. Next, you MUST call read_web_page using one of the returned URLs above to read full page content before running another search or answering.',
+          };
         } catch (err: any) {
           return { error: `Web search failed: ${err.message}` };
         }

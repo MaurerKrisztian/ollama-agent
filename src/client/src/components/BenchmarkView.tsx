@@ -198,6 +198,7 @@ interface BenchmarkViewProps {
   models: OllamaModelInfo[];
   currentConfig: AgentConfig;
   toolSettings: ToolSettings;
+  onRegisterContextWindowSetter?: (setter: (ctx: number) => void) => void;
 }
 
 interface BenchmarkFormConfig {
@@ -298,6 +299,7 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
   models,
   currentConfig,
   toolSettings,
+  onRegisterContextWindowSetter,
 }) => {
   const [benchmarkConfig, setBenchmarkConfig] = useState<BenchmarkFormConfig>(() => getBenchmarkDefaults(currentConfig, toolSettings));
   const [configDirty, setConfigDirty] = useState(false);
@@ -407,6 +409,15 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
     setConfigDirty(true);
     setBenchmarkConfig((previous) => ({ ...previous, [key]: value }));
   };
+
+  // Register an external setter so the parent (App) can drive contextWindow from the header dropdown.
+  useEffect(() => {
+    onRegisterContextWindowSetter?.((ctx: number) => {
+      setConfigDirty(true);
+      setBenchmarkConfig((previous) => ({ ...previous, contextWindow: ctx }));
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onRegisterContextWindowSetter]);
 
   const resetBenchmarkConfig = () => {
     setBenchmarkConfig(getBenchmarkDefaults(currentConfig, toolSettings));

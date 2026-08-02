@@ -330,7 +330,7 @@ export class AgentEngine {
       temperature: config?.temperature !== undefined ? config.temperature : 0.2,
       systemPrompt:
         config?.systemPrompt ||
-        'You are an intelligent AI assistant with tools for workspace files, terminal commands, web search, and reading public web pages. Use web tools for current online information and workspace tools only for local files. For stable general knowledge or math, answer directly without tools.',
+        'You are an intelligent AI assistant with tools for workspace files, terminal commands, web search, and reading public web pages. Use web tools for current online information and workspace tools only for local files. When using web search, do not repeatedly call web_search with query variations; after getting search results, inspect relevant result URLs with read_web_page to read page content before searching again. For stable general knowledge or math, answer directly without tools.',
       workingDir: config?.workingDir || process.cwd(),
       showWorkingDirInfo: config?.showWorkingDirInfo ?? true,
       contextWindow: config?.contextWindow !== undefined ? config.contextWindow : 16384,
@@ -442,6 +442,52 @@ export class AgentEngine {
       ],
     });
     return parseDeepResearchNotes(result.content || '', request.sources.map((source) => source.id));
+  }
+
+  private selectMostRelevantSearchResults(
+    userMessage: string,
+    results: Array<{ title?: string; url?: string; snippet?: string }>,
+    maxLimit: number = 2,
+    minScoreThreshold: number = 3
+  ): Array<{ title?: string; url?: string; snippet?: string }> {
+    if (!Array.isArray(results) || results.length === 0) return [];
+    const valid = results.filter((r) => r && typeof r.url === 'string' && r.url.trim());
+    if (valid.length === 0) return [];
+
+    const stopWords = new Set([
+      'the', 'a', 'an', 'is', 'are', 'was', 'were', 'and', 'or', 'in', 'on', 'at', 'to',
+      'for', 'of', 'with', 'by', 'from', 'what', 'who', 'where', 'when', 'how', 'why',
+      'can', 'you', 'give', 'me', 'tell', 'search', 'find', 'web', 'page', 'please',
+    ]);
+    const words = userMessage
+      .toLowerCase()
+      .replace(/[^a-z0-9\s.-]/g, ' ')
+      .split(/\s+/)
+      .filter((w) => w.length > 1 && !stopWords.has(w));
+
+    if (words.length === 0) return [valid[0]];
+
+    const scored = valid.map((res) => {
+      const title = (res.title || '').toLowerCase();
+      const snippet = (res.snippet || '').toLowerCase();
+      const url = (res.url || '').toLowerCase();
+
+      let score = 0;
+      for (const w of words) {
+        if (title.includes(w)) score += 3;
+        if (snippet.includes(w)) score += 2;
+        if (url.includes(w)) score += 4;
+      }
+      return { res, score };
+    });
+
+    const qualified = scored
+      .filter((item) => item.score >= minScoreThreshold)
+      .sort((a, b) => b.score - a.score)
+      .map((item) => item.res);
+
+    if (qualified.length === 0) return [];
+    return qualified.slice(0, maxLimit);
   }
 
   public updateConfig(newConfig: AgentConfigUpdate): void {
@@ -661,6 +707,7 @@ ${conversationText}`;
     let lastMutationAction = -1;
     let lastReadAction = -1;
     const failedToolCalls = new Set<string>();
+    const executedCallFingerprintsThisTurn = new Set<string>();
     const filesReadThisTurn = new Set<string>();
     for (const msg of this.contextManager.getMessages()) {
       if (msg.role === 'assistant' && msg.tool_calls) {
@@ -846,11 +893,11 @@ ${conversationText}`;
                   'Deep research has already completed for this turn. Use its supplied sources, image URLs, and source-page links to answer now; do not start another web-search loop.',
                 repeated_web_research: true,
               }
-              : failedToolCalls.has(callFingerprint)
+              : executedCallFingerprintsThisTurn.has(callFingerprint) || failedToolCalls.has(callFingerprint)
             ? {
                 error:
-                  `Refusing to repeat an identical failed ${call.name} call. ` +
-                  'Use the latest tool result to change strategy. For file edits, reread the file, use a smaller exact target, or use replace_file.',
+                  `Refusing to repeat an identical ${call.name} call with the exact same arguments in the same turn. ` +
+                  'The result for this call is already in conversation history. Change arguments or select a different tool.',
                 repeated_call: true,
               }
             : await this.toolExecutor.executeTool(
@@ -859,6 +906,36 @@ ${conversationText}`;
                 (progress) => callbacks?.onToolProgress?.(call.name, progress),
                 callbacks?.signal,
               );
+
+          executedCallFingerprintsThisTurn.add(callFingerprint);
+
+          if (call.name === 'web_search' && toolResult && Array.isArray(toolResult.results) && toolResult.results.length > 0) {
+            const isNavigationalUrlRequest =
+              /\b(?:official|website|home\s?page)\b.*\b(?:url|link|domain|address)\b/i.test(userMessage) ||
+              /\b(?:give|show|return|what\s+is)\b.*\b(?:url|link|domain|address)\b/i.test(userMessage);
+            if (!isNavigationalUrlRequest) {
+              const selectedCandidates = this.selectMostRelevantSearchResults(userMessage, toolResult.results, 2, 3);
+              if (selectedCandidates.length > 0) {
+                const readPages: any[] = [];
+                for (const candidate of selectedCandidates) {
+                  if (!candidate.url) continue;
+                  try {
+                    callbacks?.onToolStart?.('read_web_page', { url: candidate.url });
+                    const pageResult = await this.toolExecutor.executeTool('read_web_page', { url: candidate.url }, undefined, callbacks?.signal);
+                    callbacks?.onToolEnd?.('read_web_page', pageResult);
+                    if (pageResult && !pageResult.error) {
+                      readPages.push(pageResult);
+                      executedToolCounts.set('read_web_page', (executedToolCounts.get('read_web_page') || 0) + 1);
+                    }
+                  } catch (_) {}
+                }
+                if (readPages.length > 0) {
+                  toolResult.most_relevant_pages = readPages;
+                  toolResult.most_relevant_page = readPages[0];
+                }
+              }
+            }
+          }
           if (call.name === 'deep_research' && toolResult && typeof toolResult === 'object') {
             deepResearchCompleted = true;
             deepResearchInsufficient = toolResult.status === 'insufficient_evidence';

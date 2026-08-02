@@ -200,116 +200,251 @@ const getToolResultSummary = (
 const WebSearchResultsView: React.FC<{
   query: string;
   results: Array<{ title: string; url: string; snippet: string }>;
-}> = ({ query, results }) => (
-  <div style={{ marginTop: '10px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-    {/* Query Header */}
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        padding: '6px 10px',
-        background: 'rgba(15, 23, 42, 0.6)',
-        borderRadius: '6px',
-        border: '1px solid rgba(20, 184, 166, 0.2)',
-        fontSize: '0.775rem',
-      }}
-    >
-      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', overflow: 'hidden' }}>
-        <Search size={13} color="var(--accent-teal)" />
-        <span style={{ color: 'var(--text-muted)' }}>Query:</span>
-        <span style={{ fontWeight: 600, color: 'var(--text-main)', fontFamily: 'var(--font-code)', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
-          "{query}"
-        </span>
-      </div>
-      <span
+  mostRelevantPages?: Array<{ title?: string; url?: string; markdown?: string; character_count?: number }>;
+}> = ({ query, results, mostRelevantPages = [] }) => {
+  const [expandedPageIndex, setExpandedPageIndex] = useState<number | null>(null);
+
+  return (
+    <div style={{ marginTop: '10px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+      {/* Query Header */}
+      <div
         style={{
-          fontSize: '0.7rem',
-          padding: '2px 8px',
-          borderRadius: '10px',
-          background: 'rgba(20, 184, 166, 0.15)',
-          color: 'var(--accent-teal)',
-          fontWeight: 600,
-          flexShrink: 0,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '6px 10px',
+          background: 'rgba(15, 23, 42, 0.6)',
+          borderRadius: '6px',
+          border: '1px solid rgba(20, 184, 166, 0.2)',
+          fontSize: '0.775rem',
         }}
       >
-        {results.length} result{results.length === 1 ? '' : 's'}
-      </span>
-    </div>
-
-    {/* Results Cards List */}
-    {results.length === 0 ? (
-      <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontStyle: 'italic', padding: '8px' }}>
-        No search results found.
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', overflow: 'hidden' }}>
+          <Search size={13} color="var(--accent-teal)" />
+          <span style={{ color: 'var(--text-muted)' }}>Query:</span>
+          <span style={{ fontWeight: 600, color: 'var(--text-main)', fontFamily: 'var(--font-code)', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
+            "{query}"
+          </span>
+        </div>
+        <span
+          style={{
+            fontSize: '0.7rem',
+            padding: '2px 8px',
+            borderRadius: '10px',
+            background: 'rgba(20, 184, 166, 0.15)',
+            color: 'var(--accent-teal)',
+            fontWeight: 600,
+            flexShrink: 0,
+          }}
+        >
+          {results.length} result{results.length === 1 ? '' : 's'}
+        </span>
       </div>
-    ) : (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-        {results.map((r, idx) => {
-          let domain = '';
-          try {
-            domain = new URL(r.url).hostname.replace(/^www\./, '');
-          } catch (_) {}
 
-          return (
-            <div
-              key={idx}
-              style={{
-                padding: '10px 12px',
-                borderRadius: '8px',
-                background: 'rgba(15, 23, 42, 0.5)',
-                border: '1px solid var(--border-color)',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '4px',
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
-                <a
-                  href={r.url}
-                  target="_blank"
-                  rel="noreferrer"
+      {/* Side Drift Auto-Fetch UI Badge & Content Drawer */}
+      {mostRelevantPages.length > 0 ? (
+        <div
+          style={{
+            padding: '10px 14px',
+            borderRadius: '8px',
+            border: '1px solid rgba(56, 189, 248, 0.35)',
+            background: 'linear-gradient(135deg, rgba(14, 116, 144, 0.18), rgba(99, 102, 241, 0.12))',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '8px',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+            <Sparkles size={14} color="#7dd3fc" />
+            <span style={{ fontWeight: 700, color: '#7dd3fc', fontSize: '0.8rem' }}>
+              ⚡ Side Drift Auto-Fetched {mostRelevantPages.length} Relevant Page{mostRelevantPages.length === 1 ? '' : 's'}
+            </span>
+            <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+              (Full markdown page attached to model context)
+            </span>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            {mostRelevantPages.map((page, idx) => {
+              const isExpanded = expandedPageIndex === idx;
+              return (
+                <div
+                  key={idx}
                   style={{
-                    fontSize: '0.875rem',
-                    fontWeight: 600,
-                    color: '#38bdf8',
-                    textDecoration: 'none',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                    lineHeight: 1.3,
+                    borderRadius: '6px',
+                    background: 'rgba(15, 23, 42, 0.6)',
+                    border: '1px solid rgba(56, 189, 248, 0.25)',
+                    overflow: 'hidden',
                   }}
                 >
-                  <Globe size={13} style={{ flexShrink: 0, color: 'var(--accent-teal)' }} />
-                  <span>{r.title}</span>
-                  <ExternalLink size={11} style={{ flexShrink: 0, opacity: 0.7 }} />
-                </a>
-                {domain && (
-                  <span
+                  <div
                     style={{
-                      fontSize: '0.7rem',
-                      fontFamily: 'var(--font-code)',
-                      color: 'var(--text-dim)',
-                      background: 'rgba(30, 41, 59, 0.6)',
-                      padding: '2px 6px',
-                      borderRadius: '4px',
-                      border: '1px solid var(--border-color)',
-                      flexShrink: 0,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '6px 10px',
+                      gap: '8px',
                     }}
                   >
-                    {domain}
-                  </span>
-                )}
+                    <a
+                      href={page.url || '#'}
+                      target="_blank"
+                      rel="noreferrer"
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '5px',
+                        color: '#38bdf8',
+                        fontSize: '0.75rem',
+                        textDecoration: 'none',
+                        fontWeight: 600,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      <Globe size={12} color="#38bdf8" />
+                      <span>{page.title || page.url || `Page ${idx + 1}`}</span>
+                      <ExternalLink size={10} style={{ opacity: 0.8 }} />
+                    </a>
+
+                    {page.markdown && (
+                      <button
+                        type="button"
+                        onClick={() => setExpandedPageIndex(isExpanded ? null : idx)}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '4px',
+                          padding: '2px 7px',
+                          borderRadius: '4px',
+                          border: '1px solid rgba(56, 189, 248, 0.3)',
+                          background: isExpanded ? 'rgba(56, 189, 248, 0.2)' : 'rgba(15, 23, 42, 0.4)',
+                          color: '#7dd3fc',
+                          fontSize: '0.68rem',
+                          cursor: 'pointer',
+                          fontWeight: 600,
+                        }}
+                      >
+                        <Eye size={10} />
+                        <span>{isExpanded ? 'Hide Page' : 'Preview Page'}</span>
+                        <ChevronDown size={10} style={{ transform: isExpanded ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s ease' }} />
+                      </button>
+                    )}
+                  </div>
+
+                  {isExpanded && page.markdown && (
+                    <div
+                      style={{
+                        padding: '10px 12px',
+                        borderTop: '1px solid rgba(56, 189, 248, 0.2)',
+                        maxHeight: '260px',
+                        overflowY: 'auto',
+                        background: 'rgba(2, 6, 23, 0.7)',
+                        fontSize: '0.75rem',
+                      }}
+                    >
+                      <MarkdownContent content={page.markdown} />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ) : (
+        <div
+          style={{
+            padding: '6px 12px',
+            borderRadius: '6px',
+            border: '1px solid rgba(148, 163, 184, 0.2)',
+            background: 'rgba(15, 23, 42, 0.3)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            color: 'var(--text-dim)',
+            fontSize: '0.73rem',
+          }}
+        >
+          <Sparkles size={12} color="var(--text-dim)" />
+          <span>Side Drift: 0 search results met relevance threshold for auto-page reading.</span>
+        </div>
+      )}
+
+      {/* Results Cards List */}
+      {results.length === 0 ? (
+        <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontStyle: 'italic', padding: '8px' }}>
+          No search results found.
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          {results.map((r, idx) => {
+            let domain = '';
+            try {
+              domain = new URL(r.url).hostname.replace(/^www\./, '');
+            } catch (_) {}
+
+            return (
+              <div
+                key={idx}
+                style={{
+                  padding: '10px 12px',
+                  borderRadius: '8px',
+                  background: 'rgba(15, 23, 42, 0.5)',
+                  border: '1px solid var(--border-color)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '4px',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+                  <a
+                    href={r.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{
+                      fontSize: '0.875rem',
+                      fontWeight: 600,
+                      color: '#38bdf8',
+                      textDecoration: 'none',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      lineHeight: 1.3,
+                    }}
+                  >
+                    <Globe size={13} style={{ flexShrink: 0, color: 'var(--accent-teal)' }} />
+                    <span>{r.title}</span>
+                    <ExternalLink size={11} style={{ flexShrink: 0, opacity: 0.7 }} />
+                  </a>
+                  {domain && (
+                    <span
+                      style={{
+                        fontSize: '0.7rem',
+                        fontFamily: 'var(--font-code)',
+                        color: 'var(--text-dim)',
+                        background: 'rgba(30, 41, 59, 0.6)',
+                        padding: '2px 6px',
+                        borderRadius: '4px',
+                        border: '1px solid var(--border-color)',
+                        flexShrink: 0,
+                      }}
+                    >
+                      {domain}
+                    </span>
+                  )}
+                </div>
+                <p style={{ margin: 0, fontSize: '0.8rem', color: '#cbd5e1', lineHeight: 1.45 }}>
+                  {r.snippet}
+                </p>
               </div>
-              <p style={{ margin: 0, fontSize: '0.8rem', color: '#cbd5e1', lineHeight: 1.45 }}>
-                {r.snippet}
-              </p>
-            </div>
-          );
-        })}
-      </div>
-    )}
-  </div>
-);
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+};
 
 const WebPageReaderView: React.FC<{
   title?: string;
@@ -1844,6 +1979,14 @@ const ToolResultCard: React.FC<{
   const fullTokenEstimate = Math.ceil(fullResultContent.length / 4);
   const hasFormattedView = isWebSearch || isWebPageRead || isDeepResearch || fileDiff;
 
+  const sideDriftPages: any[] = isWebSearch
+    ? Array.isArray(parsedContent?.most_relevant_pages)
+      ? parsedContent.most_relevant_pages
+      : parsedContent?.most_relevant_page
+        ? [parsedContent.most_relevant_page]
+        : []
+    : [];
+
   const mainColor = isPruned ? '#c084fc' : isFailed ? '#f43f5e' : 'var(--accent-teal)';
   const bgColor = isPruned ? 'rgba(168, 85, 247, 0.08)' : isFailed ? 'rgba(244, 63, 94, 0.08)' : 'rgba(20, 184, 166, 0.08)';
   const borderColor = isPruned ? 'rgba(168, 85, 247, 0.3)' : isFailed ? 'rgba(244, 63, 94, 0.25)' : 'rgba(20, 184, 166, 0.25)';
@@ -1898,6 +2041,30 @@ const ToolResultCard: React.FC<{
           ) : summary && (
             <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: isPruned ? '#d8b4fe' : isFailed ? '#f87171' : 'var(--text-muted)', fontFamily: 'var(--font-code)', fontSize: '0.75rem' }}>
               {summary}
+            </span>
+          )}
+          {isWebSearch && sideDriftPages.length > 0 && (
+            <span style={{
+              display: 'inline-flex', alignItems: 'center', gap: '4px',
+              flexShrink: 0, padding: '2px 7px', borderRadius: '999px',
+              border: '1px solid rgba(56, 189, 248, 0.45)',
+              background: 'rgba(14, 116, 144, 0.2)',
+              color: '#7dd3fc', fontFamily: 'var(--font-code)', fontSize: '0.66rem', fontWeight: 700,
+            }}>
+              <Sparkles size={10} />
+              Side Drift ⚡ {sideDriftPages.length} page{sideDriftPages.length === 1 ? '' : 's'} read
+            </span>
+          )}
+          {isWebSearch && sideDriftPages.length === 0 && (
+            <span style={{
+              display: 'inline-flex', alignItems: 'center', gap: '4px',
+              flexShrink: 0, padding: '2px 7px', borderRadius: '999px',
+              border: '1px solid rgba(148, 163, 184, 0.2)',
+              background: 'rgba(15, 23, 42, 0.3)',
+              color: 'var(--text-dim)', fontSize: '0.66rem',
+            }}>
+              <Sparkles size={10} />
+              Side Drift: no match
             </span>
           )}
           {isDeepResearch && (
@@ -1991,6 +2158,7 @@ const ToolResultCard: React.FC<{
                       <WebSearchResultsView
                         query={parsedContent?.query || args?.query || ''}
                         results={parsedContent?.results || []}
+                        mostRelevantPages={sideDriftPages}
                       />
                     )}
                     {isWebPageRead && (

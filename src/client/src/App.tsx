@@ -17,6 +17,8 @@ import { AgentConfig, ChatMessage, ChatSessionSummary, ContextInfo, OllamaModelI
 
 export const App: React.FC = () => {
   const [activeView, setActiveView] = useState<'chat' | 'benchmark'>('chat');
+  const benchmarkContextWindowSetter = useRef<((ctx: number) => void) | null>(null);
+  const [benchmarkContextWindow, setBenchmarkContextWindow] = useState<number>(16384);
 
   const [config, setConfig] = useState<AgentConfig>({
     ollamaHost: 'http://127.0.0.1:11434',
@@ -234,6 +236,7 @@ export const App: React.FC = () => {
 
         if (activeConfig) {
           setConfig(activeConfig);
+          if (activeConfig.contextWindow) setBenchmarkContextWindow(activeConfig.contextWindow);
           if (activeConfig.workingDir) {
             localStorage.setItem('local-model-chat.workingDir', activeConfig.workingDir);
           }
@@ -347,6 +350,11 @@ export const App: React.FC = () => {
   };
 
   const handleChangeContextWindow = async (newCtx: number) => {
+    if (activeView === 'benchmark') {
+      benchmarkContextWindowSetter.current?.(newCtx);
+      setBenchmarkContextWindow(newCtx);
+      return;
+    }
     setConfig((prev) => ({ ...prev, contextWindow: newCtx }));
     await fetch('/api/config', {
       method: 'POST',
@@ -757,7 +765,7 @@ export const App: React.FC = () => {
   return (
     <div className="app-shell" style={{ display: 'flex', flexDirection: 'column', height: '100vh', width: '100vw', overflow: 'hidden' }}>
       <Header
-        config={config}
+        config={activeView === 'benchmark' ? { ...config, contextWindow: benchmarkContextWindow } : config}
         contextInfo={contextInfo}
         models={models}
         runningModels={runningModels}
@@ -845,6 +853,7 @@ export const App: React.FC = () => {
             models={models}
             currentConfig={config}
             toolSettings={toolSettings}
+            onRegisterContextWindowSetter={(setter) => { benchmarkContextWindowSetter.current = setter; }}
           />
         )}
 

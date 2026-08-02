@@ -58,7 +58,7 @@ export const TOOL_DESCRIPTIONS: Record<string, { description: string; parameters
   },
   web_search: {
     description: 'Search the public web. Returns result titles, URLs, and snippets.',
-    parameters: { query: 'string' },
+    parameters: { query: 'string', num_results: 'number (optional, 5–25, default 5)' },
   },
   read_web_page: {
     description: 'Read one public HTTP/HTTPS page and return main content as Markdown.',

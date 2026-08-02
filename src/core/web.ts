@@ -391,7 +391,7 @@ export class WebClient {
     signal?.throwIfAborted();
     const normalizedQuery = cleanText(query);
     if (!normalizedQuery) throw new Error('Parameter query is required.');
-    const limit = Math.min(Math.max(Math.trunc(maxResults) || 5, 1), 8);
+    const limit = Math.min(Math.max(Math.trunc(maxResults) || 5, 5), 25);
     const errors: string[] = [];
     const duckDuckGoUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(normalizedQuery)}`;
     try {
