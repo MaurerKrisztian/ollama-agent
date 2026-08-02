@@ -105,6 +105,71 @@ export async function setupMockEnvironment(workspaceDir?: string): Promise<strin
       content: 'Deployment state: pending-review.\nOwner: platform-team.\nRegion: eu-central.\n',
     },
     {
+      filePath: 'src/utils/math.ts',
+      content:
+        'export function calculateTax(amount: number): number {\n' +
+        '  // Line 2: Legacy tax calculation start\n' +
+        '  let taxRate = 0.05;\n' +
+        '  if (amount > 1000) {\n' +
+        '    taxRate = 0.15;\n' +
+        '  } else if (amount > 500) {\n' +
+        '    taxRate = 0.10;\n' +
+        '  }\n' +
+        '  return amount * taxRate;\n' +
+        '}\n\n' +
+        'export function formatCurrency(val: number): string {\n' +
+        '  return "$" + val.toFixed(2);\n' +
+        '}\n',
+    },
+    {
+      filePath: 'src/pricing.ts',
+      content:
+        'export function calculateDiscount(price: number, discountPercent: number): number {\n' +
+        '  return price - (price * (discountPercent / 100));\n' +
+        '}\n',
+    },
+    {
+      filePath: 'config/database.yml',
+      content:
+        'development:\n' +
+        '  adapter: postgresql\n' +
+        '  encoding: unicode\n' +
+        '  pool: 5\n' +
+        '  legacy_ssl: true\n' +
+        '  timeout: 5000\n',
+    },
+    {
+      filePath: 'src/app.ts',
+      content:
+        'export function main() {\n' +
+        '  console.log("Starting App Studio v2");\n' +
+        '}\n',
+    },
+    {
+      filePath: 'src/pipeline.ts',
+      content:
+        'export const BATCH_SIZE = 10;\n\n' +
+        'export function processBatch(items: any[]) {\n' +
+        '  console.log("Processing batch of size:", items.length);\n' +
+        '}\n',
+    },
+    {
+      filePath: 'src/api.ts',
+      content:
+        'import { legacyLog } from "./utils/logger";\n\n' +
+        'export function handleRequest(req: any) {\n' +
+        '  legacyLog("API Request received");\n' +
+        '}\n',
+    },
+    {
+      filePath: 'src/services/db.ts',
+      content:
+        'import { legacyLog } from "../utils/logger";\n\n' +
+        'export function connectDb() {\n' +
+        '  legacyLog("Connecting to DB");\n' +
+        '}\n',
+    },
+    {
       filePath: '.agent/AGENTS.md',
       content:
         '# Fixture project instructions\n\nFor this project, the required verification command is `npm run fixture-check`.\n',

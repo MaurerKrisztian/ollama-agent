@@ -16,11 +16,29 @@ export type BenchmarkCategory =
   | 'real_web_search'
   | 'ast_lsp_navigation';
 
+export interface MultiStepPrompt {
+  stepId?: string;
+  prompt: string;
+  description?: string;
+  objective?: string;
+  expectedFileState?: FileStateSpec[];
+  expectedFileJson?: {
+    relativePath: string;
+    values: Record<string, string | number | boolean | null>;
+  };
+  expectedDirectoryEntries?: DirectoryEntriesSpec[];
+  expectedResponseSubstrings?: string[];
+  expectedToolResults?: ToolResultSpec[];
+  verificationScript?: string;
+}
+
 export interface BenchmarkTestCaseDefinition {
   id: string;
   name: string;
   category: BenchmarkCategory;
   prompt: string;
+  difficulty?: 'easy' | 'medium' | 'hard';
+  multiStepPrompts?: MultiStepPrompt[];
   expectedTool?: string | null;
   expectedToolSequence?: string[];
   expectedArgSubstrings?: Record<string, string>;

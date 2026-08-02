@@ -9,6 +9,7 @@ import { AgentEngine } from '../../core/agent.js';
 import type { ChatMessage } from '../../core/types.js';
 import { BENCHMARK_TEST_CASES } from '../cases/index.js';
 import { createBenchmarkSuiteHash } from '../cases/benchmarks.js';
+import { describeStepOutcome } from '../cases/describeOutcome.js';
 import type { BenchmarkTestCase } from '../cases/index.js';
 import { evaluateBenchmarkTask } from '../evaluation/evaluators.js';
 import { setupMockEnvironment } from '../fixtures/mockEnvironment.js';
@@ -275,9 +276,21 @@ export async function runBenchmarkAttemptInContainer(
   let responseContent = '';
   let lastAssistantContent = '';
   let testError: string | null = null;
+  let stepFailureReason: string | null = null;
+  const multiStepDetails: Array<{
+    stepIndex: number;
+    stepId?: string;
+    prompt: string;
+    passed: boolean;
+    reason: string;
+    checks?: Array<{ name: string; passed: boolean; reason: string }>;
+  }> = [];
   const record = (event: Omit<TestResultTrace['executionTrace'][number], 'sequence' | 'timestamp'>) => {
     executionTrace.push({ sequence: ++sequence, timestamp: Date.now(), ...event });
   };
+  const promptsToRun = testCase.multiStepPrompts?.length
+    ? testCase.multiStepPrompts
+    : [{ prompt: testCase.prompt }];
 
   try {
     const emitStep = (step: any) => {
@@ -286,63 +299,115 @@ export async function runBenchmarkAttemptInContainer(
         fsSync.writeSync(1, line);
       } catch {}
     };
-    let liveContentBuffer = '';
-    let liveThinkingBuffer = '';
-    emitStep({ type: 'llm_start', model: modelName, timestamp: Date.now() });
-    const aggregateResponse = await agent.sendMessage(testCase.prompt, {
-      onChunk: (chunk) => {
-        liveContentBuffer += chunk;
-        emitStep({ type: 'chunk', text: chunk, snippet: liveContentBuffer.slice(-160), timestamp: Date.now() });
-      },
-      onThinkingChunk: (chunk) => {
-        liveThinkingBuffer += chunk;
-        emitStep({ type: 'thinking_chunk', text: chunk, snippet: liveThinkingBuffer.slice(-160), timestamp: Date.now() });
-      },
-      onToolStart: (name, args) => {
-        actualToolsCalled.push({ name, args });
-        record({ type: 'tool_start', name, args });
-        emitStep({ type: 'tool_start', name, args, timestamp: Date.now() });
-      },
-      onToolEnd: (name, result) => {
-        toolResults.push({ name, result });
-        record({ type: 'tool_end', name, result });
-        const resultSnippet = typeof result === 'string' ? result.slice(0, 120) : JSON.stringify(result).slice(0, 120);
-        emitStep({ type: 'tool_end', name, resultSnippet, timestamp: Date.now() });
-      },
-      onMessageAdded: (message: ChatMessage) => {
-        if (message.role === 'assistant') {
-          if (message.content.trim()) lastAssistantContent = message.content;
-          record({ type: 'assistant_message', content: message.content, thinking: message.thinking });
-          emitStep({ type: 'assistant_message', content: message.content.slice(0, 150), thinking: !!message.thinking, timestamp: Date.now() });
-        }
-      },
-      onModelResponse: (metrics) => {
-        timing.modelLoadMs += nsToMs(metrics.loadDurationNs);
-        timing.promptEvaluationMs += nsToMs(metrics.promptEvalDurationNs);
-        timing.generationMs += nsToMs(metrics.evalDurationNs);
-        timing.promptTokens += metrics.promptEvalCount ?? 0;
-        timing.generatedTokens += metrics.evalCount ?? 0;
-        const tokensPerSec = metrics.evalDurationNs ? ((metrics.evalCount || 0) / (metrics.evalDurationNs / 1e9)).toFixed(1) : undefined;
-        emitStep({
-          type: 'metrics',
-          promptTokens: timing.promptTokens,
-          generatedTokens: timing.generatedTokens,
-          turnPromptTokens: metrics.promptEvalCount,
-          turnGeneratedTokens: metrics.evalCount,
-          tokensPerSec,
-          timestamp: Date.now(),
+
+    for (let stepIndex = 0; stepIndex < promptsToRun.length; stepIndex++) {
+      const stepSpec = promptsToRun[stepIndex];
+      let liveContentBuffer = '';
+      let liveThinkingBuffer = '';
+      emitStep({ type: 'llm_start', model: modelName, timestamp: Date.now(), stepIndex });
+
+      const aggregateResponse = await agent.sendMessage(stepSpec.prompt, {
+        onChunk: (chunk) => {
+          liveContentBuffer += chunk;
+          emitStep({ type: 'chunk', text: chunk, snippet: liveContentBuffer.slice(-160), timestamp: Date.now() });
+        },
+        onThinkingChunk: (chunk) => {
+          liveThinkingBuffer += chunk;
+          emitStep({ type: 'thinking_chunk', text: chunk, snippet: liveThinkingBuffer.slice(-160), timestamp: Date.now() });
+        },
+        onToolStart: (name, args) => {
+          actualToolsCalled.push({ name, args });
+          record({ type: 'tool_start', name, args });
+          emitStep({ type: 'tool_start', name, args, timestamp: Date.now() });
+        },
+        onToolEnd: (name, result) => {
+          toolResults.push({ name, result });
+          record({ type: 'tool_end', name, result });
+          const resultSnippet = typeof result === 'string' ? result.slice(0, 120) : JSON.stringify(result).slice(0, 120);
+          emitStep({ type: 'tool_end', name, resultSnippet, timestamp: Date.now() });
+        },
+        onMessageAdded: (message: ChatMessage) => {
+          if (message.role === 'assistant') {
+            if (message.content.trim()) lastAssistantContent = message.content;
+            record({ type: 'assistant_message', content: message.content, thinking: message.thinking });
+            emitStep({ type: 'assistant_message', content: message.content.slice(0, 150), thinking: !!message.thinking, timestamp: Date.now() });
+          }
+        },
+        onModelResponse: (metrics) => {
+          timing.modelLoadMs += nsToMs(metrics.loadDurationNs);
+          timing.promptEvaluationMs += nsToMs(metrics.promptEvalDurationNs);
+          timing.generationMs += nsToMs(metrics.evalDurationNs);
+          timing.promptTokens += metrics.promptEvalCount ?? 0;
+          timing.generatedTokens += metrics.evalCount ?? 0;
+          const tokensPerSec = metrics.evalDurationNs ? ((metrics.evalCount || 0) / (metrics.evalDurationNs / 1e9)).toFixed(1) : undefined;
+          emitStep({
+            type: 'metrics',
+            promptTokens: timing.promptTokens,
+            generatedTokens: timing.generatedTokens,
+            turnPromptTokens: metrics.promptEvalCount,
+            turnGeneratedTokens: metrics.evalCount,
+            tokensPerSec,
+            timestamp: Date.now(),
+          });
+        },
+      });
+      responseContent = lastAssistantContent || aggregateResponse;
+
+      if (testCase.multiStepPrompts?.length) {
+        const stepTestCase: BenchmarkTestCase = {
+          ...testCase,
+          expectedFileState: stepSpec.expectedFileState,
+          expectedFileJson: stepSpec.expectedFileJson,
+          expectedDirectoryEntries: stepSpec.expectedDirectoryEntries,
+          expectedResponseSubstrings: stepSpec.expectedResponseSubstrings,
+          expectedToolResults: stepSpec.expectedToolResults,
+          verificationScript: stepSpec.verificationScript,
+        };
+        const stepEval = await evaluateBenchmarkTask(stepTestCase, workspace, actualToolsCalled, responseContent, toolResults);
+
+        multiStepDetails.push({
+          stepIndex: stepIndex + 1,
+          stepId: stepSpec.stepId,
+          prompt: stepSpec.prompt,
+          expectedOutcome: describeStepOutcome(stepSpec),
+          passed: stepEval.passed,
+          reason: stepEval.reason,
+          checks: stepEval.details?.checks,
         });
-      },
-    });
-    responseContent = lastAssistantContent || aggregateResponse;
+
+        if (!stepEval.passed) {
+          stepFailureReason = `Multi-step workflow failed at step ${stepIndex + 1} ("${stepSpec.prompt.slice(0, 50)}"): ${stepEval.reason}`;
+          break;
+        }
+      }
+    }
   } catch (err: any) {
     testError = err.message;
   }
 
   const verificationStartedAt = performance.now();
-  const evaluation = testError
-    ? { passed: false, reason: `Agent execution failed: ${testError}` }
+  const hasMultiStep = !!(testCase.multiStepPrompts?.length && testCase.multiStepPrompts.length > 0);
+  const baseEvaluation = testError
+    ? { passed: false, reason: `Agent execution failed: ${testError}`, details: { checks: [] } }
+    : stepFailureReason
+    ? { passed: false, reason: stepFailureReason, details: { checks: [] } }
+    : hasMultiStep
+    ? {
+        passed: multiStepDetails.every((s) => s.passed) && multiStepDetails.length === testCase.multiStepPrompts!.length,
+        reason: multiStepDetails.every((s) => s.passed) && multiStepDetails.length === testCase.multiStepPrompts!.length
+          ? `All ${multiStepDetails.length} multi-step workflow steps passed.`
+          : `Multi-step workflow failed.`,
+        details: { checks: [] },
+      }
     : await evaluateBenchmarkTask(testCase, workspace, actualToolsCalled, responseContent, toolResults);
+
+  const evaluation = {
+    ...baseEvaluation,
+    details: {
+      ...baseEvaluation.details,
+      multiStepDetails: multiStepDetails.length > 0 ? multiStepDetails : undefined,
+    },
+  };
   timing.verificationMs = performance.now() - verificationStartedAt;
   timing.comparisonMs = timing.promptEvaluationMs + timing.generationMs + timing.toolExecutionMs;
 

@@ -295,6 +295,110 @@ const CONFIG_FIELD_ORDER = [
   'systemPrompt',
 ];
 
+const OutcomeVerificationVisualizer: React.FC<{ verificationDetails?: any }> = ({ verificationDetails }) => {
+  if (!verificationDetails) {
+    return <div style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>No verification details recorded.</div>;
+  }
+
+  const multiStepDetails: Array<{
+    stepIndex: number;
+    stepId?: string;
+    prompt: string;
+    passed: boolean;
+    reason: string;
+    checks?: Array<{ name: string; passed: boolean; reason: string }>;
+  }> = verificationDetails?.details?.multiStepDetails;
+
+  const checks: Array<{ name: string; passed: boolean; reason: string }> = verificationDetails?.details?.checks;
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+      {multiStepDetails && multiStepDetails.length > 0 ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--accent-amber)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+            Multi-Step Workflow Progress ({multiStepDetails.filter(s => s.passed).length} / {multiStepDetails.length} Steps Passed):
+          </div>
+          {multiStepDetails.map((step) => (
+            <div
+              key={step.stepIndex}
+              style={{
+                padding: '10px 14px',
+                borderRadius: '8px',
+                background: step.passed ? 'rgba(16, 185, 129, 0.08)' : 'rgba(239, 68, 68, 0.08)',
+                border: `1px solid ${step.passed ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '6px',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 600, fontSize: '0.825rem', color: step.passed ? '#34d399' : '#f87171' }}>
+                  {step.passed ? <CheckCircle2 size={15} color="#10b981" /> : <XCircle size={15} color="#ef4444" />}
+                  <span>Step {step.stepIndex}{step.stepId ? ` (${step.stepId})` : ''}</span>
+                </div>
+                <span style={{ fontSize: '0.725rem', padding: '2px 8px', borderRadius: '4px', background: step.passed ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.2)', color: step.passed ? '#86efac' : '#fca5a5', fontWeight: 700 }}>
+                  {step.passed ? 'PASSED' : 'FAILED'}
+                </span>
+              </div>
+              <div style={{ fontSize: '0.78rem', color: 'var(--text-main)', fontFamily: 'var(--font-code)', background: 'rgba(0, 0, 0, 0.2)', padding: '6px 10px', borderRadius: '6px' }}>
+                <strong>Prompt:</strong> "{step.prompt}"
+              </div>
+              {step.expectedOutcome && (
+                <div style={{ fontSize: '0.775rem', color: 'var(--accent-teal)', background: 'rgba(13, 148, 136, 0.12)', padding: '6px 10px', borderRadius: '6px', border: '1px solid rgba(13, 148, 136, 0.25)' }}>
+                  <strong>Target Outcome:</strong> {step.expectedOutcome}
+                </div>
+              )}
+              <div style={{ fontSize: '0.775rem', color: step.passed ? '#a7f3d0' : '#fca5a5', lineHeight: 1.4 }}>
+                <strong>Actual Result:</strong> {step.reason}
+              </div>
+              {step.checks && step.checks.length > 0 && (
+                <div style={{ marginTop: '4px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  {step.checks.map((chk, cIdx) => (
+                    <div key={cIdx} style={{ fontSize: '0.725rem', display: 'flex', alignItems: 'center', gap: '6px', color: chk.passed ? '#6ee7b7' : '#f87171' }}>
+                      <span>{chk.passed ? '✓' : '✕'}</span>
+                      <span style={{ fontWeight: 600 }}>[{chk.name}]</span>
+                      <span>{chk.reason}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      ) : checks && checks.length > 0 ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+          {checks.map((chk, idx) => (
+            <div
+              key={idx}
+              style={{
+                padding: '8px 12px',
+                borderRadius: '6px',
+                background: chk.passed ? 'rgba(16, 185, 129, 0.08)' : 'rgba(239, 68, 68, 0.08)',
+                border: `1px solid ${chk.passed ? 'rgba(16, 185, 129, 0.25)' : 'rgba(239, 68, 68, 0.25)'}`,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '8px',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.8rem' }}>
+                {chk.passed ? <CheckCircle2 size={14} color="#10b981" /> : <XCircle size={14} color="#ef4444" />}
+                <span style={{ fontWeight: 600, color: chk.passed ? '#34d399' : '#f87171' }}>[{chk.name}]</span>
+                <span style={{ color: 'var(--text-main)', fontSize: '0.775rem' }}>{chk.reason}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      <details style={{ fontSize: '0.75rem', color: 'var(--text-muted)', cursor: 'pointer' }}>
+        <summary style={{ fontWeight: 600, marginBottom: '4px' }}>Raw Verification JSON Payload</summary>
+        <HighlightedJson value={verificationDetails} emptyText="No verification details." style={{ whiteSpace: 'pre-wrap' }} />
+      </details>
+    </div>
+  );
+};
+
 export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
   models,
   currentConfig,
@@ -1919,8 +2023,8 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
                         </div>
 
                         <div style={{ marginTop: '16px' }}>
-                          <strong style={{ color: 'var(--accent-amber)', display: 'block', marginBottom: '4px' }}>Outcome Verification:</strong>
-                          <HighlightedJson value={activeAttempt.verificationDetails} emptyText="No verification details." style={{ whiteSpace: 'pre-wrap' }} />
+                          <strong style={{ color: 'var(--accent-amber)', display: 'block', marginBottom: '8px' }}>Outcome & Multi-Step Verification:</strong>
+                          <OutcomeVerificationVisualizer verificationDetails={activeAttempt.verificationDetails} />
                         </div>
 
                         <div style={{ marginTop: '16px' }}>

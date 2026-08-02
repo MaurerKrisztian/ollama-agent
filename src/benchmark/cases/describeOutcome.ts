@@ -14,11 +14,48 @@ function describeFileState(spec: FileStateSpec): string {
   return requirements.join('; ');
 }
 
+export function describeStepOutcome(step: {
+  expectedFileState?: FileStateSpec[];
+  expectedFileJson?: { relativePath: string; values: Record<string, string | number | boolean | null> };
+  expectedDirectoryEntries?: any[];
+  expectedResponseSubstrings?: string[];
+  expectedToolResults?: any[];
+  verificationScript?: string;
+}): string {
+  const reqs: string[] = [];
+  for (const spec of step.expectedDirectoryEntries ?? []) {
+    reqs.push(`entries in "${spec.relativePath}": ${spec.entries.join(', ')}`);
+  }
+  if (step.expectedResponseSubstrings?.length) {
+    reqs.push(`response contains: ${step.expectedResponseSubstrings.map((v) => JSON.stringify(v)).join(', ')}`);
+  }
+  if (step.expectedFileJson) {
+    reqs.push(
+      `"${step.expectedFileJson.relativePath}" JSON contains ${Object.entries(step.expectedFileJson.values)
+        .map(([k, v]) => `${k}=${JSON.stringify(v)}`)
+        .join(', ')}`
+    );
+  }
+  for (const spec of step.expectedFileState ?? []) {
+    reqs.push(describeFileState(spec));
+  }
+  if (step.verificationScript) reqs.push('verification script exits 0');
+
+  return reqs.length > 0 ? reqs.join('; ') : 'verify state change';
+}
+
 export function describeBenchmarkOutcome(testCase: BenchmarkTestCaseDefinition): {
   requiredOutput: string;
   evaluationCriteria: string;
 } {
   const requirements: string[] = [];
+  if (testCase.multiStepPrompts?.length) {
+    testCase.multiStepPrompts.forEach((step, idx) => {
+      const stepTag = step.stepId ? `Step ${idx + 1} (${step.stepId})` : `Step ${idx + 1}`;
+      const stepOutcome = describeStepOutcome(step);
+      requirements.push(`${stepTag}: Prompt "${step.prompt}" -> Target Outcome: ${stepOutcome}`);
+    });
+  }
   for (const spec of testCase.expectedDirectoryEntries ?? []) {
     requirements.push(`The final answer must report every expected entry in "${spec.relativePath}": ${spec.entries.join(', ')}`);
   }

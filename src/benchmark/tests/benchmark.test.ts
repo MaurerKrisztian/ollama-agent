@@ -12,7 +12,8 @@ test('every benchmark defines at least one observable outcome verifier', () => {
       testCase.expectedFileState?.length ||
       testCase.expectedDirectoryEntries?.length ||
       testCase.expectedResponseSubstrings?.length ||
-      testCase.expectedToolResults?.length,
+      testCase.expectedToolResults?.length ||
+      testCase.multiStepPrompts?.some(s => s.expectedFileState?.length || s.expectedFileJson || s.verificationScript),
       `${testCase.id} has no outcome verifier`,
     );
   }
