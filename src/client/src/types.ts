@@ -208,3 +208,21 @@ export interface TerminalSessionOutput {
   lineCount: number;
   inputs?: TerminalInputHistoryItem[];
 }
+
+export interface BenchmarkSnapshot {
+  id?: string;
+  timestamp: string | number;
+  agentConfig?: Partial<AgentConfig>;
+  summary?: {
+    total: number;
+    passed: number;
+    failed: number;
+    durationMs: number;
+  };
+  results?: Array<{
+    caseId: string;
+    passed: boolean;
+    error?: string;
+    durationMs?: number;
+  }>;
+}

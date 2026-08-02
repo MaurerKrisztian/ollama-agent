@@ -34,6 +34,9 @@ export interface WebPageLink {
   surroundingText?: string;
   textBefore?: string;
   textAfter?: string;
+  titleAttr?: string | null;
+  ariaLabel?: string | null;
+  urlPathHints?: string[];
 }
 
 export interface WebPageImage {
