@@ -1767,6 +1767,7 @@ app.post('/api/benchmark/run-stream', async (req, res) => {
       attemptsPerCase,
       snapshot,
       parallelism,
+      (step) => sendEvent('test_step', step),
     );
 
     let savedRun;

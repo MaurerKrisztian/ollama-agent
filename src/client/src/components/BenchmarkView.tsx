@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Play,
   CheckCircle2,
@@ -344,7 +344,8 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
   const [deletingRunId, setDeletingRunId] = useState<string | null>(null);
   const [showMatchingConfigs, setShowMatchingConfigs] = useState(false);
   const [activeAttemptIndices, setActiveAttemptIndices] = useState<Record<string, number>>({});
-  const [liveSteps, setLiveSteps] = useState<Array<{ timestamp: number; text: string; type: string; detail?: string }>>([]);
+  const [liveSteps, setLiveSteps] = useState<Array<{ timestamp: number; text: string; type: string; detail?: string; attempt?: number; totalAttempts?: number }>>([]);
+  const [selectedAttemptTab, setSelectedAttemptTab] = useState<number | 'all'>('all');
   const [liveStreamingText, setLiveStreamingText] = useState<string>('');
   const [liveThinkingText, setLiveThinkingText] = useState<string>('');
   const [liveActiveTool, setLiveActiveTool] = useState<string | null>(null);
@@ -477,6 +478,131 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
 
   useEffect(() => () => benchmarkAbortController.current?.abort(), []);
 
+  // Core Unified SSE Event Processor
+  const processSseEvent = useCallback((eventType: string, eventData: any) => {
+    if (eventType === 'test_start') {
+      if (eventData.total) {
+        setProgress({
+          current: eventData.current,
+          completed: eventData.current - 1,
+          total: eventData.total,
+          testName: eventData.test.name,
+        });
+      }
+      setLiveStreamingText('');
+      setLiveThinkingText('');
+      setLiveActiveTool(null);
+      setLiveMetrics(null);
+      setSelectedAttemptTab('all');
+      setLiveSteps([{ timestamp: Date.now(), type: 'start', text: `🚀 Starting Test: ${eventData.test.name}` }]);
+    } else if (eventType === 'test_step') {
+      const att = eventData.attempt;
+      const totalAtt = eventData.totalAttempts;
+      const attemptPrefix = att && totalAtt > 1 ? `[Attempt ${att}/${totalAtt}] ` : '';
+
+      if (eventData.type === 'llm_start') {
+        setLiveSteps((prev) => [...prev.slice(-100), { timestamp: eventData.timestamp || Date.now(), type: 'llm_start', text: `${attemptPrefix}🤖 Ollama LLM Inference started for ${eventData.model || 'model'} (Evaluating prompt tokens...)`, attempt: att, totalAttempts: totalAtt }]);
+      } else if (eventData.type === 'chunk') {
+        setLiveStreamingText(eventData.snippet || '');
+      } else if (eventData.type === 'thinking_chunk') {
+        setLiveThinkingText(eventData.snippet || '');
+      } else if (eventData.type === 'metrics') {
+        setLiveMetrics({
+          promptTokens: eventData.promptTokens,
+          generatedTokens: eventData.generatedTokens,
+          tokensPerSec: eventData.tokensPerSec,
+        });
+      } else if (eventData.type === 'tool_start') {
+        setLiveActiveTool(eventData.name);
+        setLiveSteps((prev) => [...prev.slice(-100), { timestamp: eventData.timestamp || Date.now(), type: 'tool_start', text: `${attemptPrefix}🛠️ Executing Tool: ${eventData.name}`, detail: eventData.args ? JSON.stringify(eventData.args) : undefined, attempt: att, totalAttempts: totalAtt }]);
+      } else if (eventData.type === 'tool_end') {
+        setLiveActiveTool(null);
+        setLiveSteps((prev) => [...prev.slice(-100), { timestamp: eventData.timestamp || Date.now(), type: 'tool_end', text: `${attemptPrefix}✅ Finished Tool: ${eventData.name}`, detail: eventData.resultSnippet, attempt: att, totalAttempts: totalAtt }]);
+      } else if (eventData.type === 'assistant_message') {
+        setLiveSteps((prev) => [...prev.slice(-100), { timestamp: eventData.timestamp || Date.now(), type: 'assistant_message', text: `${attemptPrefix}💬 Model Turn Completed`, attempt: att, totalAttempts: totalAtt }]);
+      } else if (eventData.type === 'attempt_start' || eventData.type === 'attempt_complete') {
+        if (eventData.type === 'attempt_start' && att) {
+          setSelectedAttemptTab(att);
+        }
+        setLiveSteps((prev) => [...prev.slice(-100), { timestamp: eventData.timestamp || Date.now(), type: eventData.type, text: eventData.text, attempt: att, totalAttempts: totalAtt }]);
+      }
+    } else if (eventType === 'test_complete') {
+      setLiveStreamingText('');
+      setLiveThinkingText('');
+      setLiveActiveTool(null);
+      if (eventData.total) {
+        setProgress((prev) => ({
+          current: eventData.current,
+          completed: eventData.current,
+          total: eventData.total,
+          testName: prev?.testName,
+        }));
+      }
+      if (eventData.trace) {
+        setLiveResults((prev) => {
+          const filtered = prev.filter((r) => r.testId !== eventData.trace.testId);
+          return [...filtered, eventData.trace];
+        });
+        const verdict = eventData.trace.passed ? 'PASSED' : 'FAILED';
+        setLiveSteps((prev) => [...prev.slice(-24), { timestamp: Date.now(), type: 'complete', text: `${eventData.trace.passed ? '✅' : '❌'} Test ${verdict}: ${eventData.trace.testName} (${(eventData.trace.durationMs / 1000).toFixed(2)}s)` }]);
+      }
+    } else if (eventType === 'benchmark_done') {
+      setReport(eventData.report);
+      if (eventData.savedRun) {
+        setSavedRun(eventData.savedRun);
+        void loadSavedRuns(eventData.savedRun.outputDirectory);
+      }
+      if (eventData.saveError) alert(`Benchmark completed, but saving failed: ${eventData.saveError}`);
+    } else if (eventType === 'cancelled') {
+      setWasStopped(true);
+    } else if (eventType === 'error') {
+      alert(`Benchmark Error: ${eventData.error}`);
+    }
+  }, [loadSavedRuns]);
+
+  // Unified Benchmark Execution Stream Handler
+  const executeBenchmarkStream = useCallback(async (url: string, bodyPayload: any, signal: AbortSignal) => {
+    setLiveStreamingText('');
+    setLiveThinkingText('');
+    setLiveActiveTool(null);
+    setLiveMetrics(null);
+    setSelectedAttemptTab('all');
+
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(bodyPayload),
+      signal,
+    });
+
+    if (!res.ok || !res.body) {
+      throw new Error(`Server connection error ${res.status}`);
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder('utf-8');
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n\n');
+      buffer = lines.pop() || '';
+
+      for (const block of lines) {
+        if (!block.trim()) continue;
+        const eventLine = block.match(/^event:\s*(.+)$/m);
+        const dataLine = block.match(/^data:\s*(.+)$/m);
+
+        if (eventLine && dataLine) {
+          processSseEvent(eventLine[1].trim(), JSON.parse(dataLine[1].trim()));
+        }
+      }
+    }
+  }, [processSseEvent]);
+
   const handleRunAllBenchmarks = async () => {
     const configError = validateBenchmarkConfig();
     if (configError) {
@@ -498,112 +624,13 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
     setProgress({ current: 0, completed: 0, total: selectedDefinition.testIds.length });
 
     try {
-      const response = await fetch('/api/benchmark/run-stream', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...benchmarkRequestConfig(),
-          saveResults,
-          runName,
-          benchmarkId: selectedDefinition.id,
-          ...(outputLocationMode === 'custom' && outputDirectory.trim() ? { outputDirectory: outputDirectory.trim() } : {}),
-        }),
-        signal: controller.signal,
-      });
-
-      if (!response.ok || !response.body) {
-        throw new Error(`Server connection error ${response.status}`);
-      }
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder('utf-8');
-      let buffer = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n\n');
-        buffer = lines.pop() || '';
-
-        for (const block of lines) {
-          if (!block.trim()) continue;
-          const eventLine = block.match(/^event:\s*(.+)$/m);
-          const dataLine = block.match(/^data:\s*(.+)$/m);
-
-          if (eventLine && dataLine) {
-            const eventType = eventLine[1].trim();
-            const eventData = JSON.parse(dataLine[1].trim());
-
-            if (eventType === 'test_start') {
-              setProgress({
-                current: eventData.current,
-                completed: eventData.current - 1,
-                total: eventData.total,
-                testName: eventData.test.name,
-              });
-              setLiveStreamingText('');
-              setLiveThinkingText('');
-              setLiveActiveTool(null);
-              setLiveMetrics(null);
-              setLiveSteps((prev) => [...prev.slice(-24), { timestamp: Date.now(), type: 'start', text: `🚀 Starting Test: ${eventData.test.name}` }]);
-            } else if (eventType === 'test_step') {
-              const attemptPrefix = eventData.attempt && eventData.totalAttempts > 1 ? `[Attempt ${eventData.attempt}/${eventData.totalAttempts}] ` : '';
-              if (eventData.type === 'llm_start') {
-                setLiveSteps((prev) => [...prev.slice(-100), { timestamp: eventData.timestamp || Date.now(), type: 'llm_start', text: `${attemptPrefix}🤖 Ollama LLM Inference started for ${eventData.model || 'model'} (Evaluating prompt tokens...)` }]);
-              } else if (eventData.type === 'chunk') {
-                setLiveStreamingText(eventData.snippet || '');
-              } else if (eventData.type === 'thinking_chunk') {
-                setLiveThinkingText(eventData.snippet || '');
-              } else if (eventData.type === 'metrics') {
-                setLiveMetrics({
-                  promptTokens: eventData.promptTokens,
-                  generatedTokens: eventData.generatedTokens,
-                  tokensPerSec: eventData.tokensPerSec,
-                });
-              } else if (eventData.type === 'tool_start') {
-                setLiveActiveTool(eventData.name);
-                setLiveSteps((prev) => [...prev.slice(-100), { timestamp: eventData.timestamp || Date.now(), type: eventData.type, text: `${attemptPrefix}🛠️ Executing Tool: ${eventData.name}`, detail: eventData.args ? JSON.stringify(eventData.args) : undefined }]);
-              } else if (eventData.type === 'tool_end') {
-                setLiveActiveTool(null);
-                setLiveSteps((prev) => [...prev.slice(-100), { timestamp: eventData.timestamp || Date.now(), type: eventData.type, text: `${attemptPrefix}✅ Finished Tool: ${eventData.name}`, detail: eventData.resultSnippet }]);
-              } else if (eventData.type === 'assistant_message') {
-                setLiveSteps((prev) => [...prev.slice(-100), { timestamp: eventData.timestamp || Date.now(), type: eventData.type, text: `${attemptPrefix}💬 Model Turn Completed` }]);
-              } else if (eventData.type === 'attempt_start' || eventData.type === 'attempt_complete') {
-                setLiveSteps((prev) => [...prev.slice(-100), { timestamp: eventData.timestamp || Date.now(), type: eventData.type, text: eventData.text }]);
-              }
-            } else if (eventType === 'test_complete') {
-              setLiveStreamingText('');
-              setLiveThinkingText('');
-              setLiveActiveTool(null);
-              setProgress((prev) => ({
-                current: eventData.current,
-                completed: eventData.current,
-                total: eventData.total,
-                testName: prev?.testName,
-              }));
-              setLiveResults((prev) => {
-                const filtered = prev.filter((r) => r.testId !== eventData.trace.testId);
-                return [...filtered, eventData.trace];
-              });
-              const verdict = eventData.trace.passed ? 'PASSED' : 'FAILED';
-              setLiveSteps((prev) => [...prev.slice(-24), { timestamp: Date.now(), type: 'complete', text: `${eventData.trace.passed ? '✅' : '❌'} Test ${verdict}: ${eventData.trace.testName} (${(eventData.trace.durationMs / 1000).toFixed(2)}s)` }]);
-            } else if (eventType === 'benchmark_done') {
-              setReport(eventData.report);
-              if (eventData.savedRun) {
-                setSavedRun(eventData.savedRun);
-                void loadSavedRuns(eventData.savedRun.outputDirectory);
-              }
-              if (eventData.saveError) alert(`Benchmark completed, but saving failed: ${eventData.saveError}`);
-            } else if (eventType === 'cancelled') {
-              setWasStopped(true);
-            } else if (eventType === 'error') {
-              alert(`Benchmark Stream Error: ${eventData.error}`);
-            }
-          }
-        }
-      }
+      await executeBenchmarkStream('/api/benchmark/run-stream', {
+        ...benchmarkRequestConfig(),
+        saveResults,
+        runName,
+        benchmarkId: selectedDefinition.id,
+        ...(outputLocationMode === 'custom' && outputDirectory.trim() ? { outputDirectory: outputDirectory.trim() } : {}),
+      }, controller.signal);
     } catch (err: any) {
       if (err?.name === 'AbortError') {
         setWasStopped(true);
@@ -635,89 +662,13 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
     const controller = new AbortController();
     singleAbortController.current = controller;
     setRunningSingleId(testId);
-    setLiveStreamingText('');
-    setLiveThinkingText('');
-    setLiveActiveTool(null);
-    setLiveMetrics(null);
     setLiveSteps([{ timestamp: Date.now(), type: 'start', text: `🚀 Initializing single test execution for ${testId}...` }]);
     try {
-      const res = await fetch('/api/benchmark/run-single', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ testId, stream: true, ...benchmarkRequestConfig() }),
-        signal: controller.signal,
-      });
-
-      if (!res.ok || !res.body) {
-        throw new Error(`Server connection error ${res.status}`);
-      }
-
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder('utf-8');
-      let buffer = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n\n');
-        buffer = lines.pop() || '';
-
-        for (const block of lines) {
-          if (!block.trim()) continue;
-          const eventLine = block.match(/^event:\s*(.+)$/m);
-          const dataLine = block.match(/^data:\s*(.+)$/m);
-
-          if (eventLine && dataLine) {
-            const eventType = eventLine[1].trim();
-            const eventData = JSON.parse(dataLine[1].trim());
-
-            if (eventType === 'test_start') {
-              setLiveSteps((prev) => [...prev.slice(-24), { timestamp: Date.now(), type: 'start', text: `🐳 Docker Sandbox active for ${eventData.test.name}` }]);
-            } else if (eventType === 'test_step') {
-              const attemptPrefix = eventData.attempt && eventData.totalAttempts > 1 ? `[Attempt ${eventData.attempt}/${eventData.totalAttempts}] ` : '';
-              if (eventData.type === 'llm_start') {
-                setLiveSteps((prev) => [...prev.slice(-100), { timestamp: eventData.timestamp || Date.now(), type: 'llm_start', text: `${attemptPrefix}🤖 Ollama LLM Inference started for ${eventData.model || 'model'} (Evaluating prompt tokens...)` }]);
-              } else if (eventData.type === 'chunk') {
-                setLiveStreamingText(eventData.snippet || '');
-              } else if (eventData.type === 'thinking_chunk') {
-                setLiveThinkingText(eventData.snippet || '');
-              } else if (eventData.type === 'metrics') {
-                setLiveMetrics({
-                  promptTokens: eventData.promptTokens,
-                  generatedTokens: eventData.generatedTokens,
-                  tokensPerSec: eventData.tokensPerSec,
-                });
-              } else if (eventData.type === 'tool_start') {
-                setLiveActiveTool(eventData.name);
-                setLiveSteps((prev) => [...prev.slice(-100), { timestamp: eventData.timestamp || Date.now(), type: eventData.type, text: `${attemptPrefix}🛠️ Executing Tool: ${eventData.name}`, detail: eventData.args ? JSON.stringify(eventData.args) : undefined }]);
-              } else if (eventData.type === 'tool_end') {
-                setLiveActiveTool(null);
-                setLiveSteps((prev) => [...prev.slice(-100), { timestamp: eventData.timestamp || Date.now(), type: eventData.type, text: `${attemptPrefix}✅ Finished Tool: ${eventData.name}`, detail: eventData.resultSnippet }]);
-              } else if (eventData.type === 'assistant_message') {
-                setLiveSteps((prev) => [...prev.slice(-100), { timestamp: eventData.timestamp || Date.now(), type: eventData.type, text: `${attemptPrefix}💬 Model Turn Completed` }]);
-              } else if (eventData.type === 'attempt_start' || eventData.type === 'attempt_complete') {
-                setLiveSteps((prev) => [...prev.slice(-100), { timestamp: eventData.timestamp || Date.now(), type: eventData.type, text: eventData.text }]);
-              }
-            } else if (eventType === 'test_complete') {
-              setLiveStreamingText('');
-              setLiveThinkingText('');
-              setLiveActiveTool(null);
-              if (eventData.trace) {
-                setLiveResults((prev) => {
-                  const filtered = prev.filter((r) => r.testId !== testId);
-                  return [...filtered, eventData.trace];
-                });
-                const verdict = eventData.trace.passed ? 'PASSED' : 'FAILED';
-                setLiveSteps((prev) => [...prev.slice(-24), { timestamp: Date.now(), type: 'complete', text: `${eventData.trace.passed ? '✅' : '❌'} Test ${verdict}: ${eventData.trace.testName} (${(eventData.trace.durationMs / 1000).toFixed(2)}s)` }]);
-              }
-            } else if (eventType === 'error') {
-              alert(`Test execution failed: ${eventData.error}`);
-            }
-          }
-        }
-      }
+      await executeBenchmarkStream('/api/benchmark/run-single', {
+        testId,
+        stream: true,
+        ...benchmarkRequestConfig(),
+      }, controller.signal);
     } catch (err: any) {
       if (err?.name !== 'AbortError') {
         alert(`Error running single test: ${err.message}`);
@@ -1438,40 +1389,122 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
           })()}
 
           {/* Live Real-Time Execution Console */}
-          <div ref={logFeedRef} style={{ background: '#090d16', padding: '12px 14px', borderRadius: '10px', border: '1px solid rgba(56, 189, 248, 0.25)', fontFamily: 'var(--font-code)', fontSize: '0.78rem', display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '240px', overflowY: 'auto' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', color: '#38bdf8', fontSize: '0.72rem', fontWeight: 700, borderBottom: '1px solid rgba(255, 255, 255, 0.08)', paddingBottom: '6px', textTransform: 'uppercase' }}>
-              <span>Live Execution Log Feed</span>
-              <span>{liveSteps.length} steps recorded</span>
+          <div style={{ background: '#090d16', padding: '12px 14px', borderRadius: '10px', border: '1px solid rgba(56, 189, 248, 0.25)', fontFamily: 'var(--font-code)', fontSize: '0.78rem', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            {/* Fixed Header Bar */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', borderBottom: '1px solid rgba(255, 255, 255, 0.08)', paddingBottom: '6px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', color: '#38bdf8', fontSize: '0.72rem', fontWeight: 700, textTransform: 'uppercase', flexWrap: 'wrap', gap: '8px' }}>
+                <span>Live Execution Log Feed</span>
+                <span>{liveSteps.length} steps recorded</span>
+              </div>
+
+              {/* Attempt Filter Tabs (Sticky Top) */}
+              {totalCount > 1 && (
+                <div style={{ display: 'flex', gap: '6px', paddingTop: '2px', overflowX: 'auto' }}>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedAttemptTab('all')}
+                    style={{
+                      padding: '3px 10px',
+                      borderRadius: '6px',
+                      fontSize: '0.72rem',
+                      fontWeight: 600,
+                      background: selectedAttemptTab === 'all' ? 'rgba(56, 189, 248, 0.25)' : 'rgba(255, 255, 255, 0.05)',
+                      color: selectedAttemptTab === 'all' ? '#38bdf8' : 'var(--text-muted)',
+                      border: `1px solid ${selectedAttemptTab === 'all' ? 'rgba(56, 189, 248, 0.4)' : 'transparent'}`,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    All Attempts
+                  </button>
+                  {Array.from({ length: totalCount }, (_, idx) => {
+                    const attNum = idx + 1;
+                    const attPassed = liveSteps.some((s) => s.attempt === attNum && s.type === 'attempt_complete' && s.text.includes('PASSED'));
+                    const attFailed = liveSteps.some((s) => s.attempt === attNum && s.type === 'attempt_complete' && s.text.includes('FAILED'));
+                    const attActive = liveSteps.some((s) => s.attempt === attNum) && !attPassed && !attFailed;
+                    const isSelected = selectedAttemptTab === attNum;
+
+                    return (
+                      <button
+                        key={attNum}
+                        type="button"
+                        onClick={() => setSelectedAttemptTab(attNum)}
+                        style={{
+                          padding: '3px 10px',
+                          borderRadius: '6px',
+                          fontSize: '0.72rem',
+                          fontWeight: 600,
+                          background: isSelected ? 'rgba(56, 189, 248, 0.25)' : 'rgba(255, 255, 255, 0.05)',
+                          color: attPassed ? '#34d399' : attFailed ? '#f87171' : isSelected ? '#38bdf8' : 'var(--text-muted)',
+                          border: `1px solid ${isSelected ? 'rgba(56, 189, 248, 0.4)' : 'transparent'}`,
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '4px',
+                        }}
+                      >
+                        {attPassed ? '✅' : attFailed ? '❌' : attActive ? '⚡' : '⏳'}
+                        <span>Attempt {attNum}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </div>
-            {liveSteps.length === 0 ? (
-              <div style={{ color: 'var(--text-dim)', fontStyle: 'italic', padding: '6px 0' }}>Initializing Docker container & agent loop...</div>
-            ) : (
-              <>
-                {liveSteps.map((step, i) => (
-                  <div key={i} style={{ display: 'flex', gap: '8px', alignItems: 'flex-start', lineHeight: 1.4 }}>
-                    <span style={{ color: 'var(--text-dim)', fontSize: '0.7rem', flexShrink: 0 }}>
-                      {new Date(step.timestamp).toLocaleTimeString()}
-                    </span>
-                    <div style={{ minWidth: 0, flex: 1 }}>
-                      <span style={{ color: step.type === 'complete' ? '#34d399' : step.type === 'llm_start' ? '#fbbf24' : step.type.startsWith('tool') ? '#a7f3d0' : '#e2e8f0' }}>
-                        {step.text}
-                      </span>
-                      {step.detail && (
-                        <span style={{ display: 'block', color: 'var(--text-muted)', fontSize: '0.72rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {step.detail}
-                        </span>
-                      )}
+
+            {/* Scrollable Viewport for Log List */}
+            <div ref={logFeedRef} style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '220px', overflowY: 'auto' }}>
+              {liveSteps.length === 0 ? (
+                <div style={{ color: 'var(--text-dim)', fontStyle: 'italic', padding: '6px 0' }}>Initializing Docker container & agent loop...</div>
+              ) : (
+                <>
+                  {(() => {
+                    const filtered = selectedAttemptTab === 'all'
+                      ? liveSteps
+                      : liveSteps.filter((s) => s.attempt === selectedAttemptTab || !s.attempt);
+
+                    if (filtered.length === 0) {
+                      return (
+                        <div style={{ color: 'var(--text-dim)', fontStyle: 'italic', padding: '6px 0' }}>
+                          {typeof selectedAttemptTab === 'number'
+                            ? `Attempt ${selectedAttemptTab} has not started yet. Streamed logs will appear here when Attempt ${selectedAttemptTab} begins...`
+                            : 'Initializing Docker container & agent loop...'}
+                        </div>
+                      );
+                    }
+
+                    return filtered.map((step, i) => {
+                      const textToDisplay = selectedAttemptTab !== 'all'
+                        ? step.text.replace(/^\[Attempt \d+\/\d+\]\s*/, '')
+                        : step.text;
+
+                      return (
+                        <div key={i} style={{ display: 'flex', gap: '8px', alignItems: 'flex-start', lineHeight: 1.4 }}>
+                          <span style={{ color: 'var(--text-dim)', fontSize: '0.7rem', flexShrink: 0 }}>
+                            {new Date(step.timestamp).toLocaleTimeString()}
+                          </span>
+                          <div style={{ minWidth: 0, flex: 1 }}>
+                            <span style={{ color: step.type === 'complete' || step.type === 'attempt_complete' ? '#34d399' : step.type === 'llm_start' || step.type === 'attempt_start' ? '#fbbf24' : step.type.startsWith('tool') ? '#a7f3d0' : '#e2e8f0' }}>
+                              {textToDisplay}
+                            </span>
+                            {step.detail && (
+                              <span style={{ display: 'block', color: 'var(--text-muted)', fontSize: '0.72rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                {step.detail}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    });
+                  })()}
+                  {(isRunning || runningSingleId !== null) && !liveStreamingText && !liveThinkingText && !liveActiveTool && !liveSteps.some((s) => s.type === 'tool_start' || s.type === 'tool_end' || s.type === 'assistant_message' || s.type === 'complete') && liveSteps.some((s) => s.type === 'llm_start' || s.type === 'start') && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#fbbf24', fontSize: '0.74rem', padding: '4px 0', borderTop: '1px dashed rgba(255, 255, 255, 0.1)', marginTop: '4px' }}>
+                      <Loader2 size={12} className="spin" />
+                      <span>Ollama is evaluating prompt tokens & loading model weights for <code>{benchmarkConfig.model}</code>. Streamed tokens and tool calls will appear here live...</span>
                     </div>
-                  </div>
-                ))}
-                {(isRunning || runningSingleId !== null) && !liveStreamingText && !liveThinkingText && !liveActiveTool && !liveSteps.some((s) => s.type === 'tool_start' || s.type === 'tool_end' || s.type === 'assistant_message' || s.type === 'complete') && liveSteps.some((s) => s.type === 'llm_start' || s.type === 'start') && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#fbbf24', fontSize: '0.74rem', padding: '4px 0', borderTop: '1px dashed rgba(255, 255, 255, 0.1)', marginTop: '4px' }}>
-                    <Loader2 size={12} className="spin" />
-                    <span>Ollama is evaluating prompt tokens & loading model weights for <code>{benchmarkConfig.model}</code>. Streamed tokens and tool calls will appear here live...</span>
-                  </div>
-                )}
-              </>
-            )}
+                  )}
+                </>
+              )}
+            </div>
           </div>
 
           {/* Progress bar for suite runs */}

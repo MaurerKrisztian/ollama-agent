@@ -484,12 +484,14 @@ export async function runBenchmarkSuite(
   attemptsPerCase: number = 3,
   benchmark?: BenchmarkSnapshot,
   parallelism: number = 1,
+  onStep?: (step: any) => void,
 ): Promise<BenchmarkReport> {
   const startTime = Date.now();
   const results: TestResultTrace[] = [];
   for (let index = 0; index < testCases.length; index++) {
     signal?.throwIfAborted();
     const testCase = testCases[index];
+    onTestStart?.(index + 1, testCases.length, testCase);
     const result = await runBenchmarkCase(
       testCase,
       modelName,
@@ -498,8 +500,9 @@ export async function runBenchmarkSuite(
       signal,
       agentConfig,
       attemptsPerCase,
-      (attempt) => onTestStart?.(index + 1, testCases.length, { ...testCase, name: `${testCase.name} (attempt ${attempt}/${attemptsPerCase})` }),
+      undefined,
       parallelism,
+      onStep,
     );
     results.push(result);
     onProgress?.(index + 1, testCases.length, result);
