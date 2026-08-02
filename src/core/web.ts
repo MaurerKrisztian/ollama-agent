@@ -156,16 +156,17 @@ async function fetchPublicPage(
   throw new Error('Too many redirects.');
 }
 
-function cleanText(value: string | null | undefined): string {
-  return (value || '').replace(/\s+/g, ' ').trim();
+function cleanText(input: string | null | undefined): string {
+  if (!input) return '';
+  return input.replace(/\s+/g, ' ').trim();
 }
 
-function nearestHeading(anchor: HTMLAnchorElement): string | null {
-  let current: Element | null = anchor;
-  while (current) {
+function nearestHeading(element: Element): string | null {
+  let current: Element | null = element;
+  while (current && current.tagName !== 'BODY') {
     let sibling = current.previousElementSibling;
     while (sibling) {
-      const heading = sibling.matches('h1, h2, h3, h4, h5, h6')
+      const heading = /^H[1-6]$/i.test(sibling.tagName)
         ? sibling
         : sibling.querySelector('h1, h2, h3, h4, h5, h6');
       const text = cleanText(heading?.textContent);
@@ -177,10 +178,23 @@ function nearestHeading(anchor: HTMLAnchorElement): string | null {
   return null;
 }
 
-function linkTextContext(anchor: HTMLAnchorElement): Pick<WebPageLink, 'heading' | 'section' | 'surroundingText' | 'textBefore' | 'textAfter'> {
-  const contextElement = anchor.closest('p, li, blockquote, td, dd') || anchor.parentElement;
+function extractUrlPathHints(urlStr: string): string[] {
+  try {
+    const url = new URL(urlStr);
+    const parts = url.pathname.split('/').map((p) => p.trim()).filter((p) => p.length > 0 && !/^\d+$/.test(p));
+    const searchParams = [...url.searchParams.entries()].flatMap(([k, v]) => [k, v]).filter((p) => p.length > 1 && !/^\d+$/.test(p));
+    const rawTokens = [...parts, ...searchParams].flatMap((p) => p.replace(/[-_]+/g, ' ').split(/\s+/)).filter((t) => t.length > 1);
+    return [...new Set(rawTokens)].slice(0, 8);
+  } catch (_) {
+    return [];
+  }
+}
+
+function linkTextContext(anchor: HTMLAnchorElement): Pick<WebPageLink, 'heading' | 'section' | 'surroundingText' | 'textBefore' | 'textAfter' | 'titleAttr' | 'ariaLabel' | 'urlPathHints'> {
+  const contextElement = anchor.closest('article, section, figure, li, tr, p, blockquote, td, dd') || anchor.parentElement;
   const context = cleanText(contextElement?.textContent).slice(0, 700);
-  const anchorText = cleanText(anchor.textContent);
+  const imgAlt = cleanText(anchor.querySelector('img')?.getAttribute('alt'));
+  const anchorText = cleanText(anchor.textContent) || imgAlt || '';
   const anchorOffset = anchorText ? context.toLowerCase().indexOf(anchorText.toLowerCase()) : -1;
   const heading = nearestHeading(anchor);
   const sectionElement = anchor.closest('section, article, main, aside');
@@ -188,12 +202,19 @@ function linkTextContext(anchor: HTMLAnchorElement): Pick<WebPageLink, 'heading'
     sectionElement?.getAttribute('aria-label') ||
     (sectionElement?.id ? sectionElement.id.replace(/[-_]+/g, ' ') : ''),
   );
+  const titleAttr = cleanText(anchor.getAttribute('title'));
+  const ariaLabel = cleanText(anchor.getAttribute('aria-label') || anchor.getAttribute('aria-description')) || (imgAlt ? `Image: ${imgAlt}` : null);
+  const urlPathHints = extractUrlPathHints(anchor.href || anchor.getAttribute('href') || '');
+
   return {
     heading,
     section: (labelledSection || heading || null)?.slice(0, 240) || null,
     surroundingText: context,
     textBefore: anchorOffset >= 0 ? context.slice(Math.max(0, anchorOffset - 240), anchorOffset).trim() : context.slice(0, 240),
     textAfter: anchorOffset >= 0 ? context.slice(anchorOffset + anchorText.length, anchorOffset + anchorText.length + 240).trim() : '',
+    ...(titleAttr ? { titleAttr } : {}),
+    ...(ariaLabel ? { ariaLabel } : {}),
+    ...(urlPathHints.length > 0 ? { urlPathHints } : {}),
   };
 }
 

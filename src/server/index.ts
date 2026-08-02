@@ -10,7 +10,7 @@ import { Server as SocketIOServer } from 'socket.io';
 import { AgentEngine } from '../core/agent.js';
 import type { AgentSendMessageOptions } from '../core/agent.js';
 import { ContextManager } from '../core/context.js';
-import { BUILTIN_TOOLS, TOOL_DEFINITIONS } from '../core/tools.js';
+import { BUILTIN_TOOLS, TOOL_DEFINITIONS, TOOL_GROUP_METADATA } from '../core/tools.js';
 import { BENCHMARK_TEST_CASES } from '../benchmark/cases/index.js';
 import { createBenchmarkSuiteHash } from '../benchmark/cases/benchmarks.js';
 import type { BenchmarkDefinition, BenchmarkTestCase } from '../benchmark/cases/index.js';
@@ -219,7 +219,7 @@ const saveChatSession = (sessionId: string, engine: AgentEngine = getChatRuntime
 const getSessionContext = (sessionId: string) => {
   const session = chatSessions.getSession(sessionId);
   if (!session) return undefined;
-  const context = new ContextManager(agent.getConfig().systemPrompt, agent.getContextManager().getTools(), { enabled: false });
+  const context = new ContextManager(agent.getConfig().systemPrompt, agent.getActiveTools(), { enabled: false });
   context.setMessages(session.messages);
   return context.getContextInfo();
 };
@@ -757,6 +757,19 @@ app.get('/api/tools', (req, res) => {
     tools: agent.getActiveTools(),
     workingDir: agent.getConfig().workingDir,
   });
+});
+
+// GET /api/tools/definitions - Full builtin tool list with UI group metadata (single source of truth for tool toggles)
+app.get('/api/tools/definitions', (_req, res) => {
+  const definitions = BUILTIN_TOOLS.map((tool) => {
+    const meta = TOOL_GROUP_METADATA[tool.name] ?? {
+      group: '⚙️ Other',
+      groupColor: 'var(--text-muted)',
+      groupDescription: '',
+    };
+    return { name: tool.name, ...meta };
+  });
+  res.json({ definitions });
 });
 
 // GET /api/terminal/sessions - List active & background terminal sessions
@@ -1550,6 +1563,14 @@ const parseBenchmarkAgentConfig = (value: unknown): BenchmarkAgentConfig => {
       webOutputTTLTurns: typeof pruning.webOutputTTLTurns === 'number' && Number.isInteger(pruning.webOutputTTLTurns) && pruning.webOutputTTLTurns >= 0 ? pruning.webOutputTTLTurns : current.webOutputTTLTurns,
     };
   }
+  if (input.enabledTools && typeof input.enabledTools === 'object' && !Array.isArray(input.enabledTools)) {
+    const rawTools = input.enabledTools as Record<string, unknown>;
+    config.enabledTools = Object.fromEntries(
+      Object.entries(rawTools)
+        .filter(([, v]) => typeof v === 'boolean')
+        .map(([k, v]) => [k, v as boolean])
+    );
+  }
   return config;
 };
 
@@ -1590,26 +1611,85 @@ app.post('/api/benchmark/run', async (req, res) => {
   }
 });
 
-// POST /api/benchmark/run-single - Execute single test case 1-by-1
+// POST /api/benchmark/run-single - Execute single test case 1-by-1 (with optional SSE streaming)
 app.post('/api/benchmark/run-single', async (req, res) => {
-  const { testId, model, host } = req.body;
+  const { testId, model, host, stream } = req.body;
   if (!testId) {
     return res.status(400).json({ success: false, error: 'Parameter "testId" is required.' });
   }
 
+  const isStream = stream === true || req.headers.accept === 'text/event-stream';
+  if (isStream) {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+  }
+
+  const sendEvent = (event: string, data: any) => {
+    if (isStream && !res.writableEnded && !res.destroyed) {
+      res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    }
+  };
+
   const targetModel = model || agent.getConfig().model;
   const targetHost = host || agent.getConfig().ollamaHost;
   const benchmarkAgentConfig = parseBenchmarkAgentConfig(req.body.agentConfig);
+  const singleController = new AbortController();
+
+  res.on('close', () => {
+    if (!res.writableEnded) {
+      singleController.abort();
+    }
+  });
 
   try {
     const attemptsPerCase = parseBenchmarkAttempts(req.body.attemptsPerCase);
-    const parallelism = parseBenchmarkParallelism(req.body.parallelism);
+    const userParallelism = req.body.parallelism !== undefined ? parseBenchmarkParallelism(req.body.parallelism) : 1;
+    const parallelism = Math.max(userParallelism, attemptsPerCase);
     const testCase = BENCHMARK_TEST_CASES.find((candidate) => candidate.id === testId);
-    if (!testCase) return res.status(404).json({ success: false, error: `Test case "${testId}" not found.` });
-    const trace = await runBenchmarkCase(testCase, targetModel, targetHost, agent.getOllamaToken(), undefined, benchmarkAgentConfig, attemptsPerCase, undefined, parallelism);
-    res.json({ success: true, trace });
+    if (!testCase) {
+      if (isStream) {
+        sendEvent('error', { error: `Test case "${testId}" not found.` });
+        return res.end();
+      }
+      return res.status(404).json({ success: false, error: `Test case "${testId}" not found.` });
+    }
+
+    if (isStream) {
+      sendEvent('test_start', { current: 1, total: 1, test: { id: testCase.id, name: testCase.name, category: testCase.category } });
+    }
+
+    const trace = await runBenchmarkCase(
+      testCase,
+      targetModel,
+      targetHost,
+      agent.getOllamaToken(),
+      singleController.signal,
+      benchmarkAgentConfig,
+      attemptsPerCase,
+      undefined,
+      parallelism,
+      (step) => sendEvent('test_step', { ...step, testId })
+    );
+
+    if (isStream) {
+      sendEvent('test_complete', { current: 1, total: 1, trace });
+      res.end();
+    } else {
+      res.json({ success: true, trace });
+    }
   } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
+    if (singleController.signal.aborted) {
+      if (isStream) sendEvent('cancelled', { message: 'Aborted by user' });
+      else if (!res.writableEnded) res.status(499).json({ success: false, error: 'Benchmark single test aborted by user.' });
+      return;
+    }
+    if (isStream) {
+      sendEvent('error', { error: err.message });
+      res.end();
+    } else {
+      res.status(500).json({ success: false, error: err.message });
+    }
   }
 });
 

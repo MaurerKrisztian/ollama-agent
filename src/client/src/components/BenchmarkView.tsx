@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { AgentConfig, ContextPruningConfig, OllamaModelInfo, ToolComplexityProfile, ToolSettings } from '../types';
 import { highlightJson } from './JsonEditor';
+import { ToolTogglePanel } from './ToolTogglePanel';
 
 interface HighlightedJsonProps {
   value: unknown;
@@ -210,7 +211,10 @@ interface BenchmarkFormConfig {
   complexityProfile: ToolComplexityProfile;
   systemPrompt: string;
   pruningConfig: Required<ContextPruningConfig>;
+  enabledTools: Record<string, boolean>;
 }
+
+
 
 const getBenchmarkDefaults = (config: AgentConfig, toolSettings: ToolSettings): BenchmarkFormConfig => ({
   model: config.model,
@@ -230,6 +234,7 @@ const getBenchmarkDefaults = (config: AgentConfig, toolSettings: ToolSettings): 
     terminalOutputTTLTurns: config.pruningConfig?.terminalOutputTTLTurns ?? 5,
     webOutputTTLTurns: config.pruningConfig?.webOutputTTLTurns ?? 5,
   },
+  enabledTools: { ...(toolSettings.enabledTools as Record<string, boolean>) },
 });
 
 const formatRunDate = (runDate: string) => new Intl.DateTimeFormat(undefined, {
@@ -313,6 +318,7 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
   const [isStopping, setIsStopping] = useState(false);
   const [wasStopped, setWasStopped] = useState(false);
   const benchmarkAbortController = useRef<AbortController | null>(null);
+  const singleAbortController = useRef<AbortController | null>(null);
   const [runningSingleId, setRunningSingleId] = useState<string | null>(null);
   const [progress, setProgress] = useState<{
     current: number;
@@ -335,8 +341,28 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
   const [selectedRunIds, setSelectedRunIds] = useState<string[]>([]);
   const [runsLoading, setRunsLoading] = useState(false);
   const [savedRun, setSavedRun] = useState<SavedBenchmarkRun | null>(null);
-  const [showMatchingConfigs, setShowMatchingConfigs] = useState(false);
   const [deletingRunId, setDeletingRunId] = useState<string | null>(null);
+  const [showMatchingConfigs, setShowMatchingConfigs] = useState(false);
+  const [activeAttemptIndices, setActiveAttemptIndices] = useState<Record<string, number>>({});
+  const [liveSteps, setLiveSteps] = useState<Array<{ timestamp: number; text: string; type: string; detail?: string }>>([]);
+  const [liveStreamingText, setLiveStreamingText] = useState<string>('');
+  const [liveThinkingText, setLiveThinkingText] = useState<string>('');
+  const [liveActiveTool, setLiveActiveTool] = useState<string | null>(null);
+  const [liveMetrics, setLiveMetrics] = useState<{ promptTokens?: number; generatedTokens?: number; tokensPerSec?: string } | null>(null);
+  const [elapsedMs, setElapsedMs] = useState(0);
+
+  useEffect(() => {
+    if (isRunning || runningSingleId !== null) {
+      const start = Date.now();
+      setElapsedMs(0);
+      const interval = setInterval(() => {
+        setElapsedMs(Date.now() - start);
+      }, 100);
+      return () => clearInterval(interval);
+    } else {
+      setElapsedMs(0);
+    }
+  }, [isRunning, runningSingleId]);
   const [runSort, setRunSort] = useState<{ key: 'rank' | 'model' | 'date' | 'elapsed' | 'total' | 'average'; direction: 'asc' | 'desc' }>({ key: 'rank', direction: 'asc' });
 
   const loadSavedRuns = async (directory?: string) => {
@@ -403,6 +429,7 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
       complexityProfile: benchmarkConfig.complexityProfile,
       systemPrompt: benchmarkConfig.systemPrompt,
       pruningConfig: benchmarkConfig.pruningConfig,
+      enabledTools: benchmarkConfig.enabledTools,
     },
   });
 
@@ -508,7 +535,37 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
                 total: eventData.total,
                 testName: eventData.test.name,
               });
+              setLiveStreamingText('');
+              setLiveThinkingText('');
+              setLiveActiveTool(null);
+              setLiveMetrics(null);
+              setLiveSteps((prev) => [...prev.slice(-24), { timestamp: Date.now(), type: 'start', text: `🚀 Starting Test: ${eventData.test.name}` }]);
+            } else if (eventType === 'test_step') {
+              if (eventData.type === 'llm_start') {
+                setLiveSteps((prev) => [...prev.slice(-24), { timestamp: eventData.timestamp || Date.now(), type: 'llm_start', text: `🤖 Ollama LLM Inference started for ${eventData.model || 'model'} (Evaluating prompt tokens...)` }]);
+              } else if (eventData.type === 'chunk') {
+                setLiveStreamingText(eventData.snippet || '');
+              } else if (eventData.type === 'thinking_chunk') {
+                setLiveThinkingText(eventData.snippet || '');
+              } else if (eventData.type === 'metrics') {
+                setLiveMetrics({
+                  promptTokens: eventData.promptTokens,
+                  generatedTokens: eventData.generatedTokens,
+                  tokensPerSec: eventData.tokensPerSec,
+                });
+              } else if (eventData.type === 'tool_start') {
+                setLiveActiveTool(eventData.name);
+                setLiveSteps((prev) => [...prev.slice(-24), { timestamp: eventData.timestamp || Date.now(), type: eventData.type, text: `🛠️ Executing Tool: ${eventData.name}`, detail: eventData.args ? JSON.stringify(eventData.args) : undefined }]);
+              } else if (eventData.type === 'tool_end') {
+                setLiveActiveTool(null);
+                setLiveSteps((prev) => [...prev.slice(-24), { timestamp: eventData.timestamp || Date.now(), type: eventData.type, text: `✅ Finished Tool: ${eventData.name}`, detail: eventData.resultSnippet }]);
+              } else if (eventData.type === 'assistant_message') {
+                setLiveSteps((prev) => [...prev.slice(-24), { timestamp: eventData.timestamp || Date.now(), type: eventData.type, text: `💬 Model Turn Completed` }]);
+              }
             } else if (eventType === 'test_complete') {
+              setLiveStreamingText('');
+              setLiveThinkingText('');
+              setLiveActiveTool(null);
               setProgress((prev) => ({
                 current: eventData.current,
                 completed: eventData.current,
@@ -519,6 +576,8 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
                 const filtered = prev.filter((r) => r.testId !== eventData.trace.testId);
                 return [...filtered, eventData.trace];
               });
+              const verdict = eventData.trace.passed ? 'PASSED' : 'FAILED';
+              setLiveSteps((prev) => [...prev.slice(-24), { timestamp: Date.now(), type: 'complete', text: `${eventData.trace.passed ? '✅' : '❌'} Test ${verdict}: ${eventData.trace.testName} (${(eventData.trace.durationMs / 1000).toFixed(2)}s)` }]);
             } else if (eventType === 'benchmark_done') {
               setReport(eventData.report);
               if (eventData.savedRun) {
@@ -562,26 +621,105 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
       alert(configError);
       return;
     }
+    const controller = new AbortController();
+    singleAbortController.current = controller;
     setRunningSingleId(testId);
+    setLiveStreamingText('');
+    setLiveThinkingText('');
+    setLiveActiveTool(null);
+    setLiveMetrics(null);
+    setLiveSteps([{ timestamp: Date.now(), type: 'start', text: `🚀 Initializing single test execution for ${testId}...` }]);
     try {
       const res = await fetch('/api/benchmark/run-single', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ testId, ...benchmarkRequestConfig() }),
+        body: JSON.stringify({ testId, stream: true, ...benchmarkRequestConfig() }),
+        signal: controller.signal,
       });
-      const data = await res.json();
-      if (data.success && data.trace) {
-        setLiveResults((prev) => {
-          const filtered = prev.filter((r) => r.testId !== testId);
-          return [...filtered, data.trace];
-        });
-      } else {
-        alert(`Test execution failed: ${data.error}`);
+
+      if (!res.ok || !res.body) {
+        throw new Error(`Server connection error ${res.status}`);
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder('utf-8');
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n\n');
+        buffer = lines.pop() || '';
+
+        for (const block of lines) {
+          if (!block.trim()) continue;
+          const eventLine = block.match(/^event:\s*(.+)$/m);
+          const dataLine = block.match(/^data:\s*(.+)$/m);
+
+          if (eventLine && dataLine) {
+            const eventType = eventLine[1].trim();
+            const eventData = JSON.parse(dataLine[1].trim());
+
+            if (eventType === 'test_start') {
+              setLiveSteps((prev) => [...prev.slice(-24), { timestamp: Date.now(), type: 'start', text: `🐳 Docker Sandbox active for ${eventData.test.name}` }]);
+            } else if (eventType === 'test_step') {
+              if (eventData.type === 'llm_start') {
+                setLiveSteps((prev) => [...prev.slice(-24), { timestamp: eventData.timestamp || Date.now(), type: 'llm_start', text: `🤖 Ollama LLM Inference started for ${eventData.model || 'model'} (Evaluating prompt tokens...)` }]);
+              } else if (eventData.type === 'chunk') {
+                setLiveStreamingText(eventData.snippet || '');
+              } else if (eventData.type === 'thinking_chunk') {
+                setLiveThinkingText(eventData.snippet || '');
+              } else if (eventData.type === 'metrics') {
+                setLiveMetrics({
+                  promptTokens: eventData.promptTokens,
+                  generatedTokens: eventData.generatedTokens,
+                  tokensPerSec: eventData.tokensPerSec,
+                });
+              } else if (eventData.type === 'tool_start') {
+                setLiveActiveTool(eventData.name);
+                setLiveSteps((prev) => [...prev.slice(-24), { timestamp: eventData.timestamp || Date.now(), type: eventData.type, text: `🛠️ Executing Tool: ${eventData.name}`, detail: eventData.args ? JSON.stringify(eventData.args) : undefined }]);
+              } else if (eventData.type === 'tool_end') {
+                setLiveActiveTool(null);
+                setLiveSteps((prev) => [...prev.slice(-24), { timestamp: eventData.timestamp || Date.now(), type: eventData.type, text: `✅ Finished Tool: ${eventData.name}`, detail: eventData.resultSnippet }]);
+              } else if (eventData.type === 'assistant_message') {
+                setLiveSteps((prev) => [...prev.slice(-24), { timestamp: eventData.timestamp || Date.now(), type: eventData.type, text: `💬 Model Turn Completed` }]);
+              }
+            } else if (eventType === 'test_complete') {
+              setLiveStreamingText('');
+              setLiveThinkingText('');
+              setLiveActiveTool(null);
+              if (eventData.trace) {
+                setLiveResults((prev) => {
+                  const filtered = prev.filter((r) => r.testId !== testId);
+                  return [...filtered, eventData.trace];
+                });
+                const verdict = eventData.trace.passed ? 'PASSED' : 'FAILED';
+                setLiveSteps((prev) => [...prev.slice(-24), { timestamp: Date.now(), type: 'complete', text: `${eventData.trace.passed ? '✅' : '❌'} Test ${verdict}: ${eventData.trace.testName} (${(eventData.trace.durationMs / 1000).toFixed(2)}s)` }]);
+              }
+            } else if (eventType === 'error') {
+              alert(`Test execution failed: ${eventData.error}`);
+            }
+          }
+        }
       }
     } catch (err: any) {
-      alert(`Error running single test: ${err.message}`);
+      if (err?.name !== 'AbortError') {
+        alert(`Error running single test: ${err.message}`);
+      }
     } finally {
+      if (singleAbortController.current === controller) {
+        singleAbortController.current = null;
+      }
       setRunningSingleId(null);
+    }
+  };
+
+  const handleStopSingleTest = () => {
+    if (singleAbortController.current) {
+      singleAbortController.current.abort();
+      singleAbortController.current = null;
     }
   };
 
@@ -847,30 +985,32 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
         {/* Primary benchmark action */}
         <div className="benchmark-actions" style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
           <button
-            onClick={isRunning ? handleStopBenchmarks : handleRunAllBenchmarks}
-            disabled={isStopping || (!isRunning && (runningSingleId !== null || editingBenchmarkId !== null || !selectedBenchmark))}
+            onClick={isRunning ? handleStopBenchmarks : runningSingleId !== null ? handleStopSingleTest : handleRunAllBenchmarks}
+            disabled={isStopping || (!isRunning && runningSingleId === null && (editingBenchmarkId !== null || !selectedBenchmark))}
             style={{
               display: 'flex',
               alignItems: 'center',
               gap: '8px',
-              background: isRunning ? 'rgba(239, 68, 68, 0.16)' : 'var(--accent-gradient)',
-              border: isRunning ? '1px solid rgba(239, 68, 68, 0.55)' : 'none',
+              background: (isRunning || runningSingleId !== null) ? 'rgba(239, 68, 68, 0.16)' : 'var(--accent-gradient)',
+              border: (isRunning || runningSingleId !== null) ? '1px solid rgba(239, 68, 68, 0.55)' : 'none',
               color: '#fff',
               padding: '10px 20px',
               borderRadius: '8px',
               fontSize: '0.9rem',
               fontWeight: 600,
-              cursor: isStopping || (!isRunning && (runningSingleId !== null || editingBenchmarkId !== null || !selectedBenchmark)) ? 'not-allowed' : 'pointer',
-              boxShadow: isRunning ? '0 4px 14px rgba(239, 68, 68, 0.2)' : '0 4px 14px rgba(99, 102, 241, 0.35)',
+              cursor: isStopping || (!isRunning && runningSingleId === null && (editingBenchmarkId !== null || !selectedBenchmark)) ? 'not-allowed' : 'pointer',
+              boxShadow: (isRunning || runningSingleId !== null) ? '0 4px 14px rgba(239, 68, 68, 0.2)' : '0 4px 14px rgba(99, 102, 241, 0.35)',
               transition: 'all 0.2s',
             }}
           >
-            {isStopping ? <Loader2 size={18} className="spin" /> : isRunning ? <Square size={17} /> : <Play size={18} />}
+            {isStopping ? <Loader2 size={18} className="spin" /> : (isRunning || runningSingleId !== null) ? <Square size={17} /> : <Play size={18} />}
             <span>
               {isRunning
                 ? isStopping
                   ? 'Stopping…'
                   : `Stop Benchmark (${progress ? `${progress.current}/${progress.total}` : ''})`
+                : runningSingleId !== null
+                ? 'Stop 1-by-1 Test'
                 : `Run ${selectedBenchmark?.name || 'Benchmark'} (${selectedBenchmark?.testIds.length || 0})`}
             </span>
           </button>
@@ -1077,6 +1217,20 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
               </label>
             </div>
           </div>
+
+          {/* ── Tool Access ── */}
+          <div style={{ gridColumn: '1 / -1', borderTop: '1px solid var(--border-color)', paddingTop: '14px' }}>
+            <div style={{ marginBottom: '10px' }}>
+              <div style={{ color: 'var(--text-main)', fontSize: '0.85rem', fontWeight: 600 }}>Tool Access</div>
+              <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem', marginTop: '2px' }}>Choose which tools the agent may call during this benchmark run. Disabling tools here does not affect the chat agent.</div>
+            </div>
+            <ToolTogglePanel
+              enabledTools={benchmarkConfig.enabledTools}
+              onChange={(updated) => { setConfigDirty(true); setBenchmarkConfig((prev) => ({ ...prev, enabledTools: updated })); }}
+              variant="compact"
+              disabled={configLocked}
+            />
+          </div>
         </div>
         </div>}
       </div>
@@ -1131,27 +1285,174 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
         </div>
       )}
 
-      {/* Live Stream Progress Bar */}
-      {isRunning && progress && (
-        <div className="glass-panel animate-fade-in" style={{ padding: '16px 20px', borderRadius: '12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          <div className="benchmark-progress-labels" style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-            <span style={{ fontWeight: 600, color: 'var(--accent-amber)' }}>
-              ⚡ Running {progress.current} of {progress.total}
-              {progress.testName ? `: ${progress.testName}` : '...'}
-            </span>
-            <span>{Math.round((progress.completed / progress.total) * 100)}% Complete</span>
+      {/* Live Stream / Single Test Active Run Status Card */}
+      {(isRunning || runningSingleId !== null) && (
+        <div
+          className="glass-panel animate-fade-in"
+          style={{
+            padding: '20px 24px',
+            borderRadius: '14px',
+            border: '1px solid rgba(245, 158, 11, 0.4)',
+            background: 'rgba(245, 158, 11, 0.05)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '14px',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <Loader2 size={22} className="spin" color="#f59e0b" />
+              <div>
+                <h4 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 700, color: 'var(--text-main)' }}>
+                  {runningSingleId ? '1-by-1 Single Test Execution Active' : `Benchmark Suite Run Active (${progress ? `${progress.current}/${progress.total}` : 'Initializing'})`}
+                </h4>
+                <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                  Executing model tool calls, execution flow & system assertions in isolated Docker container
+                </span>
+              </div>
+            </div>
+
+            {/* Live Elapsed Timer Badge */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'rgba(15, 23, 42, 0.8)', padding: '6px 16px', borderRadius: '20px', border: '1px solid rgba(245, 158, 11, 0.35)' }}>
+              <Clock size={15} color="#f59e0b" />
+              <span style={{ fontFamily: 'var(--font-code)', fontSize: '0.9rem', fontWeight: 700, color: '#fbbf24' }}>
+                {(elapsedMs / 1000).toFixed(1)}s elapsed
+              </span>
+            </div>
           </div>
-          <div style={{ height: '8px', width: '100%', background: 'rgba(255, 255, 255, 0.1)', borderRadius: '4px', overflow: 'hidden' }}>
-            <div
-              style={{
-                height: '100%',
-                width: `${(progress.completed / progress.total) * 100}%`,
-                background: 'var(--accent-gradient)',
-                borderRadius: '4px',
-                transition: 'width 0.3s ease',
-              }}
-            />
+
+          {/* Active Test Metadata & Prompt Preview */}
+          {(() => {
+            const currentTest = runningSingleId
+              ? testCasesInfo.find((t) => t.id === runningSingleId)
+              : testCasesInfo.find((t) => t.name === progress?.testName);
+
+            return (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '10px', background: 'rgba(15, 23, 42, 0.65)', padding: '12px 16px', borderRadius: '10px', border: '1px solid var(--border-color)' }}>
+                  <div>
+                    <span style={{ display: 'block', fontSize: '0.72rem', color: 'var(--text-dim)', textTransform: 'uppercase', fontWeight: 600 }}>Active Test</span>
+                    <strong style={{ fontSize: '0.875rem', color: 'var(--text-main)', display: 'block', marginTop: '2px' }}>{currentTest?.name || progress?.testName || runningSingleId || 'Running...'}</strong>
+                  </div>
+
+                  <div>
+                    <span style={{ display: 'block', fontSize: '0.72rem', color: 'var(--text-dim)', textTransform: 'uppercase', fontWeight: 600 }}>Target Model</span>
+                    <strong style={{ fontSize: '0.875rem', color: 'var(--accent-teal)', display: 'block', marginTop: '2px' }}>{benchmarkConfig.model}</strong>
+                  </div>
+
+                  <div>
+                    <span style={{ display: 'block', fontSize: '0.72rem', color: 'var(--text-dim)', textTransform: 'uppercase', fontWeight: 600 }}>Category</span>
+                    <strong style={{ fontSize: '0.875rem', color: 'var(--accent-primary)', display: 'block', marginTop: '2px' }}>{currentTest?.category || 'General'}</strong>
+                  </div>
+
+                  <div>
+                    <span style={{ display: 'block', fontSize: '0.72rem', color: 'var(--text-dim)', textTransform: 'uppercase', fontWeight: 600 }}>Environment</span>
+                    <span style={{ fontSize: '0.825rem', color: 'var(--text-muted)', display: 'block', marginTop: '2px' }}>Docker Sandbox Container</span>
+                  </div>
+                </div>
+
+                {currentTest?.prompt && (
+                  <div style={{ background: 'rgba(15, 23, 42, 0.5)', padding: '8px 12px', borderRadius: '8px', border: '1px solid rgba(255, 255, 255, 0.08)', fontSize: '0.78rem' }}>
+                    <span style={{ color: 'var(--text-muted)', fontWeight: 600 }}>Active Prompt: </span>
+                    <span style={{ color: '#fcd34d', fontFamily: 'var(--font-code)' }}>"{currentTest.prompt}"</span>
+                  </div>
+                )}
+
+                {/* Live Real-time Activity Badges */}
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+                  {liveActiveTool && (
+                    <span style={{ background: 'rgba(99, 102, 241, 0.2)', border: '1px solid rgba(99, 102, 241, 0.5)', color: '#a5b4fc', padding: '4px 10px', borderRadius: '6px', fontSize: '0.78rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <Loader2 size={13} className="spin" /> Executing Tool: <code>{liveActiveTool}</code>
+                    </span>
+                  )}
+                  {liveMetrics && (
+                    <span style={{ background: 'rgba(20, 184, 166, 0.15)', border: '1px solid rgba(20, 184, 166, 0.35)', color: '#5eead4', padding: '4px 10px', borderRadius: '6px', fontSize: '0.78rem', fontWeight: 600 }}>
+                      ⚡ {liveMetrics.tokensPerSec ? `${liveMetrics.tokensPerSec} tok/s` : 'Processing'} · {liveMetrics.promptTokens ?? 0} prompt tokens · {liveMetrics.generatedTokens ?? 0} generated tokens
+                    </span>
+                  )}
+                  {benchmarkConfig.enableThinking !== false && (
+                    <span style={{ background: 'rgba(168, 85, 247, 0.15)', border: '1px solid rgba(168, 85, 247, 0.35)', color: '#c084fc', padding: '4px 10px', borderRadius: '6px', fontSize: '0.78rem', fontWeight: 600 }}>
+                      🧠 Thinking Mode Enabled
+                    </span>
+                  )}
+                </div>
+
+                {/* Live Model Thinking Box (if streaming thinking chunks) */}
+                {liveThinkingText && (
+                  <div style={{ background: 'rgba(168, 85, 247, 0.08)', padding: '10px 12px', borderRadius: '8px', border: '1px solid rgba(168, 85, 247, 0.25)', fontSize: '0.78rem' }}>
+                    <span style={{ color: '#c084fc', fontWeight: 700, display: 'block', marginBottom: '4px' }}>🧠 Live Model Reasoning Stream:</span>
+                    <span style={{ color: '#e9d5ff', fontFamily: 'var(--font-code)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{liveThinkingText}...</span>
+                  </div>
+                )}
+
+                {/* Live Model Response Content Box (if streaming content chunks) */}
+                {liveStreamingText && (
+                  <div style={{ background: 'rgba(56, 189, 248, 0.08)', padding: '10px 12px', borderRadius: '8px', border: '1px solid rgba(56, 189, 248, 0.25)', fontSize: '0.78rem' }}>
+                    <span style={{ color: '#38bdf8', fontWeight: 700, display: 'block', marginBottom: '4px' }}>💬 Live Response Generation Stream:</span>
+                    <span style={{ color: '#bae6fd', fontFamily: 'var(--font-code)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{liveStreamingText}...</span>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
+          {/* Live Real-Time Execution Console */}
+          <div style={{ background: '#090d16', padding: '12px 14px', borderRadius: '10px', border: '1px solid rgba(56, 189, 248, 0.25)', fontFamily: 'var(--font-code)', fontSize: '0.78rem', display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '180px', overflowY: 'auto' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', color: '#38bdf8', fontSize: '0.72rem', fontWeight: 700, borderBottom: '1px solid rgba(255, 255, 255, 0.08)', paddingBottom: '6px', textTransform: 'uppercase' }}>
+              <span>Live Execution Log Feed</span>
+              <span>{liveSteps.length} steps recorded</span>
+            </div>
+            {liveSteps.length === 0 ? (
+              <div style={{ color: 'var(--text-dim)', fontStyle: 'italic', padding: '6px 0' }}>Initializing Docker container & agent loop...</div>
+            ) : (
+              <>
+                {liveSteps.map((step, i) => (
+                  <div key={i} style={{ display: 'flex', gap: '8px', alignItems: 'flex-start', lineHeight: 1.4 }}>
+                    <span style={{ color: 'var(--text-dim)', fontSize: '0.7rem', flexShrink: 0 }}>
+                      {new Date(step.timestamp).toLocaleTimeString()}
+                    </span>
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <span style={{ color: step.type === 'complete' ? '#34d399' : step.type === 'llm_start' ? '#fbbf24' : step.type.startsWith('tool') ? '#a7f3d0' : '#e2e8f0' }}>
+                        {step.text}
+                      </span>
+                      {step.detail && (
+                        <span style={{ display: 'block', color: 'var(--text-muted)', fontSize: '0.72rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {step.detail}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+                {!liveStreamingText && !liveThinkingText && liveSteps.some((s) => s.type === 'llm_start' || s.type === 'start') && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#fbbf24', fontSize: '0.74rem', padding: '4px 0', borderTop: '1px dashed rgba(255, 255, 255, 0.1)', marginTop: '4px' }}>
+                    <Loader2 size={12} className="spin" />
+                    <span>Ollama is evaluating prompt tokens & loading model weights for <code>{benchmarkConfig.model}</code>. Streamed tokens and tool calls will appear here live...</span>
+                  </div>
+                )}
+              </>
+            )}
           </div>
+
+          {/* Progress bar for suite runs */}
+          {isRunning && progress && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                <span>Suite Progress ({progress.completed} of {progress.total} finished)</span>
+                <span>{Math.round((progress.completed / progress.total) * 100)}%</span>
+              </div>
+              <div style={{ height: '8px', width: '100%', background: 'rgba(255, 255, 255, 0.1)', borderRadius: '4px', overflow: 'hidden' }}>
+                <div
+                  style={{
+                    height: '100%',
+                    width: `${(progress.completed / progress.total) * 100}%`,
+                    background: 'var(--accent-gradient)',
+                    borderRadius: '4px',
+                    transition: 'width 0.3s ease',
+                  }}
+                />
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -1246,6 +1547,7 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
               { id: 'information_retrieval', label: '🔎 Information Retrieval' },
               { id: 'project_context', label: '🧭 Project Context' },
               { id: 'web_search', label: '🌐 Web Search' },
+              { id: 'real_web_search', label: '🔍 Real Web Search' },
               { id: 'ast_lsp_navigation', label: '🌳 AST/LSP' },
             ].map((cat) => {
               const catTotal = cat.id === 'all' ? testCasesInfo.length : testCasesInfo.filter((t) => t.category === cat.id).length;
@@ -1352,7 +1654,7 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
                         <span>Info</span>
                       </button>
                     </div>
-                    <span style={{ fontSize: '0.825rem', color: 'var(--text-muted)', display: 'block', marginTop: '2px' }}>
+                    <span style={{ fontSize: '0.825rem', color: 'var(--text-muted)', display: 'block', marginTop: '2px', whiteSpace: 'pre-wrap', lineHeight: '1.4' }}>
                       Prompt: "{tc.prompt}"
                     </span>
                   </div>
@@ -1377,36 +1679,58 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
                     </div>
                   )}
 
-                  {/* 1-by-1 Run / Rerun Button */}
-                  <button
-                    onClick={() => handleRunSingleTest(tc.id)}
-                    disabled={isRunning || isSingleRunning}
-                    title={resultTrace ? 'Rerun this single test' : 'Run this single test'}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '6px',
-                      background: resultTrace ? 'rgba(255, 255, 255, 0.08)' : 'var(--accent-gradient)',
-                      border: '1px solid var(--border-color)',
-                      color: '#fff',
-                      padding: '6px 12px',
-                      borderRadius: '8px',
-                      fontSize: '0.8rem',
-                      fontWeight: 600,
-                      cursor: isRunning || isSingleRunning ? 'not-allowed' : 'pointer',
-                      opacity: isRunning || isSingleRunning ? 0.6 : 1,
-                      transition: 'all 0.2s',
-                    }}
-                  >
-                    {isSingleRunning ? (
-                      <Loader2 size={14} className="spin" />
-                    ) : resultTrace ? (
-                      <RotateCw size={14} color="var(--accent-teal)" />
-                    ) : (
-                      <Play size={14} />
-                    )}
-                    <span>{isSingleRunning ? 'Testing...' : resultTrace ? 'Rerun' : 'Run Test'}</span>
-                  </button>
+                  {/* 1-by-1 Run / Stop Button */}
+                  {isSingleRunning ? (
+                    <button
+                      onClick={handleStopSingleTest}
+                      title="Stop running test"
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        background: 'rgba(239, 68, 68, 0.16)',
+                        border: '1px solid rgba(239, 68, 68, 0.55)',
+                        color: '#ef4444',
+                        padding: '6px 12px',
+                        borderRadius: '8px',
+                        fontSize: '0.8rem',
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                        transition: 'all 0.2s',
+                      }}
+                    >
+                      <Square size={14} fill="#ef4444" />
+                      <span>Stop</span>
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => handleRunSingleTest(tc.id)}
+                      disabled={isRunning || runningSingleId !== null}
+                      title={resultTrace ? 'Rerun this single test' : 'Run this single test'}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        background: resultTrace ? 'rgba(255, 255, 255, 0.08)' : 'var(--accent-gradient)',
+                        border: '1px solid var(--border-color)',
+                        color: '#fff',
+                        padding: '6px 12px',
+                        borderRadius: '8px',
+                        fontSize: '0.8rem',
+                        fontWeight: 600,
+                        cursor: isRunning || runningSingleId !== null ? 'not-allowed' : 'pointer',
+                        opacity: isRunning || runningSingleId !== null ? 0.6 : 1,
+                        transition: 'all 0.2s',
+                      }}
+                    >
+                      {resultTrace ? (
+                        <RotateCw size={14} color="var(--accent-teal)" />
+                      ) : (
+                        <Play size={14} />
+                      )}
+                      <span>{resultTrace ? 'Rerun' : 'Run Test'}</span>
+                    </button>
+                  )}
 
                   {resultTrace && (
                     <button
@@ -1422,60 +1746,108 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
               {/* Expandable Trace Drawer */}
               {resultTrace && isExpanded && (
                 <div className="benchmark-trace" style={{ padding: '16px 20px', borderTop: '1px solid var(--border-color)', background: 'rgba(15, 23, 42, 0.8)', fontSize: '0.85rem' }}>
-                  <div style={{ marginBottom: '12px', padding: '8px 12px', borderRadius: '6px', background: resultTrace.passed ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)', color: resultTrace.passed ? '#34d399' : '#f87171' }}>
-                    <strong>Verdict Reason:</strong> {resultTrace.reason}
-                    <div style={{ marginTop: '4px', color: 'var(--text-muted)' }}>
-                      Container: {resultTrace.container.image} · workspace {resultTrace.container.workspace} · isolated: {String(resultTrace.container.isolated)}
-                    </div>
-                  </div>
+                  {(() => {
+                    const attemptsList = resultTrace.attempts && resultTrace.attempts.length > 0 ? resultTrace.attempts : [resultTrace];
+                    const selectedIdx = activeAttemptIndices[tc.id] ?? 0;
+                    const activeAttempt = attemptsList[selectedIdx] || resultTrace;
 
-                  <div className="benchmark-trace-grid" style={{ display: 'grid', gap: '16px' }}>
-                    <div>
-                      <strong style={{ color: '#38bdf8', display: 'block', marginBottom: '4px' }}>Timing totals ({resultTrace.attemptCount} attempts):</strong>
-                      <HighlightedJson value={{
-                        imageSetup: formatMs(resultTrace.timing.imageSetupMs),
-                        containerStartup: formatMs(resultTrace.timing.containerStartupMs),
-                        modelLoad: formatMs(resultTrace.timing.modelLoadMs),
-                        promptEvaluation: formatMs(resultTrace.timing.promptEvaluationMs),
-                        generation: formatMs(resultTrace.timing.generationMs),
-                        toolExecution: formatMs(resultTrace.timing.toolExecutionMs),
-                        verification: formatMs(resultTrace.timing.verificationMs),
-                        endToEndWall: formatMs(resultTrace.timing.endToEndWallMs),
-                        comparison: formatMs(resultTrace.timing.comparisonMs),
-                        promptTokens: resultTrace.timing.promptTokens,
-                        generatedTokens: resultTrace.timing.generatedTokens,
-                      }} />
-                    </div>
-                    <div>
-                      <strong style={{ color: 'var(--accent-primary)', display: 'block', marginBottom: '4px' }}>Tools Invoked ({resultTrace.actualToolsCalled.length}):</strong>
-                      <HighlightedJson
-                        value={resultTrace.actualToolsCalled.length > 0 ? resultTrace.actualToolsCalled : undefined}
-                        emptyText="No tools invoked."
-                      />
-                    </div>
+                    return (
+                      <>
+                        {/* Attempt selector tabs if multiple attempts */}
+                        {attemptsList.length > 1 && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '14px', flexWrap: 'wrap', borderBottom: '1px solid var(--border-color)', paddingBottom: '10px' }}>
+                            <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: 600 }}>Select Attempt ({attemptsList.length} total):</span>
+                            {attemptsList.map((att, idx) => {
+                              const isSelected = selectedIdx === idx;
+                              return (
+                                <button
+                                  key={idx}
+                                  type="button"
+                                  onClick={() => setActiveAttemptIndices((prev) => ({ ...prev, [tc.id]: idx }))}
+                                  style={{
+                                    padding: '5px 12px',
+                                    borderRadius: '6px',
+                                    background: isSelected
+                                      ? (att.passed ? 'rgba(16, 185, 129, 0.25)' : 'rgba(239, 68, 68, 0.25)')
+                                      : 'rgba(30, 41, 59, 0.5)',
+                                    border: `1px solid ${isSelected ? (att.passed ? '#10b981' : '#ef4444') : 'var(--border-color)'}`,
+                                    color: isSelected ? '#fff' : (att.passed ? '#34d399' : '#f87171'),
+                                    fontSize: '0.78rem',
+                                    fontWeight: 600,
+                                    cursor: 'pointer',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '6px',
+                                  }}
+                                >
+                                  {att.passed ? <CheckCircle2 size={13} color="#10b981" /> : <XCircle size={13} color="#ef4444" />}
+                                  <span>Attempt #{att.attemptNumber || idx + 1}</span>
+                                  <span style={{ opacity: 0.8, fontSize: '0.72rem' }}>({formatMs(att.durationMs)})</span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
 
-                    <div>
-                      <strong style={{ color: 'var(--accent-teal)', display: 'block', marginBottom: '4px' }}>Model Response Content:</strong>
-                      <pre style={{ fontSize: '0.775rem', whiteSpace: 'pre-wrap' }}>
-                        {resultTrace.responseContent || '(Empty response)'}
-                      </pre>
-                    </div>
-                  </div>
+                        <div style={{ marginBottom: '12px', padding: '8px 12px', borderRadius: '6px', background: activeAttempt.passed ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)', color: activeAttempt.passed ? '#34d399' : '#f87171' }}>
+                          <strong>Verdict Reason ({attemptsList.length > 1 ? `Attempt #${activeAttempt.attemptNumber || selectedIdx + 1}` : 'Overall'}):</strong> {activeAttempt.reason}
+                          <div style={{ marginTop: '4px', color: 'var(--text-muted)' }}>
+                            Container: {activeAttempt.container.image} · workspace {activeAttempt.container.workspace} · isolated: {String(activeAttempt.container.isolated)}
+                          </div>
+                        </div>
 
-                  <div style={{ marginTop: '16px' }}>
-                    <strong style={{ color: 'var(--accent-amber)', display: 'block', marginBottom: '4px' }}>Outcome Verification:</strong>
-                    <HighlightedJson value={resultTrace.verificationDetails} emptyText="No verification details." style={{ whiteSpace: 'pre-wrap' }} />
-                  </div>
+                        <div className="benchmark-trace-grid" style={{ display: 'grid', gap: '16px' }}>
+                          <div>
+                            <strong style={{ color: '#38bdf8', display: 'block', marginBottom: '4px' }}>
+                              Timing Breakdown {attemptsList.length > 1 ? `(Attempt #${activeAttempt.attemptNumber || selectedIdx + 1})` : `(${resultTrace.attemptCount} attempts total)`}:
+                            </strong>
+                            <HighlightedJson value={{
+                              imageSetup: formatMs(activeAttempt.timing.imageSetupMs),
+                              containerStartup: formatMs(activeAttempt.timing.containerStartupMs),
+                              modelLoad: formatMs(activeAttempt.timing.modelLoadMs),
+                              promptEvaluation: formatMs(activeAttempt.timing.promptEvaluationMs),
+                              generation: formatMs(activeAttempt.timing.generationMs),
+                              toolExecution: formatMs(activeAttempt.timing.toolExecutionMs),
+                              verification: formatMs(activeAttempt.timing.verificationMs),
+                              endToEndWall: formatMs(activeAttempt.timing.endToEndWallMs),
+                              comparison: formatMs(activeAttempt.timing.comparisonMs),
+                              promptTokens: activeAttempt.timing.promptTokens,
+                              generatedTokens: activeAttempt.timing.generatedTokens,
+                            }} />
+                          </div>
+                          <div>
+                            <strong style={{ color: 'var(--accent-primary)', display: 'block', marginBottom: '4px' }}>Tools Invoked ({activeAttempt.actualToolsCalled.length}):</strong>
+                            <HighlightedJson
+                              value={activeAttempt.actualToolsCalled.length > 0 ? activeAttempt.actualToolsCalled : undefined}
+                              emptyText="No tools invoked."
+                            />
+                          </div>
 
-                  <div style={{ marginTop: '16px' }}>
-                    <strong style={{ color: 'var(--accent-primary)', display: 'block', marginBottom: '4px' }}>Effective Agent Configuration:</strong>
-                    <HighlightedJson value={resultTrace.agentConfig} style={{ whiteSpace: 'pre-wrap' }} />
-                  </div>
+                          <div>
+                            <strong style={{ color: 'var(--accent-teal)', display: 'block', marginBottom: '4px' }}>Model Response Content:</strong>
+                            <pre style={{ fontSize: '0.775rem', whiteSpace: 'pre-wrap' }}>
+                              {activeAttempt.responseContent || '(Empty response)'}
+                            </pre>
+                          </div>
+                        </div>
 
-                  <div style={{ marginTop: '16px' }}>
-                    <strong style={{ color: '#c084fc', display: 'block', marginBottom: '4px' }}>Complete Execution Trace:</strong>
-                    <HighlightedJson value={resultTrace.attempts ?? [resultTrace]} style={{ whiteSpace: 'pre-wrap', maxHeight: '420px', overflow: 'auto' }} />
-                  </div>
+                        <div style={{ marginTop: '16px' }}>
+                          <strong style={{ color: 'var(--accent-amber)', display: 'block', marginBottom: '4px' }}>Outcome Verification:</strong>
+                          <HighlightedJson value={activeAttempt.verificationDetails} emptyText="No verification details." style={{ whiteSpace: 'pre-wrap' }} />
+                        </div>
+
+                        <div style={{ marginTop: '16px' }}>
+                          <strong style={{ color: 'var(--accent-primary)', display: 'block', marginBottom: '4px' }}>Effective Agent Configuration:</strong>
+                          <HighlightedJson value={activeAttempt.agentConfig} style={{ whiteSpace: 'pre-wrap' }} />
+                        </div>
+
+                        <div style={{ marginTop: '16px' }}>
+                          <strong style={{ color: '#c084fc', display: 'block', marginBottom: '4px' }}>Complete Execution Trace:</strong>
+                          <HighlightedJson value={activeAttempt.executionTrace ?? resultTrace.attempts ?? [resultTrace]} style={{ whiteSpace: 'pre-wrap', maxHeight: '420px', overflow: 'auto' }} />
+                        </div>
+                      </>
+                    );
+                  })()}
                 </div>
               )}
             </div>

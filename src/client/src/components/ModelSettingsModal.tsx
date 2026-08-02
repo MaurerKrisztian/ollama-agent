@@ -141,13 +141,14 @@ export const ModelSettingsModal: React.FC<ModelSettingsModalProps> = ({
   };
 
   const unloadActiveModel = async () => {
-    if (!loadedModel || unloadState === 'unloading') return;
+    const targetModel = loadedModel?.name || loadedModel?.model || config.model;
+    if (!targetModel || unloadState === 'unloading') return;
     setUnloadState('unloading');
     setUnloadMessage('');
     try {
-      await onUnloadModel(loadedModel.name || loadedModel.model || config.model);
+      await onUnloadModel(targetModel);
       setUnloadState('success');
-      setUnloadMessage(`${config.model} was unloaded from VRAM.`);
+      setUnloadMessage(`${targetModel} was successfully unloaded from VRAM.`);
     } catch (err: any) {
       setUnloadState('error');
       setUnloadMessage(err.message || 'Could not unload the model.');
@@ -189,20 +190,21 @@ export const ModelSettingsModal: React.FC<ModelSettingsModalProps> = ({
                 <span />
                 {loadedModel ? `Loaded${vramGb ? ` · ${vramGb} GB VRAM` : ''}` : 'Idle · loads on the next prompt'}
               </div>
-              {loadedModel && (
-                <button
-                  type="button"
-                  className="model-unload-button"
-                  disabled={unloadState === 'unloading'}
-                  onClick={() => void unloadActiveModel()}
-                >
-                  {unloadState === 'unloading' ? <Loader2 size={14} className="spin" /> : <Power size={14} />}
-                  {unloadState === 'unloading' ? 'Unloading…' : 'Unload VRAM'}
-                </button>
-              )}
+              <button
+                type="button"
+                className="model-unload-button"
+                disabled={unloadState === 'unloading' || !loadedModel}
+                onClick={() => void unloadActiveModel()}
+                title={loadedModel ? 'Release VRAM memory allocation' : 'Model is not currently loaded in VRAM'}
+              >
+                {unloadState === 'unloading' ? <Loader2 size={14} className="spin" /> : <Power size={14} />}
+                {unloadState === 'unloading' ? 'Unloading…' : loadedModel ? 'Unload VRAM' : 'VRAM Released'}
+              </button>
             </div>
-            {unloadMessage && (unloadState === 'error' || !loadedModel) && (
-              <p className={`model-unload-message ${unloadState}`}>{unloadMessage}</p>
+            {unloadMessage && (
+              <p className={`model-unload-message ${unloadState}`} style={{ marginTop: '7px', fontSize: '0.78rem', color: unloadState === 'success' ? '#34d399' : '#fb7185' }}>
+                {unloadMessage}
+              </p>
             )}
           </section>
 

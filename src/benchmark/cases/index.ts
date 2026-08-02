@@ -1,10 +1,12 @@
 import { describeBenchmarkOutcome } from './describeOutcome.js';
 import { DEFAULT_BENCHMARK_CASES } from './suites/default.js';
+import { DRAGONBALL_BENCHMARK_CASES } from './suites/dragonball.js';
 import type { BenchmarkTestCase, BenchmarkTestCaseDefinition } from './types.js';
 
 // Register new suites here. Keeping registration explicit makes test ordering stable.
 const BENCHMARK_CASE_GROUPS: readonly (readonly BenchmarkTestCaseDefinition[])[] = [
   DEFAULT_BENCHMARK_CASES,
+  DRAGONBALL_BENCHMARK_CASES,
 ];
 
 function buildBenchmarkCatalog(

@@ -81,6 +81,9 @@ export interface DeepResearchRelevantLink {
   text_after?: string | null;
   heading?: string | null;
   section?: string | null;
+  title_attr?: string | null;
+  aria_label?: string | null;
+  url_path_hints?: string[];
 }
 
 export interface DeepResearchDiscoveredLink extends Omit<DeepResearchRelevantLink, 'status'> {
@@ -115,7 +118,7 @@ export type DeepResearchSemanticRequest =
   | {
       phase: 'candidate_links';
       query: string;
-      parent_page: { title: string; url: string };
+      parent_page: { title: string; url: string; excerpt?: string };
       links: Array<{
         url: string;
         anchor_text: string;
@@ -124,6 +127,9 @@ export type DeepResearchSemanticRequest =
         surrounding_text: string;
         text_before: string;
         text_after: string;
+        title_attr?: string | null;
+        aria_label?: string | null;
+        url_path_hints?: string[];
       }>;
     }
   | {
@@ -555,7 +561,7 @@ export class DeepResearchRunner {
   ): Promise<SemanticLinkCandidate[]> {
     const queryTokens = tokenize(query);
     const candidates: SemanticLinkCandidate[] = [];
-    const batches: Array<{ parentTitle: string; parentUrl: string; links: SemanticLinkCandidate[] }> = [];
+    const batches: Array<{ parentTitle: string; parentUrl: string; parentMarkdown: string; links: SemanticLinkCandidate[] }> = [];
 
     for (const { page } of pages) {
       const parentUrl = canonicalizeUrl(page.url) || page.url;
@@ -588,7 +594,7 @@ export class DeepResearchRunner {
       candidates.push(...pageCandidates);
       const classifiable = pageCandidates.filter(({ decision }) => decision.relevance_score > 0);
       for (let index = 0; index < classifiable.length; index += SEMANTIC_BATCH_SIZE) {
-        batches.push({ parentTitle: page.title, parentUrl, links: classifiable.slice(index, index + SEMANTIC_BATCH_SIZE) });
+        batches.push({ parentTitle: page.title, parentUrl, parentMarkdown: page.markdown || page.excerpt || '', links: classifiable.slice(index, index + SEMANTIC_BATCH_SIZE) });
       }
     }
 
@@ -634,7 +640,11 @@ export class DeepResearchRunner {
         const decisions = await this.semanticClassifier!({
           phase: 'candidate_links',
           query,
-          parent_page: { title: batch.parentTitle, url: batch.parentUrl },
+          parent_page: {
+            title: batch.parentTitle,
+            url: batch.parentUrl,
+            excerpt: (batch.parentMarkdown || '').slice(0, 3000),
+          },
           links: batch.links.map(({ url, link }) => ({
             url,
             anchor_text: link.title,
@@ -643,6 +653,9 @@ export class DeepResearchRunner {
             surrounding_text: (link.surroundingText || '').slice(0, 700),
             text_before: (link.textBefore || '').slice(0, 240),
             text_after: (link.textAfter || '').slice(0, 240),
+            title_attr: link.titleAttr || null,
+            aria_label: link.ariaLabel || null,
+            url_path_hints: link.urlPathHints || [],
           })),
         });
         const allowed = new Set(batch.links.map(({ url }) => url));
@@ -1096,6 +1109,9 @@ export class DeepResearchRunner {
           text_after: link.textAfter || null,
           heading: link.heading || null,
           section: link.section || null,
+          title_attr: link.titleAttr || null,
+          aria_label: link.ariaLabel || null,
+          url_path_hints: link.urlPathHints || [],
         }];
       });
       const relevantLinks = discoveredLinks.filter((link) => link.classification === 'relevant');

@@ -424,7 +424,7 @@ const ResearchTrail: React.FC<{
   </details>
 );
 
-const DeepResearchProgress: React.FC<{ args: Record<string, any>; progress?: any }> = ({ args, progress }) => {
+const DeepResearchProgress: React.FC<{ args: Record<string, any>; progress?: any; onCancelGeneration?: () => void }> = ({ args, progress, onCancelGeneration }) => {
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
 
   useEffect(() => {
@@ -505,6 +505,28 @@ const DeepResearchProgress: React.FC<{ args: Record<string, any>; progress?: any
           <span style={{ flexShrink: 0, color: '#7dd3fc', fontFamily: 'var(--font-code)', fontSize: '0.75rem' }}>
             {elapsedSeconds}s
           </span>
+          {onCancelGeneration && (
+            <button
+              type="button"
+              onClick={onCancelGeneration}
+              title="Stop Deep Research Generation"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '4px',
+                padding: '3px 9px',
+                borderRadius: '6px',
+                border: '1px solid rgba(239, 68, 68, 0.5)',
+                background: 'rgba(239, 68, 68, 0.18)',
+                color: '#fca5a5',
+                fontSize: '0.72rem',
+                fontWeight: 600,
+                cursor: 'pointer',
+              }}
+            >
+              <Square size={11} fill="currentColor" /> Stop
+            </button>
+          )}
         </div>
       </div>
 
@@ -867,7 +889,7 @@ const RankedLinkInspectorView: React.FC<{ links: any[] }> = ({ links }) => {
             const scoreBg = isRel ? 'rgba(45, 212, 191, 0.12)' : isUnc ? 'rgba(250, 204, 21, 0.12)' : 'rgba(251, 113, 133, 0.12)';
             const scoreBorder = isRel ? 'rgba(45, 212, 191, 0.3)' : isUnc ? 'rgba(250, 204, 21, 0.3)' : 'rgba(251, 113, 133, 0.3)';
 
-            let confirmationLabel = 'Skipped (Low Relevance)';
+            let confirmationLabel = isRel ? 'Skipped (Depth / Budget Cap)' : 'Skipped (Low Relevance)';
             let confirmationColor = 'var(--text-dim)';
             if (item.confirmation === 'confirmed_relevant') {
               confirmationLabel = 'Followed & Confirmed';
@@ -957,14 +979,38 @@ const RankedLinkInspectorView: React.FC<{ links: any[] }> = ({ links }) => {
 
                     {isExpanded && (
                       <div style={{ marginTop: '5px', padding: '8px 10px', borderRadius: '6px', background: 'rgba(2, 6, 23, 0.7)', border: '1px solid rgba(147, 197, 253, 0.18)', fontSize: '0.67rem', color: '#cbd5e1', lineHeight: 1.45 }}>
+                        {item.parent_excerpt && (
+                          <div style={{ marginBottom: '6px', color: '#94a3b8' }}>
+                            <strong style={{ color: '#93c5fd', display: 'block', marginBottom: '2px' }}>Parent Page Excerpt (Model Context):</strong>
+                            <p style={{ margin: 0, color: '#cbd5e1', background: 'rgba(15, 23, 42, 0.6)', padding: '6px 8px', borderRadius: '4px', border: '1px solid rgba(147, 197, 253, 0.12)', fontSize: '0.66rem', maxHeight: '120px', overflowY: 'auto', whiteSpace: 'pre-wrap' }}>
+                              {item.parent_excerpt}
+                            </p>
+                          </div>
+                        )}
                         {item.anchor_text && (
                           <div style={{ marginBottom: '4px' }}>
                             <strong style={{ color: '#93c5fd' }}>Anchor Text:</strong> <span style={{ color: '#f8fafc' }}>"{item.anchor_text}"</span>
                           </div>
                         )}
+                        {(item.aria_label || item.title_attr) && (
+                          <div style={{ marginBottom: '4px', color: '#94a3b8' }}>
+                            {item.aria_label && <div><strong style={{ color: '#93c5fd' }}>Aria Label:</strong> "{item.aria_label}"</div>}
+                            {item.title_attr && <div style={{ marginTop: '2px' }}><strong style={{ color: '#93c5fd' }}>Title Tooltip:</strong> "{item.title_attr}"</div>}
+                          </div>
+                        )}
                         {(item.heading || item.section) && (
                           <div style={{ marginBottom: '4px', color: '#94a3b8' }}>
                             <strong style={{ color: '#93c5fd' }}>Section / Heading:</strong> {item.heading || item.section}
+                          </div>
+                        )}
+                        {Array.isArray(item.url_path_hints) && item.url_path_hints.length > 0 && (
+                          <div style={{ marginBottom: '4px', color: '#94a3b8' }}>
+                            <strong style={{ color: '#93c5fd' }}>URL Path Hints:</strong>{' '}
+                            {item.url_path_hints.map((hint: string, hIdx: number) => (
+                              <span key={`hint-${hIdx}`} style={{ display: 'inline-block', padding: '1px 5px', borderRadius: '4px', background: 'rgba(56, 189, 248, 0.12)', border: '1px solid rgba(56, 189, 248, 0.25)', color: '#38bdf8', fontSize: '0.62rem', marginRight: '4px' }}>
+                                {hint}
+                              </span>
+                            ))}
                           </div>
                         )}
                         {item.surrounding_text && (
@@ -1015,6 +1061,7 @@ const FinalAnswerContextPreview: React.FC<{
       site_name?: string;
       parent_title: string;
       parent_url: string;
+      parent_excerpt?: string | null;
       depth: number;
       relevance_score: number;
       classification: 'relevant' | 'uncertain' | 'not_relevant';
@@ -1025,12 +1072,18 @@ const FinalAnswerContextPreview: React.FC<{
       status: string;
       anchor_text?: string;
       surrounding_text?: string | null;
+      text_before?: string | null;
+      text_after?: string | null;
       heading?: string | null;
       section?: string | null;
+      title_attr?: string | null;
+      aria_label?: string | null;
+      url_path_hints?: string[];
     }> = [];
 
     for (const source of sources) {
       if (Array.isArray(source.discovered_links)) {
+        const parentExcerpt = (source.content && source.content.trim().length > 0) ? source.content.slice(0, 3000) : source.excerpt;
         for (const link of source.discovered_links) {
           list.push({
             url: link.url,
@@ -1038,6 +1091,7 @@ const FinalAnswerContextPreview: React.FC<{
             site_name: link.site_name,
             parent_title: source.title || source.url,
             parent_url: source.url,
+            parent_excerpt: parentExcerpt,
             depth: link.depth ?? 1,
             relevance_score: link.relevance_score ?? 0,
             classification: link.classification || (link.relevance_score >= 70 ? 'relevant' : link.relevance_score >= 40 ? 'uncertain' : 'not_relevant'),
@@ -1052,6 +1106,9 @@ const FinalAnswerContextPreview: React.FC<{
             text_after: link.text_after || null,
             heading: link.heading || null,
             section: link.section || null,
+            title_attr: link.title_attr || null,
+            aria_label: link.aria_label || null,
+            url_path_hints: link.url_path_hints || [],
           });
         }
       }
@@ -3072,7 +3129,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
         {/* Active Tool Execution Indicator */}
         {isGenerating && activeToolCall && (
           activeToolCall.name === 'deep_research' ? (
-            <DeepResearchProgress args={activeToolCall.args || {}} progress={activeToolCall.progress} />
+            <DeepResearchProgress args={activeToolCall.args || {}} progress={activeToolCall.progress} onCancelGeneration={onCancelGeneration} />
           ) : (
           <div
             className="glass-panel animate-fade-in"
@@ -3126,6 +3183,29 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                 </div>
               )}
             </div>
+            {onCancelGeneration && (
+              <button
+                type="button"
+                onClick={onCancelGeneration}
+                title="Stop execution"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  padding: '4px 9px',
+                  borderRadius: '6px',
+                  border: '1px solid rgba(239, 68, 68, 0.5)',
+                  background: 'rgba(239, 68, 68, 0.18)',
+                  color: '#fca5a5',
+                  fontSize: '0.72rem',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  flexShrink: 0,
+                }}
+              >
+                <Square size={11} fill="currentColor" /> Stop
+              </button>
+            )}
           </div>
           )
         )}

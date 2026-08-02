@@ -2,6 +2,7 @@ import React from 'react';
 import { X, ShieldAlert, Terminal, Edit3, Wrench, Check, RefreshCw, Cpu, RotateCcw, Info, Brain } from 'lucide-react';
 import { ToolSettings, ToolComplexityProfile } from '../types';
 import { JsonEditor } from './JsonEditor';
+import { ToolTogglePanel } from './ToolTogglePanel';
 
 export const TOOL_DESCRIPTIONS: Record<string, { description: string; parameters?: Record<string, any> }> = {
   list_directory: {
@@ -759,182 +760,13 @@ export const ToolSettingsModal: React.FC<ToolSettingsModalProps> = ({
               </p>
             </div>
 
-            {/* Helper renderer for tool groups */}
-            {[
-              {
-                title: '🛠️ Developer Tools (AST & LSP Integration)',
-                description: 'Language-aware symbol navigation, definition jumps, reference finding, type hover, and diagnostics for TS/JS.',
-                color: 'var(--accent-teal)',
-                tools: [
-                  'get_document_symbols',
-                  'go_to_definition',
-                  'find_symbol_references',
-                  'get_code_diagnostics',
-                  'get_type_hover',
-                  'map_module_dependencies',
-                ] as Array<keyof ToolSettings['enabledTools']>,
-              },
-              {
-                title: '📁 File System Tools',
-                description: 'Workspace file inspection, creation, text editing, complete rewrites, directory listing, and grep searching.',
-                color: 'var(--accent-primary)',
-                tools: [
-                  'list_directory',
-                  'read_file',
-                  'edit_file',
-                  'replace_file',
-                  'create_file',
-                  'grep_search',
-                  'grep_replace',
-                ] as Array<keyof ToolSettings['enabledTools']>,
-              },
-              {
-                title: '🌐 Web Research Tools',
-                description: 'Public web search engine queries and automated HTML page to Markdown extraction.',
-                color: '#38bdf8',
-                tools: [
-                  'web_search',
-                  'read_web_page',
-                  'deep_research',
-                ] as Array<keyof ToolSettings['enabledTools']>,
-              },
-              {
-                title: '🐚 Terminal & Shell Execution Tools',
-                description: 'Execute shell commands and start interactive background terminal sessions.',
-                color: 'var(--accent-amber)',
-                tools: [
-                  'execute_command',
-                ] as Array<keyof ToolSettings['enabledTools']>,
-              },
-            ].map((group) => {
-              const allEnabled = group.tools.every((t) => settings.enabledTools[t] !== false);
-              return (
-                <div
-                  key={group.title}
-                  style={{
-                    padding: '12px',
-                    borderRadius: '10px',
-                    background: 'rgba(30, 41, 59, 0.4)',
-                    border: '1px solid var(--border-color)',
-                  }}
-                >
-                  <div className="tool-group-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
-                    <span style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--text-main)' }}>
-                      {group.title}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const updated = { ...settings.enabledTools };
-                        group.tools.forEach((t) => {
-                          updated[t] = !allEnabled;
-                        });
-                        onUpdateSettings({ ...settings, enabledTools: updated });
-                      }}
-                      style={{
-                        padding: '4px 10px',
-                        borderRadius: '6px',
-                        border: `1px solid ${group.color}`,
-                        background: 'rgba(15, 23, 42, 0.6)',
-                        color: group.color,
-                        fontSize: '0.75rem',
-                        fontWeight: 600,
-                        cursor: 'pointer',
-                      }}
-                    >
-                      {allEnabled ? 'Disable Group' : 'Enable Group'}
-                    </button>
-                  </div>
-                  <p style={{ fontSize: '0.76rem', color: 'var(--text-muted)', marginBottom: '10px', lineHeight: 1.35 }}>
-                    {group.description}
-                  </p>
-
-                  <div className="tool-list-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px' }}>
-                    {group.tools.map((toolKey) => {
-                      const isChecked = settings.enabledTools[toolKey] !== false;
-                      return (
-                        <label
-                          key={toolKey}
-                          onClick={() => handleToggleTool(toolKey)}
-                          style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'space-between',
-                            padding: '6px 10px',
-                            borderRadius: '6px',
-                            background: isChecked ? 'rgba(15, 23, 42, 0.8)' : 'rgba(15, 23, 42, 0.3)',
-                            border: `1px solid ${isChecked ? group.color : 'var(--border-color)'}`,
-                            cursor: 'pointer',
-                            fontSize: '0.8rem',
-                            color: isChecked ? 'var(--text-main)' : 'var(--text-dim)',
-                          }}
-                        >
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden' }}>
-                            <div
-                              style={{
-                                width: '15px',
-                                height: '15px',
-                                flexShrink: 0,
-                                borderRadius: '4px',
-                                border: `1px solid ${isChecked ? group.color : 'var(--text-dim)'}`,
-                                background: isChecked ? group.color : 'transparent',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                              }}
-                            >
-                              {isChecked && <Check size={11} color="#000" />}
-                            </div>
-                            <span style={{ fontFamily: 'var(--font-code)', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
-                              {toolKey}
-                            </span>
-                            {(toolKey === 'grep_search' || toolKey === 'grep_replace') && (
-                              <span
-                                style={{
-                                  fontSize: '0.65rem',
-                                  padding: '1px 4px',
-                                  borderRadius: '4px',
-                                  background: 'rgba(255,255,255,0.1)',
-                                  color: 'var(--accent-teal)',
-                                  fontFamily: 'sans-serif',
-                                  fontWeight: 600,
-                                  flexShrink: 0,
-                                }}
-                              >
-                                {Object.keys(getDynamicToolInfo(toolKey, settings.complexityProfile || 'simple').parameters || {}).length} params
-                              </span>
-                            )}
-                          </div>
-
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              e.preventDefault();
-                              setInfoTool(toolKey);
-                            }}
-                            title={`Inspect description for ${toolKey}`}
-                            style={{
-                              background: 'none',
-                              border: 'none',
-                              color: 'var(--accent-teal)',
-                              cursor: 'pointer',
-                              padding: '2px',
-                              display: 'flex',
-                              alignItems: 'center',
-                              borderRadius: '4px',
-                              opacity: 0.85,
-                            }}
-                          >
-                            <Info size={14} color="var(--accent-teal)" />
-                          </button>
-                        </label>
-                      );
-                    })}
-                  </div>
-                </div>
-              );
-            })}
+            {/* Tool groups — rendered dynamically from /api/tools/definitions */}
+            <ToolTogglePanel
+              enabledTools={settings.enabledTools as Record<string, boolean>}
+              onChange={(updated) => onUpdateSettings({ ...settings, enabledTools: updated as ToolSettings['enabledTools'] })}
+              variant="modal"
+              onInfoClick={(toolName) => setInfoTool(toolName as keyof ToolSettings['enabledTools'])}
+            />
           </div>
 
           {/* Section 4: MCP (Model Context Protocol) Servers */}

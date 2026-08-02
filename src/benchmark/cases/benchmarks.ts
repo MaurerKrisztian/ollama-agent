@@ -13,6 +13,7 @@ export const QUICK_BENCHMARK_TEST_IDS = [
   'test_retrieval_long_file',
   'test_project_context_reads_relevant_skill',
   'test_web_search_then_read_page',
+  'test_dragonball_easy_goku_saiyan_name',
   'test_ast_document_symbols',
 ] as const;
 

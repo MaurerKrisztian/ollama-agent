@@ -36,6 +36,8 @@ export interface BenchmarkAgentConfig {
   enableThinking?: boolean;
   complexityProfile?: 'simple' | 'medium' | 'advanced';
   pruningConfig?: ContextPruningConfig;
+  /** Override which tools are available to the agent during this benchmark run. */
+  enabledTools?: Record<string, boolean>;
 }
 
 export interface JsonValueSpec {

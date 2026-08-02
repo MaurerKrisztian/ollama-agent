@@ -43,6 +43,13 @@ export const App: React.FC = () => {
       web_search: true,
       read_web_page: true,
       deep_research: true,
+      get_working_directory: true,
+      set_working_directory: true,
+      start_terminal_session: true,
+      send_terminal_input: true,
+      read_terminal_output: true,
+      list_terminal_sessions: true,
+      terminate_terminal_session: true,
     },
   });
 

@@ -192,7 +192,7 @@ async function startCli() {
     const validCategories = [
       'directory_reading', 'file_reading', 'file_creation', 'file_editing',
       'code_editing', 'code_search', 'discrimination', 'multi_step_workflow', 'terminal_execution', 'information_retrieval',
-      'project_context', 'web_search', 'ast_lsp_navigation',
+      'project_context', 'web_search', 'real_web_search', 'ast_lsp_navigation',
     ];
 
     if (category && !validCategories.includes(category)) {
@@ -490,7 +490,7 @@ async function startCli() {
           const validCats = [
             'directory_reading', 'file_reading', 'file_creation', 'file_editing',
             'code_editing', 'code_search', 'discrimination', 'multi_step_workflow', 'terminal_execution', 'information_retrieval',
-            'project_context', 'web_search', 'ast_lsp_navigation',
+            'project_context', 'web_search', 'real_web_search', 'ast_lsp_navigation',
           ];
           if (catFilter && !validCats.includes(catFilter)) {
             console.log(chalk.red(`\n❌ Unknown category: "${catFilter}"\n`));

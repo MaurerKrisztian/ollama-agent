@@ -53,11 +53,15 @@ const nsToMs = (value?: number) => typeof value === 'number' ? value / 1_000_000
 async function ensureBenchmarkImage(): Promise<void> {
   if (!imageBuildPromise) {
     imageBuildPromise = (async () => {
-      await execFileAsync(
-        'docker',
-        ['build', '--file', 'Dockerfile.benchmark', '--tag', BENCHMARK_DOCKER_IMAGE, '.'],
-        { cwd: projectRoot, timeout: 10 * 60_000, maxBuffer: 10 * 1024 * 1024 }
-      );
+      try {
+        await execFileAsync('docker', ['image', 'inspect', BENCHMARK_DOCKER_IMAGE]);
+      } catch {
+        await execFileAsync(
+          'docker',
+          ['build', '--file', 'Dockerfile.benchmark', '--tag', BENCHMARK_DOCKER_IMAGE, '.'],
+          { cwd: projectRoot, timeout: 10 * 60_000, maxBuffer: 10 * 1024 * 1024 }
+        );
+      }
     })().catch((error) => {
       imageBuildPromise = null;
       throw error;
@@ -70,7 +74,8 @@ async function runDockerContainer(
   request: ContainerRequest,
   ioDir: string,
   workspaceDir: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  onStep?: (step: any) => void,
 ): Promise<void> {
   const containerName = `local-model-chat-bench-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
   const args = [
@@ -95,12 +100,28 @@ async function runDockerContainer(
     const child = spawn('docker', args, { cwd: projectRoot, stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '';
     let stderr = '';
-    const collect = (chunk: Buffer, target: 'stdout' | 'stderr') => {
-      if (target === 'stdout') stdout += chunk.toString();
-      else stderr += chunk.toString();
-    };
-    child.stdout.on('data', (chunk) => collect(chunk, 'stdout'));
-    child.stderr.on('data', (chunk) => collect(chunk, 'stderr'));
+    let stdoutBuffer = '';
+
+    child.stdout.on('data', (chunk: Buffer) => {
+      const text = chunk.toString();
+      stdout += text;
+      stdoutBuffer += text;
+      const lines = stdoutBuffer.split('\n');
+      stdoutBuffer = lines.pop() || '';
+      if (onStep) {
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (trimmed.startsWith('BENCHMARK_STEP:')) {
+            try {
+              onStep(JSON.parse(trimmed.slice('BENCHMARK_STEP:'.length)));
+            } catch {}
+          }
+        }
+      }
+    });
+    child.stderr.on('data', (chunk: Buffer) => {
+      stderr += chunk.toString();
+    });
 
     const abort = () => {
       child.kill('SIGTERM');
@@ -132,6 +153,7 @@ export async function runSingleBenchmarkTest(
   ollamaToken?: string,
   signal?: AbortSignal,
   agentConfig?: BenchmarkAgentConfig,
+  onStep?: (step: any) => void,
 ): Promise<TestResultTrace> {
   const endToEndStartedAt = performance.now();
   signal?.throwIfAborted();
@@ -156,7 +178,7 @@ export async function runSingleBenchmarkTest(
       ollamaHost,
       ollamaToken,
       agentConfig,
-    }, ioDir, workspaceDir, signal);
+    }, ioDir, workspaceDir, signal, onStep);
     const result = JSON.parse(await fs.readFile(path.join(ioDir, 'result.json'), 'utf8')) as TestResultTrace;
     result.timing.imageSetupMs += hostImageSetupMs;
     result.timing.endToEndWallMs = performance.now() - endToEndStartedAt;
@@ -195,6 +217,7 @@ export async function runBenchmarkAttemptInContainer(
     enableThinking: agentConfig?.enableThinking,
     complexityProfile: agentConfig?.complexityProfile,
     pruningConfig: agentConfig?.pruningConfig,
+    enabledTools: agentConfig?.enabledTools,
   });
 
   const executor = agent.getToolExecutor();
@@ -256,19 +279,39 @@ export async function runBenchmarkAttemptInContainer(
   };
 
   try {
+    const emitStep = (step: any) => {
+      try {
+        process.stdout.write(`BENCHMARK_STEP:${JSON.stringify(step)}\n`);
+      } catch {}
+    };
+    let liveContentBuffer = '';
+    let liveThinkingBuffer = '';
+    emitStep({ type: 'llm_start', model: modelName, timestamp: Date.now() });
     const aggregateResponse = await agent.sendMessage(testCase.prompt, {
+      onChunk: (chunk) => {
+        liveContentBuffer += chunk;
+        emitStep({ type: 'chunk', text: chunk, snippet: liveContentBuffer.slice(-160), timestamp: Date.now() });
+      },
+      onThinkingChunk: (chunk) => {
+        liveThinkingBuffer += chunk;
+        emitStep({ type: 'thinking_chunk', text: chunk, snippet: liveThinkingBuffer.slice(-160), timestamp: Date.now() });
+      },
       onToolStart: (name, args) => {
         actualToolsCalled.push({ name, args });
         record({ type: 'tool_start', name, args });
+        emitStep({ type: 'tool_start', name, args, timestamp: Date.now() });
       },
       onToolEnd: (name, result) => {
         toolResults.push({ name, result });
         record({ type: 'tool_end', name, result });
+        const resultSnippet = typeof result === 'string' ? result.slice(0, 120) : JSON.stringify(result).slice(0, 120);
+        emitStep({ type: 'tool_end', name, resultSnippet, timestamp: Date.now() });
       },
       onMessageAdded: (message: ChatMessage) => {
         if (message.role === 'assistant') {
           if (message.content.trim()) lastAssistantContent = message.content;
           record({ type: 'assistant_message', content: message.content, thinking: message.thinking });
+          emitStep({ type: 'assistant_message', content: message.content.slice(0, 150), thinking: !!message.thinking, timestamp: Date.now() });
         }
       },
       onModelResponse: (metrics) => {
@@ -277,6 +320,8 @@ export async function runBenchmarkAttemptInContainer(
         timing.generationMs += nsToMs(metrics.evalDurationNs);
         timing.promptTokens += metrics.promptEvalCount ?? 0;
         timing.generatedTokens += metrics.evalCount ?? 0;
+        const tokensPerSec = metrics.evalDurationNs ? ((metrics.evalCount || 0) / (metrics.evalDurationNs / 1e9)).toFixed(1) : undefined;
+        emitStep({ type: 'metrics', promptTokens: metrics.promptEvalCount, generatedTokens: metrics.evalCount, tokensPerSec, timestamp: Date.now() });
       },
     });
     responseContent = lastAssistantContent || aggregateResponse;
@@ -341,6 +386,7 @@ export async function runBenchmarkCase(
   attemptsPerCase: number,
   onAttemptStart?: (attempt: number, total: number) => void,
   parallelism: number = 1,
+  onStep?: (step: any) => void,
 ): Promise<TestResultTrace> {
   if (!Number.isInteger(attemptsPerCase) || attemptsPerCase < 1 || attemptsPerCase > 10) {
     throw new Error('Benchmark attempts per case must be an integer between 1 and 10.');
@@ -362,7 +408,7 @@ export async function runBenchmarkCase(
       try {
         attemptSignal.throwIfAborted();
         onAttemptStart?.(attempt, attemptsPerCase);
-        const trace = await runSingleBenchmarkTest(testCase.id, modelName, ollamaHost, ollamaToken, attemptSignal, agentConfig);
+        const trace = await runSingleBenchmarkTest(testCase.id, modelName, ollamaHost, ollamaToken, attemptSignal, agentConfig, onStep);
         trace.attemptNumber = attempt;
         attempts[attempt - 1] = trace;
       } catch (error) {

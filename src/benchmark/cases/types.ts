@@ -13,6 +13,7 @@ export type BenchmarkCategory =
   | 'information_retrieval'
   | 'project_context'
   | 'web_search'
+  | 'real_web_search'
   | 'ast_lsp_navigation';
 
 export interface BenchmarkTestCaseDefinition {

@@ -147,6 +147,7 @@ test('web page reader returns bounded navigable page links', async () => {
     surroundingText: 'The complete methodology and dataset are in the Detailed guide for this study.',
     textBefore: 'The complete methodology and dataset are in the',
     textAfter: 'for this study.',
+    urlPathHints: ['guide', 'details'],
   }]);
 });
 

@@ -45,6 +45,13 @@ export interface ToolSettings {
     web_search: boolean;
     read_web_page: boolean;
     deep_research: boolean;
+    get_working_directory?: boolean;
+    set_working_directory?: boolean;
+    start_terminal_session?: boolean;
+    send_terminal_input?: boolean;
+    read_terminal_output?: boolean;
+    list_terminal_sessions?: boolean;
+    terminate_terminal_session?: boolean;
     get_document_symbols?: boolean;
     go_to_definition?: boolean;
     find_symbol_references?: boolean;

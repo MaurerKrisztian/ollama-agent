@@ -127,7 +127,36 @@ function preserveFirstLineIndent(match: string, replacement: string): string {
   return indentation + replacement;
 }
 
+/** Single source of truth for UI grouping. Consumed by /api/tools/definitions. */
+export const TOOL_GROUP_METADATA: Record<string, { group: string; groupColor: string; groupDescription: string }> = {
+  list_directory:          { group: '📁 File System',       groupColor: 'var(--accent-primary)', groupDescription: 'Workspace file inspection, creation, text editing, complete rewrites, directory listing, and grep searching.' },
+  read_file:               { group: '📁 File System',       groupColor: 'var(--accent-primary)', groupDescription: 'Workspace file inspection, creation, text editing, complete rewrites, directory listing, and grep searching.' },
+  edit_file:               { group: '📁 File System',       groupColor: 'var(--accent-primary)', groupDescription: 'Workspace file inspection, creation, text editing, complete rewrites, directory listing, and grep searching.' },
+  replace_file:            { group: '📁 File System',       groupColor: 'var(--accent-primary)', groupDescription: 'Workspace file inspection, creation, text editing, complete rewrites, directory listing, and grep searching.' },
+  create_file:             { group: '📁 File System',       groupColor: 'var(--accent-primary)', groupDescription: 'Workspace file inspection, creation, text editing, complete rewrites, directory listing, and grep searching.' },
+  grep_search:             { group: '📁 File System',       groupColor: 'var(--accent-primary)', groupDescription: 'Workspace file inspection, creation, text editing, complete rewrites, directory listing, and grep searching.' },
+  grep_replace:            { group: '📁 File System',       groupColor: 'var(--accent-primary)', groupDescription: 'Workspace file inspection, creation, text editing, complete rewrites, directory listing, and grep searching.' },
+  web_search:              { group: '🌐 Web Research',      groupColor: '#38bdf8',               groupDescription: 'Public web search engine queries, automated HTML-to-Markdown extraction, and deep multi-source research.' },
+  read_web_page:           { group: '🌐 Web Research',      groupColor: '#38bdf8',               groupDescription: 'Public web search engine queries, automated HTML-to-Markdown extraction, and deep multi-source research.' },
+  deep_research:           { group: '🌐 Web Research',      groupColor: '#38bdf8',               groupDescription: 'Public web search engine queries, automated HTML-to-Markdown extraction, and deep multi-source research.' },
+  execute_command:         { group: '🐚 Terminal & Shell',  groupColor: 'var(--accent-amber)',   groupDescription: 'Execute shell commands, manage interactive background terminal sessions, and control the working directory.' },
+  get_working_directory:   { group: '🐚 Terminal & Shell',  groupColor: 'var(--accent-amber)',   groupDescription: 'Execute shell commands, manage interactive background terminal sessions, and control the working directory.' },
+  set_working_directory:   { group: '🐚 Terminal & Shell',  groupColor: 'var(--accent-amber)',   groupDescription: 'Execute shell commands, manage interactive background terminal sessions, and control the working directory.' },
+  start_terminal_session:  { group: '🐚 Terminal & Shell',  groupColor: 'var(--accent-amber)',   groupDescription: 'Execute shell commands, manage interactive background terminal sessions, and control the working directory.' },
+  send_terminal_input:     { group: '🐚 Terminal & Shell',  groupColor: 'var(--accent-amber)',   groupDescription: 'Execute shell commands, manage interactive background terminal sessions, and control the working directory.' },
+  read_terminal_output:    { group: '🐚 Terminal & Shell',  groupColor: 'var(--accent-amber)',   groupDescription: 'Execute shell commands, manage interactive background terminal sessions, and control the working directory.' },
+  list_terminal_sessions:  { group: '🐚 Terminal & Shell',  groupColor: 'var(--accent-amber)',   groupDescription: 'Execute shell commands, manage interactive background terminal sessions, and control the working directory.' },
+  terminate_terminal_session: { group: '🐚 Terminal & Shell', groupColor: 'var(--accent-amber)', groupDescription: 'Execute shell commands, manage interactive background terminal sessions, and control the working directory.' },
+  get_document_symbols:    { group: '🛠️ Developer (LSP)',   groupColor: 'var(--accent-teal)',    groupDescription: 'Language-aware symbol navigation, definition jumps, reference finding, type hover, and diagnostics for TS/JS.' },
+  go_to_definition:        { group: '🛠️ Developer (LSP)',   groupColor: 'var(--accent-teal)',    groupDescription: 'Language-aware symbol navigation, definition jumps, reference finding, type hover, and diagnostics for TS/JS.' },
+  find_symbol_references:  { group: '🛠️ Developer (LSP)',   groupColor: 'var(--accent-teal)',    groupDescription: 'Language-aware symbol navigation, definition jumps, reference finding, type hover, and diagnostics for TS/JS.' },
+  get_code_diagnostics:    { group: '🛠️ Developer (LSP)',   groupColor: 'var(--accent-teal)',    groupDescription: 'Language-aware symbol navigation, definition jumps, reference finding, type hover, and diagnostics for TS/JS.' },
+  get_type_hover:          { group: '🛠️ Developer (LSP)',   groupColor: 'var(--accent-teal)',    groupDescription: 'Language-aware symbol navigation, definition jumps, reference finding, type hover, and diagnostics for TS/JS.' },
+  map_module_dependencies: { group: '🛠️ Developer (LSP)',   groupColor: 'var(--accent-teal)',    groupDescription: 'Language-aware symbol navigation, definition jumps, reference finding, type hover, and diagnostics for TS/JS.' },
+};
+
 export const BUILTIN_TOOLS: ToolDefinition[] = [
+
   {
     name: 'list_directory',
     description: 'List contents of a directory in the active working directory.',
