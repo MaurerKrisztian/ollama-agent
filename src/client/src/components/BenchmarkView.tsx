@@ -351,6 +351,14 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
   const [liveMetrics, setLiveMetrics] = useState<{ promptTokens?: number; generatedTokens?: number; tokensPerSec?: string } | null>(null);
   const [elapsedMs, setElapsedMs] = useState(0);
 
+  const logFeedRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (logFeedRef.current) {
+      logFeedRef.current.scrollTop = logFeedRef.current.scrollHeight;
+    }
+  }, [liveSteps, liveStreamingText, liveThinkingText, liveActiveTool]);
+
   useEffect(() => {
     if (isRunning || runningSingleId !== null) {
       const start = Date.now();
@@ -1397,7 +1405,7 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
           })()}
 
           {/* Live Real-Time Execution Console */}
-          <div style={{ background: '#090d16', padding: '12px 14px', borderRadius: '10px', border: '1px solid rgba(56, 189, 248, 0.25)', fontFamily: 'var(--font-code)', fontSize: '0.78rem', display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '180px', overflowY: 'auto' }}>
+          <div ref={logFeedRef} style={{ background: '#090d16', padding: '12px 14px', borderRadius: '10px', border: '1px solid rgba(56, 189, 248, 0.25)', fontFamily: 'var(--font-code)', fontSize: '0.78rem', display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '240px', overflowY: 'auto' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', color: '#38bdf8', fontSize: '0.72rem', fontWeight: 700, borderBottom: '1px solid rgba(255, 255, 255, 0.08)', paddingBottom: '6px', textTransform: 'uppercase' }}>
               <span>Live Execution Log Feed</span>
               <span>{liveSteps.length} steps recorded</span>
@@ -1423,7 +1431,7 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
                     </div>
                   </div>
                 ))}
-                {!liveStreamingText && !liveThinkingText && liveSteps.some((s) => s.type === 'llm_start' || s.type === 'start') && (
+                {(isRunning || runningSingleId !== null) && !liveStreamingText && !liveThinkingText && !liveActiveTool && !liveSteps.some((s) => s.type === 'tool_start' || s.type === 'tool_end' || s.type === 'assistant_message' || s.type === 'complete') && liveSteps.some((s) => s.type === 'llm_start' || s.type === 'start') && (
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#fbbf24', fontSize: '0.74rem', padding: '4px 0', borderTop: '1px dashed rgba(255, 255, 255, 0.1)', marginTop: '4px' }}>
                     <Loader2 size={12} className="spin" />
                     <span>Ollama is evaluating prompt tokens & loading model weights for <code>{benchmarkConfig.model}</code>. Streamed tokens and tool calls will appear here live...</span>
