@@ -277,7 +277,14 @@ export const App: React.FC = () => {
             setContextInfo(activeData.context);
             setActiveSessionId(initialSessionId);
             setIsGenerating(Boolean(activeData.isGenerating));
-            if (activeData.isGenerating) setGenerationStatus('generating');
+            if (activeData.isGenerating) {
+              setGenerationStatus('generating');
+              if (activeData.activeToolState) {
+                setActiveToolCall(activeData.activeToolState);
+              }
+            } else {
+              setActiveToolCall(null);
+            }
             sessionStorage.setItem('local-model-chat.activeSessionId', initialSessionId);
           }
         }
@@ -452,6 +459,11 @@ export const App: React.FC = () => {
     setStreamingThinking('');
     setIsGenerating(Boolean(data.isGenerating));
     setGenerationStatus(data.isGenerating ? 'generating' : 'idle');
+    if (data.isGenerating && data.activeToolState) {
+      setActiveToolCall(data.activeToolState);
+    } else if (!data.isGenerating) {
+      setActiveToolCall(null);
+    }
     const url = new URL(window.location.href);
     url.searchParams.set('session', data.activeSessionId || sessionId);
     window.history.replaceState(null, '', url);

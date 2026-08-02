@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Send, Square, Wrench, CheckCircle2, XCircle, ShieldAlert, User, Bot, Loader2, FileText, Folder, Terminal, Edit3, Search, PlusCircle, Sparkles, Code2, Eye, ChevronDown, ChevronRight, Brain, X, Globe, ExternalLink, Layers, RotateCcw, Copy, Check, Scissors, Info, Image as ImageIcon } from 'lucide-react';
+import { Send, Square, Wrench, CheckCircle2, XCircle, ShieldAlert, User, Bot, Loader2, FileText, Folder, Terminal, Edit3, Search, PlusCircle, Sparkles, Code2, Eye, ChevronDown, ChevronRight, Brain, X, Globe, ExternalLink, Layers, RotateCcw, Copy, Check, Scissors, Info, Image as ImageIcon, CornerDownRight } from 'lucide-react';
 import { ChatMessage, FileDiffData, ImageAttachment, PendingApprovalCall, TextAttachment } from '../types';
 import { getLinkPresentation } from '../linkPresentation';
 import { findActiveSkillMention } from '../skillMention';
@@ -379,7 +379,7 @@ const ResearchTrail: React.FC<{
   errors?: string[];
   live?: boolean;
 }> = ({ steps = [], searchQueries = [], errors = [], live = false }) => (
-  <details style={{ marginTop: '10px', border: '1px solid rgba(125, 211, 252, 0.18)', borderRadius: '8px', background: 'rgba(15, 23, 42, 0.35)', overflow: 'hidden' }}>
+  <details open={live ? true : undefined} style={{ marginTop: '10px', border: '1px solid rgba(125, 211, 252, 0.18)', borderRadius: '8px', background: 'rgba(15, 23, 42, 0.35)', overflow: 'hidden' }}>
     <summary style={{ padding: '8px 10px', color: '#7dd3fc', cursor: 'pointer', fontSize: '0.74rem', fontWeight: 650 }}>
       {live ? 'Peek into live research steps' : 'Inspect research trail'}
       <span style={{ marginLeft: '6px', color: 'var(--text-muted)', fontWeight: 400 }}>
@@ -496,9 +496,16 @@ const DeepResearchProgress: React.FC<{ args: Record<string, any>; progress?: any
           <Loader2 size={19} className="spin" style={{ flexShrink: 0, color: '#38bdf8' }} />
           <strong style={{ color: 'var(--text-main)', fontSize: '0.9rem' }}>Deep research in progress</strong>
         </div>
-        <span style={{ flexShrink: 0, color: '#7dd3fc', fontFamily: 'var(--font-code)', fontSize: '0.75rem' }}>
-          {elapsedSeconds}s
-        </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          {args?.preset && (
+            <span style={{ padding: '2px 8px', borderRadius: '999px', background: 'rgba(125, 211, 252, 0.15)', color: '#38bdf8', fontSize: '0.68rem', fontWeight: 700, border: '1px solid rgba(56, 189, 248, 0.3)', textTransform: 'uppercase' }}>
+              {args.preset} Preset
+            </span>
+          )}
+          <span style={{ flexShrink: 0, color: '#7dd3fc', fontFamily: 'var(--font-code)', fontSize: '0.75rem' }}>
+            {elapsedSeconds}s
+          </span>
+        </div>
       </div>
 
       <div style={{ marginTop: '9px', color: '#bae6fd', fontSize: '0.8rem', lineHeight: 1.45, overflowWrap: 'anywhere' }}>
@@ -511,6 +518,43 @@ const DeepResearchProgress: React.FC<{ args: Record<string, any>; progress?: any
         {progress?.search_results_found > 0 && <span>· {progress.search_results_found} results found</span>}
         {progress?.images_found > 0 && <span>· {progress.images_found} images collected</span>}
       </div>
+
+      {Array.isArray(progress?.search_queries) && progress.search_queries.length > 0 && (
+        <div style={{ marginTop: '10px' }}>
+          <span style={{ display: 'block', marginBottom: '6px', color: 'var(--text-muted)', fontSize: '0.68rem', fontWeight: 650, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            2-Stage Search Queries ({progress.searches_completed || 0}/{progress.search_queries.length})
+          </span>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px' }}>
+            {progress.search_queries.map((q: string, idx: number) => (
+              <span
+                key={`sq-${idx}`}
+                style={{
+                  padding: '3px 8px',
+                  borderRadius: '6px',
+                  background: idx === 0 ? 'rgba(56, 189, 248, 0.16)' : 'rgba(99, 102, 241, 0.14)',
+                  border: idx === 0 ? '1px solid rgba(56, 189, 248, 0.35)' : '1px solid rgba(99, 102, 241, 0.25)',
+                  color: idx === 0 ? '#7dd3fc' : '#c4b5fd',
+                  fontSize: '0.69rem',
+                  fontFamily: 'var(--font-code)',
+                }}
+              >
+                {idx === 0 ? '🎯 Stage 1 Grounding: ' : `🔎 Stage 2 Sub-query: `}{q}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {progress?.grounding_context && (
+        <div style={{ marginTop: '10px', padding: '9px 11px', borderRadius: '8px', border: '1px solid rgba(56, 189, 248, 0.3)', background: 'rgba(15, 23, 42, 0.55)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '5px', color: '#7dd3fc', fontSize: '0.68rem', fontWeight: 650, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            <FileText size={12} /> Stage 1 Verified Grounding Facts
+          </div>
+          <div style={{ color: '#bae6fd', fontSize: '0.71rem', fontFamily: 'var(--font-code)', whiteSpace: 'pre-wrap', maxHeight: '110px', overflowY: 'auto', lineHeight: 1.4 }}>
+            {progress.grounding_context}
+          </div>
+        </div>
+      )}
 
       <div style={{ marginTop: '10px' }}>
         <span style={{ display: 'block', marginBottom: '6px', color: 'var(--text-muted)', fontSize: '0.68rem', fontWeight: 650, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
@@ -571,6 +615,71 @@ const DeepResearchProgress: React.FC<{ args: Record<string, any>; progress?: any
               </>
             ) : <span>{linkAnalysis.status === 'complete' ? 'Classification complete; selecting the next pages.' : 'Preparing bounded model batches…'}</span>}
           </div>
+          {Array.isArray(linkAnalysis.recent_decisions) && linkAnalysis.recent_decisions.length > 0 && (
+            <div style={{ marginTop: '9px', display: 'flex', flexDirection: 'column', gap: '5px', maxHeight: '140px', overflowY: 'auto' }}>
+              {linkAnalysis.recent_decisions.map((dec: any, idx: number) => {
+                let domain = dec.url;
+                let favicon = '';
+                try {
+                  const parsed = new URL(dec.url);
+                  domain = parsed.hostname.replace(/^www\./, '');
+                  favicon = `${parsed.origin}/favicon.ico`;
+                } catch (_) {}
+                const isRel = dec.classification === 'relevant';
+                const isUnc = dec.classification === 'uncertain';
+                const badgeColor = isRel ? '#2dd4bf' : isUnc ? '#facc15' : '#fb7185';
+                const badgeBg = isRel ? 'rgba(45, 212, 191, 0.12)' : isUnc ? 'rgba(250, 204, 21, 0.12)' : 'rgba(251, 113, 133, 0.12)';
+                const badgeBorder = isRel ? 'rgba(45, 212, 191, 0.3)' : isUnc ? 'rgba(250, 204, 21, 0.3)' : 'rgba(251, 113, 133, 0.3)';
+                return (
+                  <div key={`${dec.url}-${idx}`} style={{ padding: '5px 8px', borderRadius: '6px', background: 'rgba(15, 23, 42, 0.45)', border: '1px solid rgba(147, 197, 253, 0.12)', fontSize: '0.67rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '6px' }}>
+                      <a
+                        href={dec.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        title={dec.url}
+                        style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', color: '#bfdbfe', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textDecoration: 'none', minWidth: 0 }}
+                        onMouseEnter={(e) => { e.currentTarget.style.textDecoration = 'underline'; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.textDecoration = 'none'; }}
+                      >
+                        <span style={{ position: 'relative', display: 'grid', placeItems: 'center', width: '15px', height: '15px', flexShrink: 0, overflow: 'hidden', borderRadius: '3px', background: 'rgba(56, 189, 248, 0.12)' }}>
+                          <Globe size={10} color="#7dd3fc" />
+                          {favicon && <img src={favicon} alt="" onError={(event) => { event.currentTarget.style.display = 'none'; }} style={{ position: 'absolute', inset: '1px', width: '13px', height: '13px', objectFit: 'contain' }} />}
+                        </span>
+                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {dec.title || domain}
+                        </span>
+                      </a>
+                      <span style={{ padding: '1px 6px', borderRadius: '999px', background: badgeBg, border: `1px solid ${badgeBorder}`, color: badgeColor, fontSize: '0.62rem', fontWeight: 700, flexShrink: 0 }}>
+                        {dec.classification} ({dec.relevance_score}/100)
+                      </span>
+                    </div>
+                    {dec.reason && (
+                      <span style={{ display: 'block', marginTop: '2px', color: 'var(--text-muted)', fontSize: '0.64rem', overflowWrap: 'anywhere' }}>
+                        {dec.reason}
+                      </span>
+                    )}
+                    {(dec.parent_title || dec.parent_url) && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginTop: '3px', color: '#7dd3fc', fontSize: '0.63rem' }}>
+                        <CornerDownRight size={10} style={{ flexShrink: 0, opacity: 0.7 }} />
+                        <span style={{ color: 'var(--text-muted)' }}>Found on:</span>
+                        <a
+                          href={dec.parent_url || '#'}
+                          target="_blank"
+                          rel="noreferrer"
+                          style={{ color: '#93c5fd', textDecoration: 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                          onMouseEnter={(e) => { e.currentTarget.style.textDecoration = 'underline'; }}
+                          onMouseLeave={(e) => { e.currentTarget.style.textDecoration = 'none'; }}
+                        >
+                          {dec.parent_title || dec.parent_url}
+                        </a>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 
@@ -833,7 +942,7 @@ const DeepResearchResultsView: React.FC<{
       status: 'checked' | 'failed' | 'not_checked'; target_source_id: string | null; error: string | null;
     }>;
     link_summary?: { discovered: number; relevant_found: number; relevant_checked: number; relevant_failed: number; not_relevant: number; predicted_relevant?: number; uncertain?: number; confirmed_relevant?: number; low_relevance?: number };
-    ai_note?: { source_id: string; relevant: boolean; note: string; key_points: string[]; limitations: string | null };
+    ai_note?: { source_id: string; relevant: boolean; note: string; key_points: string[]; quotes?: string[]; limitations: string | null };
   }>;
   images: Array<{ id: string; url: string; alt: string; source_url: string; source_title: string }>;
   searchQueries?: string[];
@@ -904,6 +1013,16 @@ const DeepResearchResultsView: React.FC<{
                     <ul style={{ margin: '6px 0 0 17px', color: '#cbd5e1' }}>
                       {source.ai_note.key_points.map((point, index) => <li key={`${source.id}-note-${index}`}>{point}</li>)}
                     </ul>
+                  )}
+                  {Array.isArray(source.ai_note.quotes) && source.ai_note.quotes.length > 0 && (
+                    <div style={{ marginTop: '7px', padding: '6px 8px', borderRadius: '5px', background: 'rgba(99, 102, 241, 0.14)', border: '1px solid rgba(99, 102, 241, 0.25)' }}>
+                      <strong style={{ color: '#a5b4fc', fontSize: '0.65rem', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Extracted Quotes:</strong>
+                      <ul style={{ margin: '4px 0 0 16px', padding: 0, color: '#e2e8f0', fontSize: '0.72rem', fontStyle: 'italic' }}>
+                        {source.ai_note.quotes.map((quote, qIdx) => (
+                          <li key={`${source.id}-quote-${qIdx}`}>“{quote}”</li>
+                        ))}
+                      </ul>
+                    </div>
                   )}
                   {source.ai_note.limitations && <p style={{ margin: '6px 0 0', color: '#a5b4fc' }}><strong>Limitation:</strong> {source.ai_note.limitations}</p>}
                 </div>

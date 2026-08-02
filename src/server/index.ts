@@ -200,6 +200,12 @@ const getPublicConfig = () => ({
 type ApprovalDecisionPayload = { decision: 'approve' | 'reject'; reason?: string };
 const pendingApprovalResolves = new Map<string, (payload: ApprovalDecisionPayload) => void>();
 const activeGenerationControllers = new Map<string, AbortController>();
+type ActiveToolState = {
+  name: string;
+  args: Record<string, any>;
+  progress?: any;
+};
+const activeToolStates = new Map<string, ActiveToolState>();
 
 const saveChatSession = (sessionId: string, engine: AgentEngine = getChatRuntime(sessionId).engine) =>
   chatSessions.save(sessionId, engine.getContextManager().getMessages());
@@ -210,10 +216,15 @@ const getSessionContext = (sessionId: string) => {
   context.setMessages(session.messages);
   return context.getContextInfo();
 };
-const getChatSessionsState = () => ({
-  sessions: chatSessions.list(),
-  activeSessionId: chatSessions.getActiveId(),
-});
+const getChatSessionsState = () => {
+  const activeId = chatSessions.getActiveId();
+  return {
+    sessions: chatSessions.list(),
+    activeSessionId: activeId,
+    isGenerating: activeGenerationControllers.has(activeId),
+    activeToolState: activeToolStates.get(activeId) || null,
+  };
+};
 
 // GET /api/models - Fetch models from current or specified Ollama host
 app.get('/api/models', async (req, res) => {
@@ -679,6 +690,7 @@ app.post('/api/chat/sessions', (req, res) => {
     sessions: chatSessions.list(),
     activeSessionId: session.id,
     isGenerating: activeGenerationControllers.has(session.id),
+    activeToolState: activeToolStates.get(session.id) || null,
   });
 });
 
@@ -695,6 +707,8 @@ app.post('/api/chat/sessions/:id/activate', (req, res) => {
     context: getSessionContext(session.id),
     sessions: chatSessions.list(),
     activeSessionId: session.id,
+    isGenerating: activeGenerationControllers.has(session.id),
+    activeToolState: activeToolStates.get(session.id) || null,
   });
 });
 
@@ -1344,12 +1358,16 @@ app.post('/api/chat', async (req, res) => {
         sendEvent('message_updated', msg);
       },
       onToolStart: (name, args) => {
+        activeToolStates.set(sessionId, { name, args });
         sendEvent('tool_start', { name, args });
       },
       onToolProgress: (name, progress) => {
+        const state = activeToolStates.get(sessionId);
+        if (state) state.progress = progress;
         sendEvent('tool_progress', { name, progress });
       },
       onToolEnd: (name, result) => {
+        activeToolStates.delete(sessionId);
         sendEvent('tool_end', { name, result });
       },
       onModelResponse: (metrics) => {
@@ -1377,6 +1395,7 @@ app.post('/api/chat', async (req, res) => {
     executor.executeTool = originalExecuteTool;
     executor.executeCommand = originalExecuteCommand;
     pendingApprovalResolves.delete(sessionId);
+    activeToolStates.delete(sessionId);
     if (activeGenerationControllers.get(sessionId) === generationController) activeGenerationControllers.delete(sessionId);
     saveChatSession(sessionId, sessionAgent);
     io.emit('chat:sessions', { sessions: chatSessions.list() });

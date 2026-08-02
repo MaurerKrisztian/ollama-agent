@@ -10,7 +10,10 @@ const MAX_EVIDENCE_CHAR_BUDGET = 120_000;
 const MAX_LINK_CANDIDATES_PER_PAGE = 24;
 const SEMANTIC_BATCH_SIZE = 12;
 
+export type DeepResearchPreset = 'quick' | 'balanced' | 'deep';
+
 export interface DeepResearchOptions {
+  preset?: DeepResearchPreset;
   searchQueries?: string[];
   searchCount?: number;
   pageCount?: number;
@@ -19,11 +22,12 @@ export interface DeepResearchOptions {
   semanticLinkClassification?: boolean;
   linkRelevanceThreshold?: number;
   evidenceCharBudget?: number;
+  signal?: AbortSignal;
 }
 
 interface ResearchWebClient {
-  search(query: string, maxResults?: number): Promise<WebSearchResult[]>;
-  readPage(url: string): Promise<{
+  search(query: string, maxResults?: number, signal?: AbortSignal): Promise<WebSearchResult[]>;
+  readPage(url: string, signal?: AbortSignal): Promise<{
     title: string;
     url: string;
     byline: string | null;
@@ -124,6 +128,7 @@ export type DeepResearchSemanticRequest =
 
 export type DeepResearchSemanticClassifier = (
   request: DeepResearchSemanticRequest,
+  signal?: AbortSignal,
 ) => Promise<DeepResearchSemanticDecision[]>;
 
 export interface DeepResearchAiNote {
@@ -131,8 +136,16 @@ export interface DeepResearchAiNote {
   relevant: boolean;
   note: string;
   key_points: string[];
+  quotes?: string[];
   limitations: string | null;
 }
+
+export type DeepResearchQueryGenerator = (
+  query: string,
+  targetCount: number,
+  groundingContext?: string,
+  signal?: AbortSignal,
+) => Promise<string[]>;
 
 export interface DeepResearchNoteRequest {
   query: string;
@@ -142,6 +155,7 @@ export interface DeepResearchNoteRequest {
 export type DeepResearchNoteGenerator = (
   request: DeepResearchNoteRequest,
   onChunk?: (chunk: string) => void,
+  signal?: AbortSignal,
 ) => Promise<DeepResearchAiNote[]>;
 
 export interface DeepResearchNoteProgress {
@@ -173,6 +187,7 @@ export interface DeepResearchProgress {
     discovery: 'search' | 'website_link';
   }>;
   images_found: number;
+  grounding_context?: string;
   steps: DeepResearchStep[];
   note_batches: DeepResearchNoteProgress[];
   link_analysis: DeepResearchLinkAnalysisProgress | null;
@@ -187,6 +202,15 @@ export interface DeepResearchLinkAnalysisProgress {
   items_completed: number;
   active_sites: string[];
   status: 'preparing' | 'running' | 'complete';
+  recent_decisions?: Array<{
+    url: string;
+    title?: string;
+    parent_url?: string;
+    parent_title?: string;
+    classification: 'relevant' | 'uncertain' | 'not_relevant';
+    relevance_score: number;
+    reason: string;
+  }>;
 }
 
 export interface DeepResearchStep {
@@ -242,11 +266,13 @@ async function mapConcurrent<T, R>(
   items: T[],
   concurrency: number,
   task: (item: T, index: number) => Promise<R>,
+  signal?: AbortSignal,
 ): Promise<R[]> {
   const results = new Array<R>(items.length);
   let nextIndex = 0;
   const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
     while (nextIndex < items.length) {
+      signal?.throwIfAborted();
       const index = nextIndex++;
       results[index] = await task(items[index], index);
     }
@@ -263,15 +289,41 @@ function boundedInteger(value: number | undefined, fallback: number, minimum: nu
 
 function inferResearchBudgets(query: string, options: DeepResearchOptions) {
   const facets = query.split(/\b(?:and|versus|vs\.?|compare|including|across)\b|[?;,]/i).filter((part) => part.trim()).length;
-  const searchCount = boundedInteger(options.searchCount, Math.min(10, 5 + facets), 1, MAX_SEARCH_COUNT);
-  const pageCount = boundedInteger(options.pageCount, Math.min(24, Math.max(10, searchCount * 2)), 1, MAX_PAGE_COUNT);
-  const linkedPageCount = boundedInteger(options.linkedPageCount, Math.min(12, Math.max(4, Math.ceil(pageCount / 2))), 0, MAX_LINKED_PAGE_COUNT);
-  const linkDepth = boundedInteger(options.linkDepth, 1, 0, 3);
+  let fallbackSearch = Math.min(10, 5 + facets);
+  let fallbackPage = Math.min(24, Math.max(10, fallbackSearch * 2));
+  let fallbackLinkedPage = Math.min(12, Math.max(4, Math.ceil(fallbackPage / 2)));
+  let fallbackDepth = 1;
+  let fallbackCharBudget = DEFAULT_EVIDENCE_CHAR_BUDGET;
+
+  if (options.preset === 'quick') {
+    fallbackSearch = 3;
+    fallbackPage = 6;
+    fallbackLinkedPage = 0;
+    fallbackDepth = 0;
+    fallbackCharBudget = 24_000;
+  } else if (options.preset === 'balanced') {
+    fallbackSearch = 6;
+    fallbackPage = 16;
+    fallbackLinkedPage = 8;
+    fallbackDepth = 1;
+    fallbackCharBudget = 48_000;
+  } else if (options.preset === 'deep') {
+    fallbackSearch = 10;
+    fallbackPage = 28;
+    fallbackLinkedPage = 16;
+    fallbackDepth = 2;
+    fallbackCharBudget = 96_000;
+  }
+
+  const searchCount = boundedInteger(options.searchCount, fallbackSearch, 1, MAX_SEARCH_COUNT);
+  const pageCount = boundedInteger(options.pageCount, fallbackPage, 1, MAX_PAGE_COUNT);
+  const linkedPageCount = boundedInteger(options.linkedPageCount, fallbackLinkedPage, 0, MAX_LINKED_PAGE_COUNT);
+  const linkDepth = boundedInteger(options.linkDepth, fallbackDepth, 0, 3);
   const semanticLinkClassification = options.semanticLinkClassification !== false;
   const linkRelevanceThreshold = boundedInteger(options.linkRelevanceThreshold, 70, 40, 100);
   const evidenceCharBudget = boundedInteger(
     options.evidenceCharBudget,
-    DEFAULT_EVIDENCE_CHAR_BUDGET,
+    fallbackCharBudget,
     4_000,
     MAX_EVIDENCE_CHAR_BUDGET,
   );
@@ -446,14 +498,18 @@ function selectRankedWebsiteLinks(
 export class DeepResearchRunner {
   private noteGenerator?: DeepResearchNoteGenerator;
   private semanticClassifier?: DeepResearchSemanticClassifier;
+  private queryGenerator?: DeepResearchQueryGenerator;
+  private pageCache = new Map<string, Awaited<ReturnType<ResearchWebClient['readPage']>>>();
 
   constructor(
     private readonly webClient: ResearchWebClient,
     noteGenerator?: DeepResearchNoteGenerator,
     semanticClassifier?: DeepResearchSemanticClassifier,
+    queryGenerator?: DeepResearchQueryGenerator,
   ) {
     this.noteGenerator = noteGenerator;
     this.semanticClassifier = semanticClassifier;
+    this.queryGenerator = queryGenerator;
   }
 
   public setNoteGenerator(noteGenerator?: DeepResearchNoteGenerator): void {
@@ -462,6 +518,25 @@ export class DeepResearchRunner {
 
   public setSemanticClassifier(classifier?: DeepResearchSemanticClassifier): void {
     this.semanticClassifier = classifier;
+  }
+
+  public setQueryGenerator(generator?: DeepResearchQueryGenerator): void {
+    this.queryGenerator = generator;
+  }
+
+  public clearPageCache(): void {
+    this.pageCache.clear();
+  }
+
+  private async readPageCached(url: string, signal?: AbortSignal): Promise<Awaited<ReturnType<ResearchWebClient['readPage']>>> {
+    signal?.throwIfAborted();
+    const canonical = canonicalizeUrl(url) || url;
+    if (this.pageCache.has(canonical)) {
+      return this.pageCache.get(canonical)!;
+    }
+    const page = await this.webClient.readPage(url, signal);
+    this.pageCache.set(canonical, page);
+    return page;
   }
 
   private async classifyFrontierLinks(
@@ -511,6 +586,15 @@ export class DeepResearchRunner {
       }
     }
 
+    const recentDecisions: Array<{
+      url: string;
+      title?: string;
+      parent_url?: string;
+      parent_title?: string;
+      classification: 'relevant' | 'uncertain' | 'not_relevant';
+      relevance_score: number;
+      reason: string;
+    }> = [];
     const report = (
       status: DeepResearchLinkAnalysisProgress['status'],
       batchesCompleted: number,
@@ -525,6 +609,7 @@ export class DeepResearchRunner {
       items_completed: itemsCompleted,
       active_sites: activeSites,
       status,
+      recent_decisions: recentDecisions.slice(-8),
     });
     report('preparing', 0, 0, []);
     if (!semanticEnabled || !this.semanticClassifier || batches.length === 0) {
@@ -558,7 +643,18 @@ export class DeepResearchRunner {
         const validated = validateSemanticDecisions(decisions, allowed);
         for (const candidate of batch.links) {
           const decision = validated.get(candidate.url);
-          if (decision) candidate.decision = decision;
+          if (decision) {
+            candidate.decision = decision;
+            recentDecisions.push({
+              url: candidate.url,
+              title: candidate.title,
+              parent_url: candidate.parentUrl,
+              parent_title: candidate.parentTitle,
+              classification: decision.classification,
+              relevance_score: decision.relevance_score,
+              reason: decision.reason,
+            });
+          }
         }
       } catch (_) {
         // Keep deterministic decisions when the model is unavailable or malformed.
@@ -693,12 +789,6 @@ export class DeepResearchRunner {
 
     const researchDate = new Date().toISOString().slice(0, 10);
     const budgets = inferResearchBudgets(normalizedQuery, options);
-    const searchQueries = buildResearchQueries(
-      normalizedQuery,
-      Number(researchDate.slice(0, 4)),
-      budgets.searchCount,
-      Array.isArray(options.searchQueries) ? options.searchQueries : [],
-    );
     const errors: string[] = [];
     const noteErrors: string[] = [];
     let searchesCompleted = 0;
@@ -710,6 +800,54 @@ export class DeepResearchRunner {
     const addStep = (step: Omit<DeepResearchStep, 'id'>) => {
       steps.push({ id: steps.length + 1, ...step });
     };
+
+    // Stage 1: Literal Grounding Search
+    let groundingContext = '';
+    const initialQuery = Array.isArray(options.searchQueries) && options.searchQueries.length > 0
+      ? options.searchQueries[0]
+      : normalizedQuery;
+    let initialResults: WebSearchResult[] = [];
+    try {
+      options.signal?.throwIfAborted();
+      initialResults = await this.webClient.search(initialQuery, 6, options.signal);
+      searchesCompleted++;
+      searchResultsFound += initialResults.length;
+      addStep({ phase: 'searching', kind: 'search', status: 'success', label: initialQuery, detail: `${initialResults.length} initial results` });
+      if (initialResults.length > 0) {
+        groundingContext = initialResults
+          .map((r) => `${r.title}: ${r.snippet}`)
+          .join('\n')
+          .slice(0, 1500);
+      }
+    } catch (err: any) {
+      if (err?.name === 'AbortError' || options.signal?.aborted) throw err;
+      errors.push(`Grounding search failed for "${initialQuery}": ${err.message}`);
+      addStep({ phase: 'searching', kind: 'search', status: 'error', label: initialQuery, detail: err.message });
+    }
+
+    let searchQueries: string[] = [];
+    if (this.queryGenerator) {
+      try {
+        options.signal?.throwIfAborted();
+        const generated = await this.queryGenerator(normalizedQuery, budgets.searchCount, groundingContext, options.signal);
+        if (Array.isArray(generated) && generated.length > 0) {
+          searchQueries = [...new Set([initialQuery, ...generated.map((q) => String(q).replace(/\s+/g, ' ').trim()).filter(Boolean)])].slice(
+            0,
+            budgets.searchCount,
+          );
+        }
+      } catch (err: any) {
+        if (err?.name === 'AbortError' || options.signal?.aborted) throw err;
+      }
+    }
+    if (searchQueries.length === 0) {
+      searchQueries = buildResearchQueries(
+        normalizedQuery,
+        Number(researchDate.slice(0, 4)),
+        budgets.searchCount,
+        Array.isArray(options.searchQueries) ? options.searchQueries : [],
+      );
+    }
     const emitProgress = (phase: DeepResearchProgress['phase'], imagesFound = 0) => {
       try {
         onProgress?.({
@@ -719,6 +857,7 @@ export class DeepResearchRunner {
           search_results_found: searchResultsFound,
           pages: [...inspectedPages],
           images_found: imagesFound,
+          grounding_context: groundingContext,
           steps: [...steps],
           link_analysis: linkAnalysis ? { ...linkAnalysis, active_sites: [...linkAnalysis.active_sites] } : null,
           note_batches: [...noteBatches.values()].map((batch) => ({
@@ -737,30 +876,41 @@ export class DeepResearchRunner {
       detail: `Read up to ${budgets.pageCount} primary and ${budgets.linkedPageCount} follow-up pages across ${budgets.linkDepth} link level${budgets.linkDepth === 1 ? '' : 's'}; share ${budgets.evidenceCharBudget.toLocaleString()} evidence characters across sources`,
     });
     emitProgress('searching');
-    const searchBatches = await mapConcurrent(searchQueries, 2, async (searchQuery) => {
+
+    // Stage 2: Execute remaining sub-queries
+    const remainingQueries = searchQueries.filter((q) => q !== initialQuery);
+    const stage2Batches = await mapConcurrent(remainingQueries, 2, async (searchQuery) => {
       try {
-        const results = await this.webClient.search(searchQuery, Math.max(8, Math.ceil(budgets.pageCount / searchQueries.length) * 3));
+        options.signal?.throwIfAborted();
+        const results = await this.webClient.search(searchQuery, Math.max(8, Math.ceil(budgets.pageCount / searchQueries.length) * 3), options.signal);
         searchResultsFound += results.length;
         addStep({ phase: 'searching', kind: 'search', status: 'success', label: searchQuery, detail: `${results.length} results` });
-        return results;
+        return { searchQuery, results };
       } catch (error: any) {
+        if (error?.name === 'AbortError' || options.signal?.aborted) throw error;
         errors.push(`Search failed for "${searchQuery}": ${error.message}`);
         addStep({ phase: 'searching', kind: 'search', status: 'error', label: searchQuery, detail: error.message });
-        return [];
+        return { searchQuery, results: [] };
       } finally {
         searchesCompleted++;
         emitProgress('searching');
       }
-    });
-    const candidates = searchBatches.flatMap((results, batchIndex) =>
-      results.map((result) => ({ ...result, discoveredBy: searchQueries[batchIndex] }))
+    }, options.signal);
+
+    const searchBatchesMap = new Map<string, WebSearchResult[]>();
+    searchBatchesMap.set(initialQuery, initialResults);
+    for (const entry of stage2Batches) {
+      searchBatchesMap.set(entry.searchQuery, entry.results);
+    }
+    const candidates = searchQueries.flatMap((q) =>
+      (searchBatchesMap.get(q) || []).map((result) => ({ ...result, discoveredBy: q }))
     );
     const selected = selectSearchCandidates(candidates, normalizedQuery, budgets.pageCount);
     emitProgress('reading');
 
     const initialPages = (await mapConcurrent(selected, 3, async (candidate) => {
       try {
-        const page = await this.webClient.readPage(candidate.url);
+        const page = await this.readPageCached(candidate.url);
         inspectedPages.push({ title: page.title, url: page.url, discovery: 'search' });
         addStep({ phase: 'reading', kind: 'page', status: 'success', label: page.title || candidate.title, url: page.url });
         emitProgress('reading');
@@ -813,7 +963,7 @@ export class DeepResearchRunner {
       emitProgress('following_links');
       const depthResults = await mapConcurrent(websiteLinks, 3, async (link): Promise<{ link: SemanticLinkCandidate; page: Awaited<ReturnType<ResearchWebClient['readPage']>>; depth: number } | null> => {
         try {
-          const page = await this.webClient.readPage(link.url);
+          const page = await this.readPageCached(link.url);
           const canonicalPageUrl = canonicalizeUrl(page.url) || link.url;
           visited.add(canonicalPageUrl);
           inspectedPages.push({ title: page.title, url: page.url, discovery: 'website_link' });
@@ -1001,21 +1151,24 @@ export class DeepResearchRunner {
         try {
           const notes = await this.noteGenerator!({
             query: normalizedQuery,
-            sources: batch.map(({ id, title, url, excerpt, content, relevant_links }) => ({ id, title, url, excerpt, content, relevant_links })),
+            sources: batch.map((source) => ({
+              id: source.id,
+              title: source.title,
+              url: source.url,
+              excerpt: source.excerpt,
+              content: source.content,
+              relevant_links: source.relevant_links,
+            })),
           }, (chunk) => {
-            liveBatch.content = `${liveBatch.content}${chunk}`.slice(-60_000);
-            liveBatch.notes_completed = sourceIds.filter((sourceId) =>
-              liveBatch.content.includes(`"source_id":"${sourceId}"`) ||
-              liveBatch.content.includes(`"source_id": "${sourceId}"`),
-            ).length;
+            liveBatch.content += chunk;
             liveBatch.context_characters = liveBatch.content.length;
-            liveBatch.estimated_tokens = Math.ceil(liveBatch.context_characters / 4);
+            liveBatch.estimated_tokens = Math.ceil(liveBatch.content.length / 4);
             const now = Date.now();
-            if (now - lastProgressEmission >= 80) {
+            if (now - lastProgressEmission > 150) {
               lastProgressEmission = now;
               emitProgress('analyzing');
             }
-          });
+          }, options.signal);
           const notesBySource = new Map(notes.map((note) => [note.source_id, note]));
           for (const source of batch) {
             const note = notesBySource.get(source.id);

@@ -202,7 +202,7 @@ test('deep research accepts custom search and crawl budgets', async () => {
     evidenceCharBudget: 12_000,
   });
 
-  assert.deepEqual(searched, ['complex topic', 'custom facet one', 'custom facet two']);
+  assert.deepEqual(searched, ['custom facet one', 'complex topic', 'custom facet two']);
   assert.equal(result.pages_read, 2);
   assert.deepEqual(result.research_budget, {
     searches: 3,
@@ -546,3 +546,128 @@ test('deep research accepts zero images without silently changing it to one', as
   assert.match(result.guidance, /did not request images/);
   assert.ok(result.steps.some((step) => step.kind === 'search'));
 });
+
+test('deep research supports research intensity presets', async () => {
+  const client = {
+    async search() {
+      return [{ title: 'Page', url: 'https://example.com/p1', snippet: 'Snippet' }];
+    },
+    async readPage(url: string) {
+      return {
+        title: 'Page',
+        url,
+        byline: null,
+        excerpt: null,
+        markdown: 'Content',
+        truncated: false,
+        links: [],
+        images: [],
+      };
+    },
+  };
+
+  const quick = await new DeepResearchRunner(client).run('topic', 0, undefined, { preset: 'quick' });
+  const deep = await new DeepResearchRunner(client).run('topic', 0, undefined, { preset: 'deep' });
+
+  assert.equal(quick.research_budget.searches, 3);
+  assert.equal(quick.research_budget.primary_pages, 6);
+  assert.equal(quick.research_budget.link_depth, 0);
+
+  assert.equal(deep.research_budget.searches, 10);
+  assert.equal(deep.research_budget.primary_pages, 28);
+  assert.equal(deep.research_budget.link_depth, 2);
+});
+
+test('deep research uses custom queryGenerator when provided', async () => {
+  const searchesRun: string[] = [];
+  const client = {
+    async search(query: string) {
+      searchesRun.push(query);
+      return [{ title: 'Page', url: 'https://example.com/p1', snippet: 'Snippet' }];
+    },
+    async readPage(url: string) {
+      return {
+        title: 'Page',
+        url,
+        byline: null,
+        excerpt: null,
+        markdown: 'Content',
+        truncated: false,
+        links: [],
+        images: [],
+      };
+    },
+  };
+
+  const runner = new DeepResearchRunner(client);
+  runner.setQueryGenerator(async (query, targetCount) => {
+    return ['custom query alpha', 'custom query beta'];
+  });
+
+  const result = await runner.run('general topic', 0);
+  assert.deepEqual(searchesRun, ['general topic', 'custom query alpha', 'custom query beta']);
+  assert.deepEqual(result.search_queries, ['general topic', 'custom query alpha', 'custom query beta']);
+});
+
+test('deep research caches web page reads across duplicate calls', async () => {
+  let readCount = 0;
+  const client = {
+    async search() {
+      return [
+        { title: 'Page A', url: 'https://example.com/same-page', snippet: 'Snippet A' },
+        { title: 'Page B', url: 'https://example.com/same-page#section', snippet: 'Snippet B' },
+      ];
+    },
+    async readPage(url: string) {
+      readCount++;
+      return {
+        title: 'Same Page',
+        url: 'https://example.com/same-page',
+        byline: null,
+        excerpt: null,
+        markdown: 'Cached content',
+        truncated: false,
+        links: [],
+        images: [],
+      };
+    },
+  };
+
+  const runner = new DeepResearchRunner(client);
+  await runner.run('topic', 0);
+  assert.equal(readCount, 1);
+});
+
+test('deep research passes Stage 1 grounding search context to queryGenerator', async () => {
+  let receivedGroundingContext = '';
+  const client = {
+    async search(query: string) {
+      if (query === 'niche target') {
+        return [{ title: 'Niche Target Biography', url: 'https://example.com/bio', snippet: 'Niche Target is a Lead Software Engineer and Agent Architecture Researcher.' }];
+      }
+      return [];
+    },
+    async readPage(url: string) {
+      return {
+        title: 'Niche Target Biography',
+        url,
+        byline: null,
+        excerpt: null,
+        markdown: 'Content',
+        truncated: false,
+        links: [],
+        images: [],
+      };
+    },
+  };
+
+  const runner = new DeepResearchRunner(client);
+  runner.setQueryGenerator(async (query, targetCount, groundingContext) => {
+    receivedGroundingContext = groundingContext || '';
+    return ['niche target software engineer'];
+  });
+
+  await runner.run('niche target', 0);
+  assert.match(receivedGroundingContext, /Lead Software Engineer/);
+});
+

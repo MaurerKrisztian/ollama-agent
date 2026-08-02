@@ -125,14 +125,19 @@ async function fetchPublicPage(
   fetchImpl: FetchLike,
   lookup: LookupLike,
   validatePublicNetwork: boolean,
+  signal?: AbortSignal,
 ): Promise<{ response: Response; finalUrl: URL; text: string }> {
   let url = parseHttpUrl(rawUrl);
   for (let redirect = 0; redirect <= MAX_REDIRECTS; redirect++) {
+    signal?.throwIfAborted();
     if (validatePublicNetwork) await assertPublicUrl(url, lookup);
+    const fetchSignal = signal
+      ? AbortSignal.any([AbortSignal.timeout(REQUEST_TIMEOUT_MS), signal])
+      : AbortSignal.timeout(REQUEST_TIMEOUT_MS);
     const response = await fetchImpl(url, {
       headers: { 'User-Agent': USER_AGENT, Accept: 'text/html, text/plain;q=0.9' },
       redirect: 'manual',
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      signal: fetchSignal,
     });
     if (response.status >= 300 && response.status < 400) {
       const location = response.headers.get('location');
@@ -358,14 +363,15 @@ export class WebClient {
     private readonly lookup: LookupLike = (hostname) => dns.lookup(hostname, { all: true }),
   ) {}
 
-  public async search(query: string, maxResults = 5): Promise<WebSearchResult[]> {
+  public async search(query: string, maxResults = 5, signal?: AbortSignal): Promise<WebSearchResult[]> {
+    signal?.throwIfAborted();
     const normalizedQuery = cleanText(query);
     if (!normalizedQuery) throw new Error('Parameter query is required.');
     const limit = Math.min(Math.max(Math.trunc(maxResults) || 5, 1), 8);
     const errors: string[] = [];
     const duckDuckGoUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(normalizedQuery)}`;
     try {
-      const { response, text } = await fetchPublicPage(duckDuckGoUrl, this.fetchImpl, this.lookup, false);
+      const { response, text } = await fetchPublicPage(duckDuckGoUrl, this.fetchImpl, this.lookup, false, signal);
       if (isSearchChallenge(response.status, text)) {
         throw new Error(`challenge response (HTTP ${response.status})`);
       }
@@ -373,12 +379,14 @@ export class WebClient {
       if (results.length > 0 || /no results/i.test(text)) return results;
       throw new Error('unrecognized response with no result entries');
     } catch (error: any) {
+      if (error?.name === 'AbortError' || signal?.aborted) throw error;
       errors.push(`DuckDuckGo: ${error.message}`);
     }
 
+    signal?.throwIfAborted();
     const yahooUrl = `https://search.yahoo.com/search?p=${encodeURIComponent(normalizedQuery)}`;
     try {
-      const { response, text } = await fetchPublicPage(yahooUrl, this.fetchImpl, this.lookup, false);
+      const { response, text } = await fetchPublicPage(yahooUrl, this.fetchImpl, this.lookup, false, signal);
       if (isSearchChallenge(response.status, text)) {
         throw new Error(`challenge response (HTTP ${response.status})`);
       }
@@ -386,12 +394,14 @@ export class WebClient {
       if (results.length > 0 || /no results/i.test(text)) return results;
       throw new Error('unrecognized or irrelevant response with no usable result entries');
     } catch (error: any) {
+      if (error?.name === 'AbortError' || signal?.aborted) throw error;
       errors.push(`Yahoo: ${error.message}`);
     }
 
+    signal?.throwIfAborted();
     const bingUrl = `https://www.bing.com/search?q=${encodeURIComponent(normalizedQuery)}&setlang=en-US`;
     try {
-      const { response, text } = await fetchPublicPage(bingUrl, this.fetchImpl, this.lookup, false);
+      const { response, text } = await fetchPublicPage(bingUrl, this.fetchImpl, this.lookup, false, signal);
       if (isSearchChallenge(response.status, text)) {
         throw new Error(`challenge response (HTTP ${response.status})`);
       }
@@ -399,13 +409,14 @@ export class WebClient {
       if (results.length > 0 || /no results/i.test(text)) return results;
       throw new Error('unrecognized or irrelevant response with no usable result entries');
     } catch (error: any) {
+      if (error?.name === 'AbortError' || signal?.aborted) throw error;
       errors.push(`Bing: ${error.message}`);
     }
 
     throw new Error(`All search providers failed. ${errors.join('; ')}`);
   }
 
-  public async readPage(rawUrl: string): Promise<{
+  public async readPage(rawUrl: string, signal?: AbortSignal): Promise<{
     title: string;
     url: string;
     byline: string | null;
@@ -421,6 +432,7 @@ export class WebClient {
       this.fetchImpl,
       this.lookup,
       true,
+      signal,
     );
     const contentType = response.headers.get('content-type')?.toLowerCase() || '';
     if (contentType.includes('text/plain')) {

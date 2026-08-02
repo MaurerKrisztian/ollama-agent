@@ -4,7 +4,7 @@ import { exec } from 'child_process';
 import { ToolDefinition, ToolComplexityProfile } from './types.js';
 import { WebClient } from './web.js';
 import { DeepResearchRunner } from './deepResearch.js';
-import type { DeepResearchNoteGenerator, DeepResearchSemanticClassifier } from './deepResearch.js';
+import type { DeepResearchNoteGenerator, DeepResearchSemanticClassifier, DeepResearchQueryGenerator } from './deepResearch.js';
 import { McpClientManager } from './mcp.js';
 import { TerminalSessionManager, stripAnsiCodes } from './terminalManager.js';
 import { LspManager } from './lsp.js';
@@ -426,6 +426,11 @@ export const BUILTIN_TOOLS: ToolDefinition[] = [
           minimum: 4000,
           maximum: 120000,
         },
+        preset: {
+          type: 'string',
+          enum: ['quick', 'balanced', 'deep'],
+          description: 'Optional research intensity preset: quick (fast summary), balanced (standard investigation), or deep (thorough multi-level research).',
+        },
       },
       required: ['query'],
     },
@@ -750,6 +755,10 @@ export class ToolExecutor {
 
   public setDeepResearchSemanticClassifier(classifier?: DeepResearchSemanticClassifier): void {
     this.deepResearchRunner.setSemanticClassifier(classifier);
+  }
+
+  public setDeepResearchQueryGenerator(generator?: DeepResearchQueryGenerator): void {
+    this.deepResearchRunner.setQueryGenerator(generator);
   }
 
   public setWorkingDir(newDir: string): { success: boolean; path: string; error?: string } {
@@ -1110,7 +1119,7 @@ export class ToolExecutor {
     };
   }
 
-  public async executeTool(name: string, args: Record<string, any>, onProgress?: (progress: any) => void): Promise<any> {
+  public async executeTool(name: string, args: Record<string, any>, onProgress?: (progress: any) => void, signal?: AbortSignal): Promise<any> {
     if (this.mcpManager.hasTool(name)) {
       return await this.mcpManager.executeTool(name, args);
     }
@@ -1419,7 +1428,7 @@ export class ToolExecutor {
       case 'web_search': {
         if (!args.query) return { error: 'Parameter query is required.' };
         try {
-          const results = await this.webClient.search(args.query);
+          const results = await this.webClient.search(args.query, undefined, signal);
           return { query: args.query, result_count: results.length, results };
         } catch (err: any) {
           return { error: `Web search failed: ${err.message}` };
@@ -1429,7 +1438,7 @@ export class ToolExecutor {
       case 'read_web_page': {
         if (!args.url) return { error: 'Parameter url is required.' };
         try {
-          return await this.webClient.readPage(args.url);
+          return await this.webClient.readPage(args.url, signal);
         } catch (err: any) {
           return { error: `Web page read failed: ${err.message}`, url: args.url };
         }
@@ -1439,6 +1448,7 @@ export class ToolExecutor {
         if (!args.query) return { error: 'Parameter query is required.' };
         try {
           return await this.deepResearchRunner.run(String(args.query), args.image_count, onProgress, {
+            preset: typeof args.preset === 'string' && ['quick', 'balanced', 'deep'].includes(args.preset) ? args.preset as any : undefined,
             searchQueries: Array.isArray(args.search_queries) ? args.search_queries.map(String) : undefined,
             searchCount: args.search_count,
             pageCount: args.page_count,
@@ -1447,6 +1457,7 @@ export class ToolExecutor {
             semanticLinkClassification: args.semantic_link_classification,
             linkRelevanceThreshold: args.link_relevance_threshold,
             evidenceCharBudget: args.evidence_char_budget,
+            signal,
           });
         } catch (err: any) {
           return { error: `Deep research failed: ${err.message}` };

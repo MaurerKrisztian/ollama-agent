@@ -267,6 +267,7 @@ test('getToolDefinitions generates single schema profile based on complexity lev
     'semantic_link_classification',
     'link_relevance_threshold',
     'evidence_char_budget',
+    'preset',
   ]);
   assert.equal(deepResearch?.parameters.properties.image_count.minimum, 0);
   assert.equal(deepResearch?.parameters.properties.image_count.maximum, 60);
