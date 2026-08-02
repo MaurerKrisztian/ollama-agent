@@ -191,7 +191,7 @@ interface SavedBenchmarkRun {
   successRatePercentage: number;
   comparisonDurationMs: number;
   timing: BenchmarkTiming;
-  results: Array<Pick<TestResultTrace, 'testId' | 'testName' | 'category' | 'passed' | 'reason' | 'durationMs' | 'attemptCount' | 'successfulAttempts' | 'failedAttempts' | 'successRatePercentage' | 'timing'>>;
+  results: TestResultTrace[];
 }
 
 interface BenchmarkViewProps {
@@ -304,6 +304,7 @@ const OutcomeVerificationVisualizer: React.FC<{ verificationDetails?: any }> = (
     stepIndex: number;
     stepId?: string;
     prompt: string;
+    expectedOutcome?: string;
     passed: boolean;
     reason: string;
     checks?: Array<{ name: string; passed: boolean; reason: string }>;

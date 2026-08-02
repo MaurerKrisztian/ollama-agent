@@ -11,6 +11,7 @@ import { AgentEngine } from '../core/agent.js';
 import type { AgentSendMessageOptions } from '../core/agent.js';
 import { ContextManager } from '../core/context.js';
 import { BUILTIN_TOOLS, TOOL_DEFINITIONS, TOOL_GROUP_METADATA } from '../core/tools.js';
+import type { FileDiff } from '../core/tools/fileTools.js';
 import { BENCHMARK_TEST_CASES } from '../benchmark/cases/index.js';
 import { createBenchmarkSuiteHash } from '../benchmark/cases/benchmarks.js';
 import type { BenchmarkDefinition, BenchmarkTestCase } from '../benchmark/cases/index.js';

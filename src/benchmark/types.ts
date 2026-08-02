@@ -181,5 +181,5 @@ export interface SavedBenchmarkRun {
   successRatePercentage: number;
   comparisonDurationMs: number;
   timing: BenchmarkTiming;
-  results: Array<Pick<TestResultTrace, 'testId' | 'testName' | 'category' | 'passed' | 'reason' | 'durationMs' | 'attemptCount' | 'successfulAttempts' | 'failedAttempts' | 'successRatePercentage' | 'timing'>>;
+  results: TestResultTrace[];
 }

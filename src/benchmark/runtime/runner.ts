@@ -281,6 +281,7 @@ export async function runBenchmarkAttemptInContainer(
     stepIndex: number;
     stepId?: string;
     prompt: string;
+    expectedOutcome?: string;
     passed: boolean;
     reason: string;
     checks?: Array<{ name: string; passed: boolean; reason: string }>;

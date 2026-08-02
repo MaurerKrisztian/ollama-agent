@@ -56,14 +56,19 @@ export function createStandaloneBenchmarkHtml(bundle: BenchmarkRunBundle): strin
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Benchmark ${bundle.runId}</title><style>
-:root{color-scheme:dark;font-family:Inter,ui-sans-serif,system-ui,sans-serif;background:#07111f;color:#e5edf8}*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at top,#172554 0,#07111f 42%);min-height:100vh}.page{max-width:1180px;margin:auto;padding:36px 20px 72px}h1{margin:0 0 8px;font-size:clamp(1.55rem,4vw,2.4rem)}.muted{color:#94a3b8}.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin:24px 0}.card,.case,details{background:rgba(15,23,42,.88);border:1px solid #293548;border-radius:12px}.card{padding:18px}.value{font-size:1.8rem;font-weight:800;margin-top:5px}.good{color:#34d399}.bad{color:#fb7185}.cases{display:grid;gap:10px}.case{padding:14px 16px;display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:14px;align-items:center}.badge{font-size:.72rem;border-radius:999px;padding:3px 8px;background:#263449}.status{font-weight:750}details{margin-top:18px;padding:14px}summary{cursor:pointer;font-weight:700}pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:520px;overflow:auto;background:#050b14;border-radius:8px;padding:14px;color:#cbd5e1}@media(max-width:620px){.case{grid-template-columns:1fr}.page{padding-top:22px}}
+:root{color-scheme:dark;font-family:Inter,ui-sans-serif,system-ui,sans-serif;background:#07111f;color:#e5edf8}*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at top,#172554 0,#07111f 42%);min-height:100vh}.page{max-width:1180px;margin:auto;padding:36px 20px 72px}h1{margin:0 0 8px;font-size:clamp(1.55rem,4vw,2.4rem)}.muted{color:#94a3b8}.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin:24px 0}.card,.case,details{background:rgba(15,23,42,.88);border:1px solid #293548;border-radius:12px}.card{padding:18px}.value{font-size:1.8rem;font-weight:800;margin-top:5px}.good{color:#34d399}.bad{color:#fb7185}.cases{display:grid;gap:10px}.case{padding:14px 16px;margin:0}.case summary{cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:14px;list-style:none;user-select:none}.case summary::-webkit-details-marker{display:none}.case-info{flex:1;min-width:0}.case-stats{display:flex;align-items:center;gap:12px;flex-shrink:0}.badge{font-size:.72rem;border-radius:999px;padding:3px 8px;background:#263449}.status{font-weight:750}.case-body{margin-top:14px;padding-top:14px;border-top:1px solid #293548;font-size:.85rem;display:flex;flex-direction:column;gap:10px}details{margin-top:12px;padding:12px}summary{cursor:pointer;font-weight:700}pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:520px;overflow:auto;background:#050b14;border-radius:8px;padding:14px;color:#cbd5e1;margin:6px 0 0 0}@media(max-width:620px){.case summary{flex-direction:column;align-items:flex-start}.page{padding-top:22px}}
 </style></head><body><main class="page"><h1>Benchmark result</h1><div class="muted" id="subtitle"></div><section class="cards" id="cards"></section><details open><summary>Detailed timing totals</summary><pre id="timing"></pre></details><h2>Test results</h2><section class="cases" id="cases"></section><details><summary>Model and agent configuration</summary><pre id="config"></pre></details><details><summary>Complete portable JSON result</summary><pre id="raw"></pre></details></main>
 <script type="application/json" id="benchmark-data">${jsonForHtml(bundle)}</script><script>
 const b=JSON.parse(document.getElementById('benchmark-data').textContent),r=b.report,score=r.successRatePercentage??r.accuracyPercentage,compare=r.comparisonDurationMs??r.totalDurationMs;
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 document.getElementById('subtitle').textContent=r.benchmark.definitionName+' • '+(b.runName?b.runName+' • ':'')+r.model+' • '+new Date(b.runDate).toLocaleString()+' • '+b.runId;
 document.getElementById('cards').innerHTML=[['Success rate',score+'%',score===100?'good':''],['Successful attempts',(r.successfulAttempts??r.passCount)+' / '+(r.totalAttempts??r.totalTests),'good'],['Fully reliable cases',r.passCount+' / '+r.totalTests,r.failCount?'bad':'good'],['Avg comparison time',(compare/1000).toFixed(2)+'s','']].map(x=>'<div class="card"><div class="muted">'+x[0]+'</div><div class="value '+x[2]+'">'+x[1]+'</div></div>').join('');
-document.getElementById('cases').innerHTML=r.results.map(t=>'<article class="case"><div><strong>'+esc(t.testName)+'</strong> <span class="badge">'+esc(t.category)+'</span><div class="muted">'+esc(t.reason)+'</div></div><span class="status '+(t.successRatePercentage===100?'good':'bad')+'">'+(t.successRatePercentage??(t.passed?100:0))+'%</span><span class="muted">'+Math.round(t.durationMs)+'ms compare</span></article>').join('');
+document.getElementById('cases').innerHTML=r.results.map(t=>{
+  const tools=(t.actualToolsCalled||[]).map(tc=>tc.name).join(', ')||\'None\';
+  const details={testId:t.testId,passed:t.passed,reason:t.reason,toolsCalled:t.actualToolsCalled,toolResults:t.toolResults,responseContent:t.responseContent,executionTrace:t.executionTrace,verificationDetails:t.verificationDetails};
+  const isPass=(t.successRatePercentage??(t.passed?100:0))===100;
+  return '<details class="case"><summary><div class="case-info"><strong>'+esc(t.testName)+'</strong> <span class="badge">'+esc(t.category)+'</span><div class="muted" style="margin-top:3px">'+esc(t.reason)+'</div></div><div class="case-stats"><span class="status '+(isPass?'good':'bad')+'">'+(t.successRatePercentage??(t.passed?100:0))+'%</span><span class="muted">'+Math.round(t.durationMs)+'ms compare</span></div></summary><div class="case-body"><div><strong>Tools Called:</strong> '+esc(tools)+'</div><details><summary>Trace & Failure Details</summary><pre>'+esc(JSON.stringify(details,null,2))+'</pre></details></div></details>';
+}).join('');
 document.getElementById('timing').textContent=JSON.stringify(r.timing??{comparisonMs:compare},null,2);
 document.getElementById('config').textContent=JSON.stringify(b.modelConfig,null,2);document.getElementById('raw').textContent=JSON.stringify(b,null,2);
 </script></body></html>`;
@@ -95,13 +100,13 @@ function summarize(bundle: BenchmarkRunBundle, directory: string): SavedBenchmar
     successRatePercentage: report.successRatePercentage ?? report.accuracyPercentage,
     comparisonDurationMs: report.comparisonDurationMs ?? report.totalDurationMs,
     timing: report.timing ?? legacyTiming(report.totalDurationMs),
-    results: report.results.map(({ testId, testName, category, passed, reason, durationMs, attemptCount, successfulAttempts, failedAttempts, successRatePercentage, timing }) => ({
-      testId, testName, category, passed, reason, durationMs,
-      attemptCount: attemptCount ?? 1,
-      successfulAttempts: successfulAttempts ?? (passed ? 1 : 0),
-      failedAttempts: failedAttempts ?? (passed ? 0 : 1),
-      successRatePercentage: successRatePercentage ?? (passed ? 100 : 0),
-      timing: timing ?? legacyTiming(durationMs),
+    results: report.results.map((result) => ({
+      ...result,
+      attemptCount: result.attemptCount ?? 1,
+      successfulAttempts: result.successfulAttempts ?? (result.passed ? 1 : 0),
+      failedAttempts: result.failedAttempts ?? (result.passed ? 0 : 1),
+      successRatePercentage: result.successRatePercentage ?? (result.passed ? 100 : 0),
+      timing: result.timing ?? legacyTiming(result.durationMs),
     })),
   };
 }
