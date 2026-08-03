@@ -59,7 +59,7 @@ No cloud, no API keys, no data leaving your machine.
 | | `map_module_dependencies` | Map import/export module dependencies and caller files without reading raw code text |
 | 📁 **File System Tools** | `list_directory` | List files and subdirectories in a target directory |
 | | `read_file` | Read the raw contents of any file in the workspace |
-| | `edit_file` | Partial text replacement in existing files |
+| | `edit_file` | Partial text replacement in existing files with smart target resolution & fallback normalization |
 | | `replace_file` | Replace an existing file for broad rewrites after reading it |
 | | `create_file` | Create new text or code files |
 | | `grep_search` | Advanced codebase search with regex, case-sensitivity, whole word boundaries (`\b`), context lines (`context_lines`), result limits (`max_results`), and match highlighting (`>>>match<<<`) |
@@ -68,6 +68,20 @@ No cloud, no API keys, no data leaving your machine.
 | | `read_web_page` | Extract a public page's main content as bounded Markdown |
 | | `deep_research` | Run several searches, inspect multiple sources, and explore relevant links within visited websites |
 | 🐚 **Terminal Tools** | `execute_command` | Run terminal shell commands (with approval gate & whitelist) |
+
+---
+
+## ✏️ Smart File Edit & Fallback Normalization
+
+The `edit_file` tool uses a resilient multi-stage target resolution engine designed specifically for local LLMs (which may output double-escaped linebreaks, imprecise line bounds, or slightly altered operator spacing):
+
+1. **Primary Exact & Bounded Match**: First attempts to match `target_text` within specified `start_line` / `end_line` bounds.
+2. **Whitespace & Operator Normalization**: Tolerates differences in tabs vs. spaces, line indentation, trailing whitespace, and operator spacing (e.g. `failedCount>0` matching `failedCount > 0`).
+3. **Non-Whitespace Character Mapping**: Maps non-whitespace characters to original file offsets to preserve exact linebreaks and indentation even when the model alters formatting.
+4. **Fallback Normalization** *(Triggered ONLY if primary search returns `null`)*:
+   - **Literal `\\n` Unescaping:** Smaller models often output literal backslash-n strings (`\\n`) instead of raw linebreaks in JSON. The engine unescapes these sequences and re-attempts matching.
+   - **Unbounded Search Recovery:** If specified `start_line` / `end_line` bounds fail (e.g. line numbers shifted from earlier edits), the engine falls back to searching across the full file.
+   - **Combined Recovery:** Unescapes `\\n` literals and searches full file content simultaneously if bounded search fails.
 
 ---
 
