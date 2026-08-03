@@ -1,4 +1,4 @@
-import { spawn, ChildProcess } from 'child_process';
+import { spawn, ChildProcess, execSync } from 'child_process';
 import path from 'path';
 
 export function stripAnsiCodes(text: string): string {
@@ -88,7 +88,8 @@ export class TerminalSessionManager {
     const isWin = process.platform === 'win32';
     const isLinux = process.platform === 'linux';
     const trimmedCmd = command.trim();
-    const isInteractiveShell = trimmedCmd === 'bash' || trimmedCmd === 'sh' || trimmedCmd === 'zsh' || trimmedCmd === '';
+    const INTERACTIVE_SHELLS = new Set(['bash', 'sh', 'zsh', 'fish', 'powershell', 'pwsh', 'cmd', 'cmd.exe', '']);
+    const isInteractiveShell = INTERACTIVE_SHELLS.has(trimmedCmd.toLowerCase());
 
     let shell: string;
     let shellArgs: string[];
@@ -201,7 +202,12 @@ export class TerminalSessionManager {
       session.inputs.push({ input, timestamp: new Date().toISOString() });
 
       if (input === 'CTRL+C' || input === '\x03') {
-        session.process.kill('SIGINT');
+        if (process.platform === 'win32') {
+          // On Windows SIGINT doesn't work via kill(); write Ctrl+C byte to stdin instead
+          session.process.stdin?.write('\x03');
+        } else {
+          session.process.kill('SIGINT');
+        }
         return { success: true };
       }
 
@@ -279,14 +285,23 @@ export class TerminalSessionManager {
     }
 
     try {
-      session.process.kill('SIGTERM');
-      setTimeout(() => {
-        if (session.status === 'running') {
-          session.process.kill('SIGKILL');
+      if (process.platform === 'win32') {
+        // SIGTERM/SIGKILL don't work on Windows; use taskkill to force-kill the process tree
+        if (session.pid) {
+          try { execSync(`taskkill /F /T /PID ${session.pid}`, { stdio: 'ignore' }); } catch (_) {}
         }
-      }, 1000);
-      session.status = 'exited';
-      session.exitCode = 137;
+        session.status = 'exited';
+        session.exitCode = 1;
+      } else {
+        session.process.kill('SIGTERM');
+        setTimeout(() => {
+          if (session.status === 'running') {
+            session.process.kill('SIGKILL');
+          }
+        }, 1000);
+        session.status = 'exited';
+        session.exitCode = 137;
+      }
       return { success: true };
     } catch (err: any) {
       return { success: false, error: `Failed to kill process: ${err.message}` };

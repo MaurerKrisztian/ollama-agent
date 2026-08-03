@@ -228,6 +228,13 @@ export const App: React.FC = () => {
         setGenerationStatus('generating');
       }
       applyChatStreamEvent(payload.event, payload.data);
+      // On terminal stream-end events, refresh context info from server
+      if (['done', 'cancelled', 'error'].includes(payload.event)) {
+        fetch(`/api/context?sessionId=${encodeURIComponent(activeSessionIdRef.current)}`)
+          .then((r) => (r.ok ? r.json() : null))
+          .then((data) => { if (data) setContextInfo(data); })
+          .catch(() => {});
+      }
     });
     socket.on('config:state', (data: { config?: AgentConfig; context?: ContextInfo }) => {
       if (data.config) {
@@ -855,72 +862,34 @@ export const App: React.FC = () => {
   };
 
   const runChatStream = async (body: Record<string, unknown>, actionLabel: string) => {
-    const controller = new AbortController();
-    chatStreamAbortControllerRef.current = controller;
     setIsGenerating(true);
     setGenerationStatus('generating');
     setStreamingText('');
     setStreamingThinking('');
 
     try {
+      // Join the session-specific Socket.IO room so the server can target stream events at us
+      liveSocketRef.current?.emit('session:join', activeSessionId);
+
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...body, sessionId: activeSessionId }),
-        signal: controller.signal,
       });
 
-      if (!response.ok || !response.body) {
+      if (!response.ok) {
         const data = await response.json().catch(() => null);
-        throw new Error(data?.error || `Server response error ${response.status}`);
+        throw new Error(data?.error || `Server error ${response.status}`);
       }
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder('utf-8');
-      let buffer = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n\n');
-        buffer = lines.pop() || '';
-
-        for (const block of lines) {
-          if (!block.trim()) continue;
-          const eventLine = block.match(/^event:\s*(.+)$/m);
-          const dataLine = block.match(/^data:\s*(.+)$/m);
-
-          if (eventLine && dataLine) {
-            const eventType = eventLine[1].trim();
-            const eventData = JSON.parse(dataLine[1].trim());
-
-            applyChatStreamEvent(eventType, eventData);
-          }
-        }
-      }
+      // Streaming events will arrive via socket.on('chat:stream')
+      // State cleanup happens there when 'done' / 'error' / 'cancelled' is received
     } catch (err: any) {
       setActiveToolCall(null);
-      if (err?.name !== 'AbortError') {
-        setGenerationStatus('error');
-        alert(`Failed to ${actionLabel}: ${err.message}`);
-      } else {
-        setGenerationStatus('idle');
-      }
-    } finally {
-      if (chatStreamAbortControllerRef.current === controller) {
-        chatStreamAbortControllerRef.current = null;
-      }
       setIsGenerating(false);
       setStreamingText('');
       setStreamingThinking('');
-      setActiveToolCall(null);
-      const ctxRes = await fetch(`/api/context?sessionId=${encodeURIComponent(activeSessionId)}`);
-      if (ctxRes.ok) {
-        const data = await ctxRes.json();
-        setContextInfo(data);
-      }
+      setGenerationStatus('error');
+      alert(`Failed to ${actionLabel}: ${err.message}`);
     }
   };
 
@@ -940,10 +909,6 @@ export const App: React.FC = () => {
 
   const handleCancelAllGenerations = async () => {
     try {
-      if (chatStreamAbortControllerRef.current) {
-        chatStreamAbortControllerRef.current.abort();
-        chatStreamAbortControllerRef.current = null;
-      }
       const response = await fetch('/api/chat/cancel', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -966,10 +931,6 @@ export const App: React.FC = () => {
 
   const handleCancelGeneration = async () => {
     try {
-      if (chatStreamAbortControllerRef.current) {
-        chatStreamAbortControllerRef.current.abort();
-        chatStreamAbortControllerRef.current = null;
-      }
       setGenerationStatus('idle');
       setIsGenerating(false);
       setActiveToolCall(null);

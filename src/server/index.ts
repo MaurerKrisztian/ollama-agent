@@ -210,11 +210,14 @@ app.post('/api/models/pull', async (req, res) => {
   res.status(200);
   res.setHeader('Content-Type', 'application/x-ndjson');
   res.setHeader('Cache-Control', 'no-cache, no-transform');
+  // Disable Nagle's algorithm for low-latency streaming on Windows
+  res.socket?.setNoDelay(true);
   res.flushHeaders();
 
   try {
     await agent.pullModel(model, (progress) => {
       res.write(`${JSON.stringify(progress)}\n`);
+      (res as any).flush?.();
     }, controller.signal);
     res.end();
   } catch (err: any) {
@@ -455,6 +458,19 @@ io.on('connection', async (socket) => {
     void broadcastRunningModels();
   });
 
+  // Client joins a session-specific room so the server can target it with chat:stream events
+  socket.on('session:join', (sessionId: string) => {
+    // Leave any previously joined session rooms
+    for (const room of socket.rooms) {
+      if (room !== socket.id && room.startsWith('session:')) {
+        socket.leave(room);
+      }
+    }
+    if (typeof sessionId === 'string' && sessionId) {
+      socket.join(`session:${sessionId}`);
+    }
+  });
+
   socket.on('disconnect', () => {
     if (io.engine.clientsCount === 0 && liveStateInterval) {
       clearInterval(liveStateInterval);
@@ -501,8 +517,8 @@ app.get('/api/directories', async (req, res) => {
     const entries = await fs.readdir(resolvedPath, { withFileTypes: true });
     const directories = entries
       .filter((entry) => entry.isDirectory() && !entry.name.startsWith('.'))
-      .map((entry) => entry.name)
-      .sort((a, b) => a.localeCompare(b));
+      .map((entry) => ({ name: entry.name, fullPath: path.join(resolvedPath, entry.name) }))
+      .sort((a, b) => a.name.localeCompare(b.name));
     res.json({
       success: true,
       currentPath: resolvedPath,
@@ -1236,14 +1252,13 @@ app.post('/api/chat/cancel', (req, res) => {
   res.json({ success: true });
 });
 
-// POST /api/chat - Stream chat completion via Server-Sent Events (SSE)
+// POST /api/chat - Stream chat completion via Socket.IO (works on all platforms including Windows)
 app.post('/api/chat', async (req, res) => {
   const {
     message: requestedMessage,
     sessionId,
     attachments = [],
     imageAttachments = [],
-    broadcast = false,
     regenerateFromToolMessageId,
   } = req.body;
   const isDeepResearchRegeneration = typeof regenerateFromToolMessageId === 'string';
@@ -1294,19 +1309,16 @@ app.post('/api/chat', async (req, res) => {
   if (!isDeepResearchRegeneration && /^\/skills\s*$/i.test(message)) {
     const skills = await listProjectSkills(agent.getConfig().workingDir);
     const content = formatProjectSkillList(skills);
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache, no-transform');
-    res.setHeader('Connection', 'keep-alive');
-    res.setHeader('X-Accel-Buffering', 'no');
-    res.flushHeaders();
-    res.write(`event: message_added\ndata: ${JSON.stringify({
+    // Respond immediately, emit events via Socket.IO
+    res.status(202).json({ success: true });
+    const skillMsg = {
       id: `skills-${Date.now()}`,
       role: 'assistant',
       content,
       timestamp: Date.now(),
-    })}\n\n`);
-    res.write(`event: done\ndata: ${JSON.stringify({ content })}\n\n`);
-    res.end();
+    };
+    io.to(`session:${sessionId}`).emit('chat:stream', { sessionId, event: 'message_added', data: skillMsg });
+    io.to(`session:${sessionId}`).emit('chat:stream', { sessionId, event: 'done', data: { content } });
     return;
   }
 
@@ -1344,16 +1356,12 @@ app.post('/api/chat', async (req, res) => {
         .join('\n\n')}`
     : effectiveMessage;
 
-  // Setup Server-Sent Events headers
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache, no-transform');
-  res.setHeader('Connection', 'keep-alive');
-  res.setHeader('X-Accel-Buffering', 'no');
-  res.flushHeaders();
+  // Respond immediately — streaming events are delivered via Socket.IO (cross-platform, no HTTP buffering)
+  res.status(202).json({ success: true });
 
+  // All stream events go to the session room via Socket.IO
   const sendEvent = (event: string, data: any) => {
-    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
-    if (broadcast === true) io.emit('chat:stream', { sessionId, event, data });
+    io.to(`session:${sessionId}`).emit('chat:stream', { sessionId, event, data });
   };
 
   // Intercept /compact command
@@ -1376,19 +1384,10 @@ app.post('/api/chat', async (req, res) => {
       sendEvent('error', { error: err.message });
     } finally {
       if (activeGenerationControllers.get(sessionId) === generationController) activeGenerationControllers.delete(sessionId);
+      broadcastChatSessions();
     }
-    res.end();
     return;
   }
-  res.on('close', () => {
-    if (res.writableEnded || activeGenerationControllers.get(sessionId) !== generationController) return;
-    generationController.abort();
-    const pendingApprovalResolve = pendingApprovalResolves.get(sessionId);
-    if (pendingApprovalResolve) {
-      pendingApprovalResolve({ decision: 'reject', reason: 'Client disconnected' });
-      pendingApprovalResolves.delete(sessionId);
-    }
-  });
 
   // Checkpoint: create a new entry for this prompt turn
   const promptId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -1633,7 +1632,7 @@ app.post('/api/chat', async (req, res) => {
     if (activeGenerationControllers.get(sessionId) === generationController) activeGenerationControllers.delete(sessionId);
     saveChatSession(sessionId, sessionAgent);
     broadcastChatSessions();
-    res.end();
+    // HTTP response was already sent (202) — no res.end() needed
   }
 });
 
@@ -1836,11 +1835,14 @@ app.post('/api/benchmark/run-single', async (req, res) => {
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
+    // Disable Nagle's algorithm for low-latency SSE on Windows
+    res.socket?.setNoDelay(true);
   }
 
   const sendEvent = (event: string, data: any) => {
     if (isStream && !res.writableEnded && !res.destroyed) {
       res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+      (res as any).flush?.();
     }
   };
 
@@ -1922,6 +1924,8 @@ app.post('/api/benchmark/run-stream', async (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
+  // Disable Nagle's algorithm for low-latency SSE on Windows
+  res.socket?.setNoDelay(true);
   const benchmarkController = new AbortController();
   res.on('close', () => {
     if (!res.writableEnded) benchmarkController.abort();
@@ -1930,6 +1934,7 @@ app.post('/api/benchmark/run-stream', async (req, res) => {
   const sendEvent = (event: string, data: any) => {
     if (!res.writableEnded && !res.destroyed) {
       res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+      (res as any).flush?.();
     }
   };
 

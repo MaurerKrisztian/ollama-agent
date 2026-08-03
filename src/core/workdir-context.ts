@@ -46,10 +46,13 @@ async function collectFiles(root: string): Promise<{ files: string[]; truncated:
   let truncated = false;
 
   const visit = async (relativeDir: string, depth: number): Promise<void> => {
+    const agentSep = path.sep;
     const isAgentFolder =
       relativeDir === '.agent' ||
+      relativeDir.startsWith(`.agent${agentSep}`) ||
       relativeDir.startsWith('.agent/') ||
       relativeDir === '.agents' ||
+      relativeDir.startsWith(`.agents${agentSep}`) ||
       relativeDir.startsWith('.agents/');
     const maxAllowedDepth = isAgentFolder ? 5 : MAX_DEPTH;
 

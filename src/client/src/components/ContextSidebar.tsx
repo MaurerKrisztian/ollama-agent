@@ -669,7 +669,7 @@ export const ContextSidebar: React.FC<ContextSidebarProps> = ({
               </div>
             </div>
           )
-        ) : !contextInfo && activeTab !== 'workdir' && activeTab !== 'settings' ? (
+        ) : !contextInfo && activeTab !== 'workdir' ? (
           <div style={{ color: 'var(--text-dim)', fontSize: '0.85rem' }}>No context loaded.</div>
         ) : activeTab === 'formatted' ? (
           <pre

@@ -160,13 +160,10 @@ npm install
 
 ### Run the Web UI
 ```bash
-# Terminal 1: Start the backend server
-npm run dev:server
-
-# Terminal 2: Start the frontend dev server
-npm run dev:client
+npm run dev
 ```
 
+This starts both the backend server and frontend dev server in one command.
 Then open **http://localhost:5173** in your browser.
 
 ### Run the app and Ollama with Docker Compose
@@ -198,6 +195,43 @@ current project. The Docker socket is mounted so the benchmark runner can launch
 isolated attempt containers. Access to that socket grants the app container control
 of the host Docker daemon; remove the socket and `.benchmark-tmp` mounts if benchmark
 execution is not required.
+
+### 🪟 Running on Windows (Native)
+
+The app runs natively on Windows — no WSL required. Streaming uses Socket.IO WebSocket,
+so there are no HTTP buffering issues on Windows.
+
+**Prerequisites**
+- [Node.js 20+](https://nodejs.org/) (includes npm)
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) (for Ollama)
+- [Ollama](https://ollama.com) (or run it inside Docker — see below)
+
+**Option A — Recommended: Ollama in Docker, app native**
+```cmd
+:: Start only Ollama in Docker
+docker compose up ollama -d
+
+:: Pull a model
+docker exec local-model-chat-ollama-1 ollama pull qwen3.5:9b
+
+:: Install dependencies and start the app natively
+npm install
+npm run dev
+```
+
+Open **http://localhost:5173** in your browser.
+
+**Option B — Full Docker (Linux containers via WSL2)**
+```cmd
+docker compose up --build -d
+```
+Open **http://localhost:3000**. Note: terminal commands run inside the Linux container,
+not on your Windows host directly.
+
+**Windows-specific notes**
+- The agent can read/write files inside the project folder (mounted as `/workspace`)
+- Terminal sessions use `cmd.exe` by default; PowerShell works too — just type `powershell`
+- To kill a running terminal session, the app uses `taskkill /F /T` automatically
 
 ### Run the CLI
 ```bash
@@ -342,7 +376,7 @@ curl -X POST http://localhost:3001/api/benchmark/run
 | `GET` | `/api/skills` | List valid workspace and bundled skills |
 | `GET` | `/api/messages` | Get stored conversation messages for UI restoration |
 | `POST` | `/api/clear` | Clear conversation history |
-| `POST` | `/api/chat` | Send message (SSE stream) |
+| `POST` | `/api/chat` | Send message (Socket.IO stream) |
 | `POST` | `/api/chat/tool-approval` | Approve or reject pending tool execution |
 | `POST` | `/api/chat/tool-settings` | Update terminal approval & tool complexity settings |
 | `GET` | `/api/benchmark/testcases` | List all benchmark test cases |
@@ -358,7 +392,7 @@ curl -X POST http://localhost:3001/api/benchmark/run
 | **LLM Runtime** | [Ollama](https://ollama.com) (local, any model) |
 | **Agent Core** | TypeScript, custom agentic loop |
 | **Code Intelligence** | TypeScript Compiler API (AST & LSP engine) |
-| **Backend** | Node.js, Express, Server-Sent Events |
+| **Backend** | Node.js, Express, Socket.IO |
 | **Frontend** | React 18, Vite, Lucide icons, Vanilla CSS |
 | **CLI** | Commander.js, Chalk, Readline |
 | **Benchmark Sandbox** | Docker (`alpine`) |

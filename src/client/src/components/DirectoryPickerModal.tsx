@@ -3,7 +3,7 @@ import { ArrowUp, Folder, FolderCheck, RefreshCw, X } from 'lucide-react';
 
 interface DirectoryEntry {
   name: string;
-  path: string;
+  fullPath: string;
 }
 
 interface DirectoryPickerModalProps {
@@ -34,9 +34,9 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
       const response = await fetch(`/api/directories?path=${encodeURIComponent(targetPath)}`);
       const data = await response.json();
       if (!response.ok || !data.success) throw new Error(data.error || 'Could not browse directory.');
-      setBrowsingPath(data.current);
-      setPathInput(data.current);
-      setParent(data.parent);
+      setBrowsingPath(data.currentPath);
+      setPathInput(data.currentPath);
+      setParent(data.parentPath ?? null);
       setDirectories(Array.isArray(data.directories) ? data.directories : []);
     } catch (err: any) {
       setError(err.message);
@@ -105,7 +105,7 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
             <div style={{ padding: 18, color: 'var(--text-dim)', fontSize: '.84rem' }}>No subdirectories.</div>
           )}
           {directories.map((directory) => (
-            <button key={directory.path} onClick={() => void browse(directory.path)} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 9, padding: '10px 13px', background: 'transparent', border: 0, borderBottom: '1px solid rgba(148,163,184,.08)', color: 'var(--text-main)', cursor: 'pointer', textAlign: 'left' }}>
+            <button key={directory.fullPath} onClick={() => void browse(directory.fullPath)} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 9, padding: '10px 13px', background: 'transparent', border: 0, borderBottom: '1px solid rgba(148,163,184,.08)', color: 'var(--text-main)', cursor: 'pointer', textAlign: 'left' }}>
               <Folder size={16} color="var(--accent-teal)" />
               <span>{directory.name}</span>
             </button>
