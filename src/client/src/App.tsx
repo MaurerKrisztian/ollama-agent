@@ -1115,6 +1115,10 @@ export const App: React.FC = () => {
           activeModel={config.model}
           onCompactContext={handleCompactContext}
           onContextInfoChange={setContextInfo}
+          config={config}
+          onOpenSystemPrompt={() => setSystemPromptModalOpen(true)}
+          onOpenWorkingDirPicker={() => setDirectoryPickerOpen(true)}
+          onToggleWorkingDirInfo={handleToggleWorkingDirInfo}
         />
 
         <RightTerminalSidebar

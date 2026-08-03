@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import { X, Copy, Check, FileJson, AlignLeft, Layers, FolderTree, RefreshCw, Cpu, Sparkles, Scissors } from 'lucide-react';
-import { ContextInfo, ContextPruningConfig } from '../types';
+import { X, Copy, Check, FileJson, AlignLeft, Layers, FolderTree, RefreshCw, Cpu, Sparkles, Scissors, SlidersHorizontal, FolderOpen, Settings } from 'lucide-react';
+import { AgentConfig, ContextInfo, ContextPruningConfig } from '../types';
 
 interface ContextSidebarProps {
   isOpen: boolean;
@@ -9,6 +9,10 @@ interface ContextSidebarProps {
   activeModel?: string;
   onCompactContext?: () => void;
   onContextInfoChange?: (contextInfo: ContextInfo) => void;
+  config?: AgentConfig;
+  onOpenSystemPrompt?: () => void;
+  onOpenWorkingDirPicker?: () => void;
+  onToggleWorkingDirInfo?: (enabled: boolean) => void;
 }
 
 function escapeHtml(str: string): string {
@@ -103,8 +107,12 @@ export const ContextSidebar: React.FC<ContextSidebarProps> = ({
   activeModel,
   onCompactContext,
   onContextInfoChange,
+  config,
+  onOpenSystemPrompt,
+  onOpenWorkingDirPicker,
+  onToggleWorkingDirInfo,
 }) => {
-  const [activeTab, setActiveTab] = useState<'formatted' | 'json' | 'workdir' | 'pruning'>('formatted');
+  const [activeTab, setActiveTab] = useState<'formatted' | 'json' | 'workdir' | 'pruning' | 'settings'>('formatted');
   const [copied, setCopied] = useState(false);
   const [workdirContext, setWorkdirContext] = useState('');
   const [workdirEnabled, setWorkdirEnabled] = useState(false);
@@ -428,6 +436,25 @@ export const ContextSidebar: React.FC<ContextSidebarProps> = ({
             <Scissors size={13} />
             <span>Pruning</span>
           </button>
+          <button
+            onClick={() => setActiveTab('settings')}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+              padding: '5px 8px',
+              borderRadius: '6px',
+              border: 'none',
+              fontSize: '0.75rem',
+              fontWeight: 500,
+              cursor: 'pointer',
+              background: activeTab === 'settings' ? 'var(--accent-primary)' : 'transparent',
+              color: activeTab === 'settings' ? '#fff' : 'var(--text-muted)',
+            }}
+          >
+            <Settings size={13} />
+            <span>Settings</span>
+          </button>
         </div>
 
         <div style={{ display: 'flex', gap: '4px' }}>
@@ -441,7 +468,7 @@ export const ContextSidebar: React.FC<ContextSidebarProps> = ({
               <RefreshCw size={14} className={workdirLoading ? 'spin' : undefined} />
             </button>
           )}
-          {activeTab !== 'pruning' && (
+          {activeTab !== 'pruning' && activeTab !== 'settings' && (
             <button
               onClick={handleCopy}
               title="Copy to clipboard"
@@ -466,9 +493,84 @@ export const ContextSidebar: React.FC<ContextSidebarProps> = ({
         </div>
       </div>
 
-      {/* Code / Text Inspector / Pruning Config View */}
+      {/* Code / Text Inspector / Pruning Config / Settings View */}
       <div style={{ flex: 1, overflow: 'auto', padding: '16px 20px', background: 'rgba(10, 15, 28, 0.95)' }}>
-        {activeTab === 'pruning' ? (
+        {activeTab === 'settings' ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+            {/* System Prompt */}
+            <div style={{ padding: '14px', background: 'rgba(30, 41, 59, 0.5)', border: '1px solid var(--border-color)', borderRadius: '8px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <SlidersHorizontal size={15} color="var(--accent-amber)" />
+                <span style={{ fontWeight: 600, color: 'var(--text-main)', fontSize: '0.85rem' }}>System Prompt &amp; Core Rules</span>
+              </div>
+              <p style={{ fontSize: '0.725rem', color: 'var(--text-muted)', margin: 0 }}>Define the agent's base behaviour, personality, and constraints.</p>
+              <button
+                onClick={onOpenSystemPrompt}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '6px',
+                  padding: '7px 12px',
+                  borderRadius: '6px',
+                  border: '1px solid rgba(245, 158, 11, 0.4)',
+                  background: 'rgba(245, 158, 11, 0.12)',
+                  color: 'var(--accent-amber)',
+                  fontSize: '0.8rem',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                <SlidersHorizontal size={14} />
+                <span>Edit System Prompt</span>
+              </button>
+            </div>
+
+            {/* Working Directory */}
+            <div style={{ padding: '14px', background: 'rgba(30, 41, 59, 0.5)', border: '1px solid var(--border-color)', borderRadius: '8px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <FolderOpen size={15} color="var(--accent-teal)" />
+                <span style={{ fontWeight: 600, color: 'var(--text-main)', fontSize: '0.85rem' }}>Active Working Directory</span>
+              </div>
+              <button
+                onClick={onOpenWorkingDirPicker}
+                title="Click to change working directory"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  background: 'rgba(15, 23, 42, 0.6)',
+                  border: '1px solid var(--border-color)',
+                  color: 'var(--text-main)',
+                  fontSize: '0.78rem',
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                  width: '100%',
+                  padding: '7px 10px',
+                  borderRadius: '6px',
+                  fontFamily: 'var(--font-code)',
+                }}
+              >
+                <FolderOpen size={14} color="var(--accent-teal)" style={{ flexShrink: 0 }} />
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+                  {config?.workingDir || 'Not set'}
+                </span>
+              </button>
+              {onToggleWorkingDirInfo && (
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.76rem', color: 'var(--text-muted)', cursor: 'pointer', paddingTop: '4px', borderTop: '1px dashed var(--border-color)' }}>
+                  <input
+                    type="checkbox"
+                    checked={config?.showWorkingDirInfo ?? false}
+                    onChange={(e) => onToggleWorkingDirInfo(e.target.checked)}
+                    style={{ accentColor: 'var(--accent-teal)' }}
+                  />
+                  <span>Include workspace &amp; skills context</span>
+                </label>
+              )}
+            </div>
+          </div>
+        ) : activeTab === 'pruning' ? (
           pruningLoading ? (
             <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Loading pruning settings…</div>
           ) : (
@@ -567,7 +669,7 @@ export const ContextSidebar: React.FC<ContextSidebarProps> = ({
               </div>
             </div>
           )
-        ) : !contextInfo && activeTab !== 'workdir' ? (
+        ) : !contextInfo && activeTab !== 'workdir' && activeTab !== 'settings' ? (
           <div style={{ color: 'var(--text-dim)', fontSize: '0.85rem' }}>No context loaded.</div>
         ) : activeTab === 'formatted' ? (
           <pre

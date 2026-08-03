@@ -444,46 +444,6 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
           </div>
         </div>
 
-        {/* Workspace Working Directory Section */}
-        <div>
-          <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: '8px' }}>
-            Active Working Directory
-          </span>
-          <div style={{ background: 'rgba(30, 41, 59, 0.6)', padding: '10px', borderRadius: '8px', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            <button
-              onClick={onOpenWorkingDirPicker}
-              title="Click to change working directory"
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px',
-                background: 'none',
-                border: 0,
-                color: 'var(--text-main)',
-                fontSize: '0.8rem',
-                cursor: 'pointer',
-                textAlign: 'left',
-                width: '100%',
-              }}
-            >
-              <FolderOpen size={16} color="var(--accent-teal)" style={{ flexShrink: 0 }} />
-              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, fontFamily: 'var(--font-code)' }}>
-                {config.workingDir}
-              </span>
-            </button>
-
-            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.76rem', color: 'var(--text-muted)', cursor: 'pointer', paddingTop: '4px', borderTop: '1px dashed var(--border-color)' }}>
-              <input
-                type="checkbox"
-                checked={config.showWorkingDirInfo}
-                onChange={(e) => onToggleWorkingDirInfo(e.target.checked)}
-                style={{ accentColor: 'var(--accent-teal)' }}
-              />
-              <span>Include workspace & skills context</span>
-            </label>
-          </div>
-        </div>
-
         {/* Model & Agent Settings */}
         <div>
           <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: '8px' }}>
@@ -536,26 +496,6 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
             )}
 
             <button
-              onClick={onOpenSystemPrompt}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '10px',
-                padding: '9px 12px',
-                borderRadius: '8px',
-                border: '1px solid var(--border-color)',
-                background: 'rgba(30, 41, 59, 0.4)',
-                color: 'var(--text-main)',
-                fontSize: '0.825rem',
-                cursor: 'pointer',
-                textAlign: 'left',
-              }}
-            >
-              <SlidersHorizontal size={15} color="var(--accent-amber)" />
-              <span>System Prompt & Core Rules</span>
-            </button>
-
-            <button
               onClick={onOpenConnectionSettings}
               style={{
                 display: 'flex',
@@ -574,49 +514,10 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
               <Server size={15} color="var(--accent-teal)" />
               <span>Ollama Host & API Connection</span>
             </button>
-
-            <button
-              onClick={onOpenModelDetails}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '10px',
-                padding: '9px 12px',
-                borderRadius: '8px',
-                border: '1px solid var(--border-color)',
-                background: 'rgba(30, 41, 59, 0.4)',
-                color: 'var(--text-main)',
-                fontSize: '0.825rem',
-                cursor: 'pointer',
-                textAlign: 'left',
-              }}
-            >
-              <Info size={15} color="#38bdf8" />
-              <span>Inspect Model Specs & GGUF</span>
-            </button>
           </div>
         </div>
 
-        {/* Temperature Control */}
-        <div>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
-            <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-              Temperature
-            </span>
-            <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--accent-amber)', fontFamily: 'var(--font-code)' }}>
-              {config.temperature !== undefined ? config.temperature.toFixed(1) : '0.2'}
-            </span>
-          </div>
-          <input
-            type="range"
-            min="0.0"
-            max="1.0"
-            step="0.1"
-            value={config.temperature !== undefined ? config.temperature : 0.2}
-            onChange={(e) => onChangeTemperature(parseFloat(e.target.value))}
-            style={{ width: '100%', accentColor: 'var(--accent-amber)', cursor: 'pointer' }}
-          />
-        </div>
+
 
         {/* User Config Export / Load */}
         <div>
