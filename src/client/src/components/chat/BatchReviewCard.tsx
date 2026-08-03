@@ -22,6 +22,56 @@ type DiffLine = {
 };
 type SimpleDiff = { lines: DiffLine[]; firstChangedIndex: number; truncated: boolean };
 
+/**
+ * Compute an LCS-based edit script between two arrays of strings.
+ * Returns a sequence of { type, aIdx?, bIdx? } entries representing the diff.
+ * Capped at MAX_LCS lines per side to bound O(m*n) memory/time.
+ */
+const MAX_LCS = 600;
+
+function computeLCS(
+  a: string[],
+  b: string[],
+): Array<{ type: 'context' | 'add' | 'remove'; aIdx?: number; bIdx?: number }> {
+  const m = a.length;
+  const n = b.length;
+
+  // Build DP table (using flat Uint32Array for efficiency)
+  const dp = new Uint32Array((m + 1) * (n + 1));
+  const W = n + 1;
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      if (a[i - 1] === b[j - 1]) {
+        dp[i * W + j] = dp[(i - 1) * W + (j - 1)] + 1;
+      } else {
+        const up = dp[(i - 1) * W + j];
+        const left = dp[i * W + (j - 1)];
+        dp[i * W + j] = up > left ? up : left;
+      }
+    }
+  }
+
+  // Backtrack to build edit script
+  const result: Array<{ type: 'context' | 'add' | 'remove'; aIdx?: number; bIdx?: number }> = [];
+  let i = m;
+  let j = n;
+  while (i > 0 || j > 0) {
+    if (i > 0 && j > 0 && a[i - 1] === b[j - 1]) {
+      result.push({ type: 'context', aIdx: i - 1, bIdx: j - 1 });
+      i--;
+      j--;
+    } else if (j > 0 && (i === 0 || dp[i * W + (j - 1)] >= dp[(i - 1) * W + j])) {
+      result.push({ type: 'add', bIdx: j - 1 });
+      j--;
+    } else {
+      result.push({ type: 'remove', aIdx: i - 1 });
+      i--;
+    }
+  }
+  result.reverse();
+  return result;
+}
+
 // Build a smart hunk-based diff from before/after strings focusing on actual changes
 function buildSimpleDiff(before: string | null, after: string | null): SimpleDiff | null {
   if (before === null && after === null) return null;
@@ -40,41 +90,56 @@ function buildSimpleDiff(before: string | null, after: string | null): SimpleDif
     return { lines: lines.slice(0, 500), firstChangedIndex: 0, truncated: lines.length > 500 };
   }
 
-  // Calculate line diffs
-  const allDiffs: { type: 'context' | 'add' | 'remove'; b?: string; a?: string; oldL?: number; newL?: number }[] = [];
-  const maxLen = Math.max(beforeLines.length, afterLines.length);
-  let oldL = 1;
-  let newL = 1;
+  // Use LCS for accurate diff; fall back to zip for very large files
+  type EditEntry = { type: 'context' | 'add' | 'remove'; aIdx?: number; bIdx?: number };
+  let editScript: EditEntry[];
 
-  for (let i = 0; i < maxLen; i++) {
-    const b = beforeLines[i];
-    const a = afterLines[i];
-    if (b === undefined) {
-      allDiffs.push({ type: 'add', a, newL: newL++ });
-    } else if (a === undefined) {
-      allDiffs.push({ type: 'remove', b, oldL: oldL++ });
-    } else if (b === a) {
-      allDiffs.push({ type: 'context', b, oldL: oldL++, newL: newL++ });
-    } else {
-      allDiffs.push({ type: 'remove', b, oldL: oldL });
-      allDiffs.push({ type: 'add', a, newL: newL });
-      oldL++;
-      newL++;
+  if (beforeLines.length <= MAX_LCS && afterLines.length <= MAX_LCS) {
+    editScript = computeLCS(beforeLines, afterLines);
+  } else {
+    // Simple fallback for very large files (keeps existing behaviour)
+    editScript = [];
+    const maxLen = Math.max(beforeLines.length, afterLines.length);
+    for (let k = 0; k < maxLen; k++) {
+      if (k >= beforeLines.length) {
+        editScript.push({ type: 'add', bIdx: k });
+      } else if (k >= afterLines.length) {
+        editScript.push({ type: 'remove', aIdx: k });
+      } else if (beforeLines[k] === afterLines[k]) {
+        editScript.push({ type: 'context', aIdx: k, bIdx: k });
+      } else {
+        editScript.push({ type: 'remove', aIdx: k });
+        editScript.push({ type: 'add', bIdx: k });
+      }
     }
   }
 
+  // Pre-compute line numbers for each entry in the edit script
+  const lineNums: Array<{ old?: number; new?: number }> = [];
+  let oc = 1;
+  let nc = 1;
+  for (const e of editScript) {
+    if (e.type === 'context') {
+      lineNums.push({ old: oc++, new: nc++ });
+    } else if (e.type === 'remove') {
+      lineNums.push({ old: oc++ });
+    } else {
+      lineNums.push({ new: nc++ });
+    }
+  }
+
+  // Identify changed indices and build context windows (radius 3)
+  const contextRadius = 3;
   const changedIndices: number[] = [];
-  allDiffs.forEach((d, idx) => {
-    if (d.type !== 'context') changedIndices.push(idx);
+  editScript.forEach((e, idx) => {
+    if (e.type !== 'context') changedIndices.push(idx);
   });
 
   if (changedIndices.length === 0) return null;
 
-  // Build context windows around changes (radius 3 lines)
-  const contextRadius = 3;
   const showIndices = new Set<number>();
   changedIndices.forEach((idx) => {
-    for (let c = Math.max(0, idx - contextRadius); c <= Math.min(allDiffs.length - 1, idx + contextRadius); c++) {
+    for (let c = Math.max(0, idx - contextRadius); c <= Math.min(editScript.length - 1, idx + contextRadius); c++) {
       showIndices.add(c);
     }
   });
@@ -85,24 +150,28 @@ function buildSimpleDiff(before: string | null, after: string | null): SimpleDif
   let lastIdx = -1;
 
   for (const idx of sortedIndices) {
+    // Insert hunk header when there's a gap
     if (lastIdx !== -1 && idx > lastIdx + 1) {
-      const item = allDiffs[idx];
+      const nums = lineNums[idx];
       lines.push({
         type: 'hunk_header',
-        content: `@@ -${item.oldL ?? '...'} +${item.newL ?? '...'} @@`,
+        content: `@@ -${nums.old ?? nums.new ?? '...'} +${nums.new ?? nums.old ?? '...'} @@`,
       });
     }
-    const d = allDiffs[idx];
-    if (d.type !== 'context' && firstChangedIndex === -1) {
+
+    const e = editScript[idx];
+    const nums = lineNums[idx];
+
+    if (e.type !== 'context' && firstChangedIndex === -1) {
       firstChangedIndex = lines.length;
     }
 
-    if (d.type === 'add') {
-      lines.push({ type: 'add', content: d.a ?? '', newLine: d.newL });
-    } else if (d.type === 'remove') {
-      lines.push({ type: 'remove', content: d.b ?? '', oldLine: d.oldL });
+    if (e.type === 'add') {
+      lines.push({ type: 'add', content: e.bIdx !== undefined ? afterLines[e.bIdx] : '', newLine: nums.new });
+    } else if (e.type === 'remove') {
+      lines.push({ type: 'remove', content: e.aIdx !== undefined ? beforeLines[e.aIdx] : '', oldLine: nums.old });
     } else {
-      lines.push({ type: 'context', content: d.b ?? '', oldLine: d.oldL, newLine: d.newL });
+      lines.push({ type: 'context', content: e.aIdx !== undefined ? beforeLines[e.aIdx] : '', oldLine: nums.old, newLine: nums.new });
     }
     lastIdx = idx;
   }
