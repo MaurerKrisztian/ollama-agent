@@ -64,7 +64,7 @@ function getInitialPersistedConfig(): {
   model: string;
   allowedCommands: string[];
   terminalMode: 'confirm' | 'auto';
-  fileEditMode: 'confirm' | 'auto';
+  fileEditMode: 'confirm' | 'auto' | 'batch';
   enableThinking: boolean;
   classifierModel?: string;
   complexityProfile: 'simple' | 'medium' | 'advanced';
@@ -77,7 +77,7 @@ function getInitialPersistedConfig(): {
   let classifierModel: string | undefined = undefined;
   let allowedCommands = [...DEFAULT_COMMAND_WHITELIST];
   let terminalMode: 'confirm' | 'auto' = 'confirm';
-  let fileEditMode: 'confirm' | 'auto' = 'confirm';
+  let fileEditMode: 'confirm' | 'auto' | 'batch' = 'batch';
   let enableThinking = true;
   let complexityProfile: 'simple' | 'medium' | 'advanced' = 'simple';
   let enabledTools = Object.fromEntries(BUILTIN_TOOLS.map((tool) => [tool.name, tool.name !== 'apply_patch']));
@@ -107,7 +107,7 @@ function getInitialPersistedConfig(): {
       if (parsed.terminalMode === 'confirm' || parsed.terminalMode === 'auto') {
         terminalMode = parsed.terminalMode;
       }
-      if (parsed.fileEditMode === 'confirm' || parsed.fileEditMode === 'auto') {
+      if (parsed.fileEditMode === 'confirm' || parsed.fileEditMode === 'auto' || parsed.fileEditMode === 'batch') {
         fileEditMode = parsed.fileEditMode;
       }
       if (typeof parsed.enableThinking === 'boolean') {

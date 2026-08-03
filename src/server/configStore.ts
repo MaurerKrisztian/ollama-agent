@@ -30,7 +30,7 @@ export function getInitialPersistedConfig(): PersistedConfig {
   let classifierModel: string | undefined = undefined;
   let allowedCommands = [...DEFAULT_COMMAND_WHITELIST];
   let terminalMode: 'confirm' | 'auto' = 'confirm';
-  let fileEditMode: 'confirm' | 'auto' | 'batch' = 'confirm';
+  let fileEditMode: 'confirm' | 'auto' | 'batch' = 'batch';
   let enableThinking = true;
   let preventRepeatedCalls = true;
   let complexityProfile: 'simple' | 'medium' | 'advanced' = 'simple';

@@ -114,7 +114,7 @@ test('configStore round-trips batch fileEditMode', async () => {
       const raw = JSON.parse(await fs.readFile(configFile, 'utf8'));
       const v = raw.fileEditMode;
       if (v === 'confirm' || v === 'auto' || v === 'batch') return v;
-      return 'confirm'; // default
+      return 'batch'; // default
     };
 
     await write('batch');
@@ -127,7 +127,7 @@ test('configStore round-trips batch fileEditMode', async () => {
     assert.equal(await read(), 'confirm');
 
     await write('invalid');
-    assert.equal(await read(), 'confirm', 'unknown value should fall back to confirm');
+    assert.equal(await read(), 'batch', 'unknown value should fall back to batch');
   });
 });
 

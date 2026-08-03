@@ -31,7 +31,7 @@ export const App: React.FC = () => {
 
   const [toolSettings, setToolSettings] = useState<ToolSettings>({
     terminalMode: 'confirm',
-    fileEditMode: 'confirm',
+    fileEditMode: 'batch',
     allowedCommands: ['ls', 'pwd'],
     maxLoops: 25,
     preventRepeatedCalls: true,
