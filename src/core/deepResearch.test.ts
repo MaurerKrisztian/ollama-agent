@@ -671,3 +671,31 @@ test('deep research passes Stage 1 grounding search context to queryGenerator', 
   assert.match(receivedGroundingContext, /Lead Software Engineer/);
 });
 
+test('deep research aborts immediately when AbortSignal is cancelled', async () => {
+  const controller = new AbortController();
+  const client = {
+    async search() {
+      controller.abort();
+      return [{ title: 'Page', url: 'https://example.com/p1', snippet: 'Snippet' }];
+    },
+    async readPage(url: string) {
+      return {
+        title: 'Page',
+        url,
+        byline: null,
+        excerpt: null,
+        markdown: 'Content',
+        truncated: false,
+        links: [],
+        images: [],
+      };
+    },
+  };
+
+  const runner = new DeepResearchRunner(client);
+  await assert.rejects(
+    () => runner.run('test topic', 0, undefined, { signal: controller.signal }),
+    (err: any) => err?.name === 'AbortError' || controller.signal.aborted
+  );
+});
+

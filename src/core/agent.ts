@@ -382,7 +382,9 @@ export class AgentEngine {
       if (parsed && Array.isArray(parsed.queries)) {
         return parsed.queries.map((q: any) => String(q).trim()).filter(Boolean);
       }
-    } catch (_) {}
+    } catch (err: any) {
+      if (err?.name === 'AbortError' || signal?.aborted) throw err;
+    }
     return [];
   }
 

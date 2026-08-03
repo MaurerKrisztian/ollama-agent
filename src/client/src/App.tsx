@@ -95,6 +95,7 @@ export const App: React.FC = () => {
   const [activeGenerationsCount, setActiveGenerationsCount] = useState<number>(0);
   const liveSocketRef = useRef<Socket | null>(null);
   const activeSessionIdRef = useRef('');
+  const chatStreamAbortControllerRef = useRef<AbortController | null>(null);
 
   const applyChatStreamEvent = (eventType: string, eventData: any) => {
     if (eventType === 'message_added') {
@@ -844,6 +845,8 @@ export const App: React.FC = () => {
   };
 
   const runChatStream = async (body: Record<string, unknown>, actionLabel: string) => {
+    const controller = new AbortController();
+    chatStreamAbortControllerRef.current = controller;
     setIsGenerating(true);
     setGenerationStatus('generating');
     setStreamingText('');
@@ -854,6 +857,7 @@ export const App: React.FC = () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...body, sessionId: activeSessionId }),
+        signal: controller.signal,
       });
 
       if (!response.ok || !response.body) {
@@ -888,9 +892,16 @@ export const App: React.FC = () => {
       }
     } catch (err: any) {
       setActiveToolCall(null);
-      setGenerationStatus('error');
-      alert(`Failed to ${actionLabel}: ${err.message}`);
+      if (err?.name !== 'AbortError') {
+        setGenerationStatus('error');
+        alert(`Failed to ${actionLabel}: ${err.message}`);
+      } else {
+        setGenerationStatus('idle');
+      }
     } finally {
+      if (chatStreamAbortControllerRef.current === controller) {
+        chatStreamAbortControllerRef.current = null;
+      }
       setIsGenerating(false);
       setStreamingText('');
       setStreamingThinking('');
@@ -919,6 +930,10 @@ export const App: React.FC = () => {
 
   const handleCancelAllGenerations = async () => {
     try {
+      if (chatStreamAbortControllerRef.current) {
+        chatStreamAbortControllerRef.current.abort();
+        chatStreamAbortControllerRef.current = null;
+      }
       const response = await fetch('/api/chat/cancel', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -941,6 +956,17 @@ export const App: React.FC = () => {
 
   const handleCancelGeneration = async () => {
     try {
+      if (chatStreamAbortControllerRef.current) {
+        chatStreamAbortControllerRef.current.abort();
+        chatStreamAbortControllerRef.current = null;
+      }
+      setGenerationStatus('idle');
+      setIsGenerating(false);
+      setActiveToolCall(null);
+      setPendingApprovalCall(null);
+      setStreamingText('');
+      setStreamingThinking('');
+
       const response = await fetch('/api/chat/cancel', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

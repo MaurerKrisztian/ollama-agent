@@ -558,6 +558,7 @@ export class DeepResearchRunner {
     semanticEnabled: boolean,
     depth: number,
     onAnalysisProgress?: (progress: DeepResearchLinkAnalysisProgress) => void,
+    signal?: AbortSignal,
   ): Promise<SemanticLinkCandidate[]> {
     const queryTokens = tokenize(query);
     const candidates: SemanticLinkCandidate[] = [];
@@ -657,7 +658,7 @@ export class DeepResearchRunner {
             aria_label: link.ariaLabel || null,
             url_path_hints: link.urlPathHints || [],
           })),
-        });
+        }, signal);
         const allowed = new Set(batch.links.map(({ url }) => url));
         const validated = validateSemanticDecisions(decisions, allowed);
         for (const candidate of batch.links) {
@@ -675,7 +676,8 @@ export class DeepResearchRunner {
             });
           }
         }
-      } catch (_) {
+      } catch (err: any) {
+        if (err?.name === 'AbortError' || signal?.aborted) throw err;
         // Keep deterministic decisions when the model is unavailable or malformed.
       } finally {
         batchesCompleted++;
@@ -683,7 +685,7 @@ export class DeepResearchRunner {
         activeBatches.delete(batchIndex);
         report(batchesCompleted === batches.length ? 'complete' : 'running', batchesCompleted, itemsCompleted, [...activeBatches.values()]);
       }
-    });
+    }, signal);
     return candidates;
   }
 
@@ -694,6 +696,7 @@ export class DeepResearchRunner {
     relevanceThreshold: number,
     depth: number,
     onAnalysisProgress?: (progress: DeepResearchLinkAnalysisProgress) => void,
+    signal?: AbortSignal,
   ): Promise<Map<string, DeepResearchSemanticDecision>> {
     const queryTokens = tokenize(query);
     const confirmed = new Map<string, DeepResearchSemanticDecision>();
@@ -749,11 +752,12 @@ export class DeepResearchRunner {
             excerpt: page.excerpt,
             content: page.markdown.slice(0, 6_000),
           })),
-        });
+        }, signal);
         const allowed = new Set(batch.map((page) => canonicalizeUrl(page.url) || page.url));
         const validated = validateSemanticDecisions(decisions, allowed);
         for (const [url, decision] of validated) confirmed.set(url, decision);
-      } catch (_) {
+      } catch (err: any) {
+        if (err?.name === 'AbortError' || signal?.aborted) throw err;
         // Keep content-based deterministic confirmation.
       } finally {
         batchesCompleted++;
@@ -761,7 +765,7 @@ export class DeepResearchRunner {
         activeBatches.delete(batchIndex);
         report(batchesCompleted === batches.length ? 'complete' : 'running', batchesCompleted, itemsCompleted, [...activeBatches.values()]);
       }
-    });
+    }, signal);
     return confirmed;
   }
 
@@ -929,18 +933,20 @@ export class DeepResearchRunner {
 
     const initialPages = (await mapConcurrent(selected, 3, async (candidate) => {
       try {
-        const page = await this.readPageCached(candidate.url);
+        options.signal?.throwIfAborted();
+        const page = await this.readPageCached(candidate.url, options.signal);
         inspectedPages.push({ title: page.title, url: page.url, discovery: 'search' });
         addStep({ phase: 'reading', kind: 'page', status: 'success', label: page.title || candidate.title, url: page.url });
         emitProgress('reading');
         return { candidate, page };
       } catch (error: any) {
+        if (error?.name === 'AbortError' || options.signal?.aborted) throw error;
         errors.push(`Page read failed for ${candidate.url}: ${error.message}`);
         addStep({ phase: 'reading', kind: 'page', status: 'error', label: candidate.title || candidate.url, url: candidate.url, detail: error.message });
         emitProgress('reading');
         return null;
       }
-    })).filter((entry): entry is NonNullable<typeof entry> => entry !== null);
+    }, options.signal)).filter((entry): entry is NonNullable<typeof entry> => entry !== null);
 
     type FollowedPage = { link: SemanticLinkCandidate; page: Awaited<ReturnType<ResearchWebClient['readPage']>>; depth: number; confirmation: DeepResearchSemanticDecision };
     type LinkAttempt = {
@@ -969,6 +975,7 @@ export class DeepResearchRunner {
           linkAnalysis = analysis;
           emitProgress('classifying_links');
         },
+        options.signal,
       );
       for (const candidate of classifiedLinks) {
         const parentLinks = classifiedLinksByParent.get(candidate.parentUrl) || new Map<string, SemanticLinkCandidate>();
@@ -982,7 +989,8 @@ export class DeepResearchRunner {
       emitProgress('following_links');
       const depthResults = await mapConcurrent(websiteLinks, 3, async (link): Promise<{ link: SemanticLinkCandidate; page: Awaited<ReturnType<ResearchWebClient['readPage']>>; depth: number } | null> => {
         try {
-          const page = await this.readPageCached(link.url);
+          options.signal?.throwIfAborted();
+          const page = await this.readPageCached(link.url, options.signal);
           const canonicalPageUrl = canonicalizeUrl(page.url) || link.url;
           visited.add(canonicalPageUrl);
           inspectedPages.push({ title: page.title, url: page.url, discovery: 'website_link' });
@@ -990,6 +998,7 @@ export class DeepResearchRunner {
           emitProgress('following_links');
           return { link, page, depth };
         } catch (error: any) {
+          if (error?.name === 'AbortError' || options.signal?.aborted) throw error;
           const message = `Linked page read failed for ${link.url}: ${error.message}`;
           errors.push(message);
           linkAttempts.push({ link, depth, status: 'failed', confirmation: 'failed', error: error.message });
@@ -997,7 +1006,7 @@ export class DeepResearchRunner {
           emitProgress('following_links');
           return null;
         }
-      });
+      }, options.signal);
       const fetchedDepthPages = depthResults.filter((entry): entry is NonNullable<typeof entry> => entry !== null);
       const confirmations = await this.confirmFetchedPages(
         normalizedQuery,
@@ -1009,6 +1018,7 @@ export class DeepResearchRunner {
           linkAnalysis = analysis;
           emitProgress('classifying_links');
         },
+        options.signal,
       );
       const successfulDepthPages: FollowedPage[] = fetchedDepthPages.map(({ link, page }) => {
         const targetUrl = canonicalizeUrl(page.url) || link.url;
@@ -1177,6 +1187,7 @@ export class DeepResearchRunner {
         emitProgress('analyzing');
         let lastProgressEmission = 0;
         try {
+          options.signal?.throwIfAborted();
           const notes = await this.noteGenerator!({
             query: normalizedQuery,
             sources: batch.map((source) => ({
@@ -1188,6 +1199,7 @@ export class DeepResearchRunner {
               relevant_links: source.relevant_links,
             })),
           }, (chunk) => {
+            options.signal?.throwIfAborted();
             liveBatch.content += chunk;
             liveBatch.context_characters = liveBatch.content.length;
             liveBatch.estimated_tokens = Math.ceil(liveBatch.content.length / 4);
@@ -1215,13 +1227,14 @@ export class DeepResearchRunner {
           });
           liveBatch.status = 'complete';
         } catch (error: any) {
+          if (error?.name === 'AbortError' || options.signal?.aborted) throw error;
           const message = `AI relevance extraction failed for ${batch.map((source) => source.id).join(', ')}: ${error.message}`;
           noteErrors.push(message);
           addStep({ phase: 'analyzing', kind: 'note', status: 'error', label: 'AI relevance extraction failed', detail: message });
           liveBatch.status = 'error';
         }
         emitProgress('analyzing');
-      });
+      }, options.signal);
     }
 
     const seenImages = new Set<string>();
