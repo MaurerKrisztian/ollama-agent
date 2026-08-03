@@ -908,7 +908,13 @@ ${conversationText}`;
               }
             }
 
-            this.contextManager.removeMessagesByIds(idsToRemove);
+            const pruningEnabled = this.contextManager.getPruningConfig().enabled;
+            this.contextManager.removeMessagesByIds(idsToRemove, pruningEnabled ? (evicted) => {
+              if (evicted.role === 'tool' && callbacks?.onMessageUpdated) {
+                const reason = `[Context Pruned: Duplicate ${evicted.name || 'read_file'} call evicted to allow a fresh read.]`;
+                callbacks.onMessageUpdated({ ...evicted, content: reason });
+              }
+            } : undefined);
             // Reset counters so the main ternary below no longer considers this repeated.
             executedCallFingerprintsThisTurn.delete(callFingerprint);
             failedToolCalls.delete(callFingerprint);
@@ -1058,7 +1064,7 @@ ${conversationText}`;
             tool_call_id: call.id,
             content: resultStr,
             displayContent: synthesisResult ? fullResultStr : undefined,
-          });
+          }, callbacks?.onMessageUpdated);
           if (callbacks?.onMessageAdded) callbacks.onMessageAdded(toolMsg);
         }
 

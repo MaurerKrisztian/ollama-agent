@@ -103,8 +103,16 @@ export const App: React.FC = () => {
         if (prev.some((message) => message.id === eventData.id)) return prev;
         return [...prev, eventData];
       });
+      if (eventData.role === 'assistant') {
+        setStreamingText('');
+        setStreamingThinking('');
+      }
     } else if (eventType === 'message_updated') {
       setMessages((prev) => prev.map((message) => message.id === eventData.id ? eventData : message));
+      if (eventData.role === 'assistant') {
+        setStreamingText('');
+        setStreamingThinking('');
+      }
     } else if (eventType === 'chunk') {
       setStreamingText((prev) => prev + eventData.chunk);
     } else if (eventType === 'thinking_chunk') {
@@ -133,6 +141,8 @@ export const App: React.FC = () => {
     } else if (eventType === 'tool_start') {
       setPendingApprovalCall(null);
       setActiveToolCall({ name: eventData.name, args: eventData.args });
+      setStreamingText('');
+      setStreamingThinking('');
     } else if (eventType === 'tool_progress') {
       setActiveToolCall((current) => current?.name === eventData.name
         ? { ...current, progress: eventData.progress }

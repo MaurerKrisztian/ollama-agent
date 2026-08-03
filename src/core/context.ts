@@ -218,7 +218,7 @@ export class ContextManager {
     imageAttachments?: ChatMessage['imageAttachments'];
     thinking?: string;
     thinkingTokens?: number;
-  }): ChatMessage {
+  }, onMessageUpdated?: (msg: ChatMessage) => void): ChatMessage {
     const newMessage: ChatMessage = {
       id: `msg_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
       role: msg.role,
@@ -236,7 +236,7 @@ export class ContextManager {
     };
     this.messages.push(newMessage);
     if (this.pruningConfig.enabled) {
-      this.applyPruning();
+      this.applyPruning(onMessageUpdated);
     }
     return newMessage;
   }
@@ -257,19 +257,26 @@ export class ContextManager {
    * Used to evict stale tool-result/assistant-request pairs (e.g. superseded read_file calls)
    * so a fresh execution can replace them without duplicating context.
    */
-  public removeMessagesByIds(ids: Set<string>): void {
+  public removeMessagesByIds(ids: Set<string>, onMessageRemoved?: (msg: ChatMessage) => void): void {
     if (ids.size === 0) return;
+    const removed = onMessageRemoved ? this.messages.filter((m) => ids.has(m.id)) : [];
     this.messages = this.messages.filter((m) => !ids.has(m.id));
     if (this.pruningConfig.enabled) {
       this.applyPruning();
     }
+    // Notify caller of each removed message so it can push updates to the client
+    removed.forEach((m) => onMessageRemoved!(m));
   }
 
   /**
    * Applies enabled context pruning strategies (Superseded File Reads, Post-Mutation Invalidation, and Tool Output TTL)
    */
-  public applyPruning(): void {
+  public applyPruning(onMessageUpdated?: (msg: ChatMessage) => void): void {
     if (!this.pruningConfig.enabled) return;
+
+    // Snapshot content before pruning to detect changes
+    const contentBefore = new Map<string, string>();
+    this.messages.forEach((m) => contentBefore.set(m.id, m.content));
 
     const toolCallMap = new Map<string, { name: string; arguments: any; index: number }>();
 
@@ -358,6 +365,16 @@ export class ContextManager {
             }
           }
         });
+      });
+    }
+
+    // Emit updates for messages whose content was just pruned
+    if (onMessageUpdated) {
+      this.messages.forEach((m) => {
+        const before = contentBefore.get(m.id);
+        if (before !== undefined && before !== m.content && m.content.startsWith('[Context Pruned:')) {
+          onMessageUpdated(m);
+        }
       });
     }
   }

@@ -1800,150 +1800,38 @@ const PrettierInvocationView: React.FC<{ name: string; args: Record<string, any>
   );
 };
 
-const ToolInvocationCard: React.FC<{
-  name: string;
+const ToolExecutionCard: React.FC<{
+  toolName: string;
   args: Record<string, any>;
-  defaultExpanded?: boolean;
-}> = ({ name, args, defaultExpanded = true }) => {
-  const [expanded, setExpanded] = useState(defaultExpanded);
-  const [viewMode, setViewMode] = useState<'prettier' | 'raw'>('prettier');
-  const [copied, setCopied] = useState(false);
-
-  const handleCopy = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    navigator.clipboard.writeText(JSON.stringify(args, null, 2));
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
-  const getToolSummary = () => {
-    if (args.command) return `$ ${args.command}`;
-    if (args.relative_path) return args.relative_path;
-    if (args.query) return `"${args.query}"`;
-    if (args.url) return args.url;
-    if (args.session_id) return `session: ${args.session_id}`;
-    return null;
-  };
-
-  const summary = getToolSummary();
-
-  return (
-    <div style={{ background: 'rgba(245, 158, 11, 0.08)', border: '1px solid rgba(245, 158, 11, 0.3)', borderRadius: '10px', fontSize: '0.85rem', overflow: 'hidden' }}>
-      {/* Header Bar */}
-      <div
-        onClick={() => setExpanded((curr) => !curr)}
-        style={{ padding: '8px 12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', background: 'rgba(245, 158, 11, 0.05)', userSelect: 'none' }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--accent-amber)', fontWeight: 600, minWidth: 0, flex: 1 }}>
-          <Wrench size={15} style={{ flexShrink: 0 }} />
-          <span style={{ whiteSpace: 'nowrap' }}>Tool Invocation:</span>
-          <span style={{ fontFamily: 'var(--font-code)', background: 'rgba(245, 158, 11, 0.18)', padding: '2px 8px', borderRadius: '6px', color: '#fcd34d', fontSize: '0.8rem', flexShrink: 0 }}>
-            {name}
-          </span>
-          {summary && (
-            <span style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-code)', fontSize: '0.75rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 0 }}>
-              {summary}
-            </span>
-          )}
-        </div>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0, marginLeft: '8px' }}>
-          {/* Prettier / Raw JSON View Mode Tabs */}
-          <div style={{ display: 'flex', gap: '2px', background: 'rgba(15, 23, 42, 0.7)', padding: '2px', borderRadius: '6px', border: '1px solid var(--border-color)' }}>
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                setViewMode('prettier');
-              }}
-              title="Formatted Prettier View"
-              style={{
-                padding: '3px 8px',
-                borderRadius: '4px',
-                border: 'none',
-                background: viewMode === 'prettier' ? 'rgba(245, 158, 11, 0.25)' : 'transparent',
-                color: viewMode === 'prettier' ? '#fcd34d' : 'var(--text-muted)',
-                fontSize: '0.72rem',
-                fontWeight: 600,
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '4px',
-              }}
-            >
-              <Eye size={12} />
-              <span>Prettier</span>
-            </button>
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                setViewMode('raw');
-              }}
-              title="Raw JSON View"
-              style={{
-                padding: '3px 8px',
-                borderRadius: '4px',
-                border: 'none',
-                background: viewMode === 'raw' ? 'rgba(245, 158, 11, 0.25)' : 'transparent',
-                color: viewMode === 'raw' ? '#fcd34d' : 'var(--text-muted)',
-                fontSize: '0.72rem',
-                fontWeight: 600,
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '4px',
-              }}
-            >
-              <Code2 size={12} />
-              <span>Raw JSON</span>
-            </button>
-          </div>
-
-          <button
-            type="button"
-            onClick={handleCopy}
-            title="Copy Raw JSON"
-            style={{ background: 'none', border: 'none', color: copied ? '#10b981' : 'var(--text-muted)', cursor: 'pointer', padding: '2px 4px', display: 'flex', alignItems: 'center', gap: '3px', fontSize: '0.72rem' }}
-          >
-            {copied ? <Check size={13} /> : <Copy size={13} />}
-          </button>
-
-          <ChevronDown size={16} color="var(--accent-amber)" style={{ transform: expanded ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s ease' }} />
-        </div>
-      </div>
-
-      {/* Expanded Content */}
-      {expanded && (
-        <div style={{ padding: '12px', borderTop: '1px solid rgba(245, 158, 11, 0.2)', background: 'rgba(10, 15, 28, 0.6)' }}>
-          {viewMode === 'prettier' ? (
-            <PrettierInvocationView name={name} args={args} />
-          ) : (
-            <pre style={{ margin: 0, padding: '10px 12px', background: '#090d16', borderRadius: '8px', border: '1px solid var(--border-color)', fontFamily: 'var(--font-code)', fontSize: '0.8rem', color: '#fcd34d', whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: '350px', overflowY: 'auto' }}>
-              {JSON.stringify(args, null, 2)}
-            </pre>
-          )}
-        </div>
-      )}
-    </div>
-  );
-};
-
-const ToolResultCard: React.FC<{
-  message: ChatMessage;
-  args: Record<string, any>;
+  resultMessage?: ChatMessage;
+  isWorking?: boolean;
+  progress?: any;
   onOpenFile?: (file: TextAttachment) => void;
   isGenerating?: boolean;
   onRegenerateDeepResearch?: (toolMessageId: string) => void;
-}> = ({ message, args, onOpenFile, isGenerating = false, onRegenerateDeepResearch }) => {
-  const [expanded, setExpanded] = useState(false);
-  const [viewMode, setViewMode] = useState<'formatted' | 'raw'>('formatted');
+  onCancelGeneration?: () => void;
+  defaultExpanded?: boolean;
+}> = ({
+  toolName,
+  args,
+  resultMessage,
+  isWorking = false,
+  progress,
+  onOpenFile,
+  isGenerating = false,
+  onRegenerateDeepResearch,
+  onCancelGeneration,
+  defaultExpanded,
+}) => {
+  const [expanded, setExpanded] = useState<boolean>(defaultExpanded ?? false);
+  const [viewMode, setViewMode] = useState<'formatted' | 'raw_input' | 'raw_result'>('formatted');
+  const [copied, setCopied] = useState(false);
 
-  const fullResultContent = message.displayContent || message.content;
-  const isPruned = typeof message.content === 'string' && message.content.startsWith('[Context Pruned:');
+  const fullResultContent = resultMessage?.displayContent || resultMessage?.content || '';
+  const isPruned = typeof resultMessage?.content === 'string' && resultMessage.content.startsWith('[Context Pruned:');
 
   let parsedContent: any = null;
-  if (!isPruned) {
+  if (resultMessage && !isPruned) {
     try {
       parsedContent = JSON.parse(fullResultContent);
     } catch (_) {}
@@ -1956,15 +1844,25 @@ const ToolResultCard: React.FC<{
     (parsedContent?.exitCode !== undefined && parsedContent.exitCode !== 0)
   );
 
-  const fileDiff = parsedContent?.diff as FileDiffData | undefined;
-  const resultWithoutDiff = parsedContent && fileDiff
-    ? Object.fromEntries(Object.entries(parsedContent).filter(([key]) => key !== 'diff'))
-    : parsedContent;
-  const summary = isPruned
-    ? message.content.replace(/^\[Context Pruned:\s*/, '').replace(/\]$/, '')
-    : getToolResultSummary(message.name, args, parsedContent);
+  const getToolSummary = () => {
+    if (args.command) return `$ ${args.command}`;
+    if (args.relative_path) return args.relative_path;
+    if (args.query) return `"${args.query}"`;
+    if (args.url) return args.url;
+    if (args.session_id) return `session: ${args.session_id}`;
+    return null;
+  };
 
-  const readFilePath = message.name === 'read_file' && !isFailed && typeof parsedContent?.content === 'string'
+  const inputSummary = getToolSummary();
+  const resultSummary = isPruned
+    ? resultMessage?.content.replace(/^\[Context Pruned:\s*/, '').replace(/\]$/, '')
+    : resultMessage
+    ? getToolResultSummary(toolName, args, parsedContent)
+    : null;
+
+  const displaySummary = resultSummary || inputSummary;
+
+  const readFilePath = toolName === 'read_file' && !isFailed && typeof parsedContent?.content === 'string'
     ? String(parsedContent.file_path || args.relative_path || '')
     : '';
   const readFileLineCount = readFilePath
@@ -1985,12 +1883,16 @@ const ToolResultCard: React.FC<{
     });
   };
 
-  const isWebSearch = message.name === 'web_search' && parsedContent?.results;
-  const isWebPageRead = message.name === 'read_web_page' && parsedContent?.markdown;
-  const isDeepResearch = message.name === 'deep_research' && parsedContent?.sources;
-  const synthesisTokenEstimate = Math.ceil(message.content.length / 4);
+  const fileDiff = parsedContent?.diff as FileDiffData | undefined;
+  const resultWithoutDiff = parsedContent && fileDiff
+    ? Object.fromEntries(Object.entries(parsedContent).filter(([key]) => key !== 'diff'))
+    : parsedContent;
+
+  const isWebSearch = toolName === 'web_search' && parsedContent?.results;
+  const isWebPageRead = toolName === 'read_web_page' && parsedContent?.markdown;
+  const isDeepResearch = toolName === 'deep_research' && (parsedContent?.sources || isWorking);
+  const synthesisTokenEstimate = resultMessage ? Math.ceil(resultMessage.content.length / 4) : 0;
   const fullTokenEstimate = Math.ceil(fullResultContent.length / 4);
-  const hasFormattedView = isWebSearch || isWebPageRead || isDeepResearch || fileDiff;
 
   const sideDriftPages: any[] = isWebSearch
     ? Array.isArray(parsedContent?.most_relevant_pages)
@@ -2000,43 +1902,140 @@ const ToolResultCard: React.FC<{
         : []
     : [];
 
-  const mainColor = isPruned ? '#c084fc' : isFailed ? '#f43f5e' : 'var(--accent-teal)';
-  const bgColor = isPruned ? 'rgba(168, 85, 247, 0.08)' : isFailed ? 'rgba(244, 63, 94, 0.08)' : 'rgba(20, 184, 166, 0.08)';
-  const borderColor = isPruned ? 'rgba(168, 85, 247, 0.3)' : isFailed ? 'rgba(244, 63, 94, 0.25)' : 'rgba(20, 184, 166, 0.25)';
-  const borderTopColor = isPruned ? 'rgba(168, 85, 247, 0.2)' : isFailed ? 'rgba(244, 63, 94, 0.18)' : 'rgba(20, 184, 166, 0.18)';
-  const activeBtnBg = isPruned ? 'rgba(168, 85, 247, 0.2)' : isFailed ? 'rgba(244, 63, 94, 0.2)' : 'rgba(20, 184, 166, 0.2)';
+  const handleCopy = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const dataToCopy = viewMode === 'raw_result' && resultMessage
+      ? fullResultContent
+      : JSON.stringify(args, null, 2);
+    navigator.clipboard.writeText(dataToCopy);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const mainColor = isWorking
+    ? 'var(--accent-primary)'
+    : isPruned
+    ? '#c084fc'
+    : isFailed
+    ? '#f43f5e'
+    : resultMessage
+    ? 'var(--accent-teal)'
+    : 'var(--accent-amber)';
+
+  const bgColor = isWorking
+    ? 'rgba(99, 102, 241, 0.08)'
+    : isPruned
+    ? 'rgba(168, 85, 247, 0.08)'
+    : isFailed
+    ? 'rgba(244, 63, 94, 0.08)'
+    : resultMessage
+    ? 'rgba(20, 184, 166, 0.08)'
+    : 'rgba(245, 158, 11, 0.08)';
+
+  const borderColor = isWorking
+    ? 'rgba(99, 102, 241, 0.4)'
+    : isPruned
+    ? 'rgba(168, 85, 247, 0.3)'
+    : isFailed
+    ? 'rgba(244, 63, 94, 0.25)'
+    : resultMessage
+    ? 'rgba(20, 184, 166, 0.25)'
+    : 'rgba(245, 158, 11, 0.3)';
+
+  const borderTopColor = isWorking
+    ? 'rgba(99, 102, 241, 0.2)'
+    : isPruned
+    ? 'rgba(168, 85, 247, 0.2)'
+    : isFailed
+    ? 'rgba(244, 63, 94, 0.18)'
+    : resultMessage
+    ? 'rgba(20, 184, 166, 0.18)'
+    : 'rgba(245, 158, 11, 0.2)';
 
   return (
-    <div className="animate-fade-in" style={{ marginLeft: '44px', maxWidth: '80%' }}>
-      <div style={{ background: bgColor, border: `1px solid ${borderColor}`, borderRadius: '8px', fontSize: '0.825rem', overflow: 'hidden' }}>
-        <div
-          role="button"
-          tabIndex={0}
-          onClick={() => setExpanded((current) => !current)}
-          onKeyDown={(event) => {
-            if (event.target !== event.currentTarget) return;
-            if (event.key === 'Enter' || event.key === ' ') {
-              event.preventDefault();
-              setExpanded((current) => !current);
-            }
-          }}
-          aria-expanded={expanded}
-          title={expanded ? 'Hide tool result' : 'Show tool result'}
-          style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '7px', padding: '7px 10px', border: 0, background: 'transparent', color: mainColor, cursor: 'pointer', textAlign: 'left', font: 'inherit' }}
-        >
-          {isPruned ? (
-            <Scissors size={14} style={{ flexShrink: 0, color: '#c084fc' }} />
+    <div
+      className="animate-fade-in"
+      style={{
+        background: bgColor,
+        border: `1px solid ${borderColor}`,
+        borderRadius: '10px',
+        fontSize: '0.85rem',
+        overflow: 'hidden',
+        boxShadow: isWorking ? '0 4px 12px rgba(99, 102, 241, 0.15)' : 'none',
+        transition: 'all 0.2s ease',
+      }}
+    >
+      {/* Header Bar */}
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={() => setExpanded((curr) => !curr)}
+        onKeyDown={(e) => {
+          if (e.target !== e.currentTarget) return;
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            setExpanded((curr) => !curr);
+          }
+        }}
+        aria-expanded={expanded}
+        style={{
+          padding: '8px 12px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          cursor: 'pointer',
+          background: 'rgba(15, 23, 42, 0.2)',
+          userSelect: 'none',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: mainColor, fontWeight: 600, minWidth: 0, flex: 1 }}>
+          {isWorking ? (
+            <Loader2 size={16} className="spin" style={{ flexShrink: 0, color: 'var(--accent-primary)' }} />
+          ) : isPruned ? (
+            <Scissors size={15} style={{ flexShrink: 0, color: '#c084fc' }} />
           ) : isFailed ? (
-            <XCircle size={14} style={{ flexShrink: 0, color: '#f43f5e' }} />
+            <XCircle size={15} style={{ flexShrink: 0, color: '#f43f5e' }} />
+          ) : resultMessage ? (
+            <CheckCircle2 size={15} style={{ flexShrink: 0, color: 'var(--accent-teal)' }} />
           ) : (
-            <CheckCircle2 size={14} style={{ flexShrink: 0 }} />
+            <Wrench size={15} style={{ flexShrink: 0, color: 'var(--accent-amber)' }} />
           )}
-          <span style={{ fontWeight: 600, whiteSpace: 'nowrap' }}>Tool Result: {message.name}</span>
-          {isPruned && (
-            <span style={{ background: 'rgba(168, 85, 247, 0.2)', border: '1px solid rgba(168, 85, 247, 0.4)', color: '#e9d5ff', padding: '1px 6px', borderRadius: '4px', fontSize: '0.675rem', fontWeight: 700, textTransform: 'uppercase', flexShrink: 0 }}>
+
+          <span style={{ whiteSpace: 'nowrap' }}>Tool Execution:</span>
+          <span
+            style={{
+              fontFamily: 'var(--font-code)',
+              background: 'rgba(15, 23, 42, 0.4)',
+              padding: '2px 8px',
+              borderRadius: '6px',
+              color: mainColor,
+              fontSize: '0.8rem',
+              fontWeight: 700,
+              flexShrink: 0,
+            }}
+          >
+            {toolName}
+          </span>
+
+          {/* Status Badge */}
+          {isWorking ? (
+            <span style={{ background: 'rgba(99, 102, 241, 0.25)', color: '#c7d2fe', border: '1px solid rgba(99, 102, 241, 0.4)', padding: '1px 7px', borderRadius: '4px', fontSize: '0.675rem', fontWeight: 700, textTransform: 'uppercase', flexShrink: 0 }}>
+              Working...
+            </span>
+          ) : isPruned ? (
+            <span style={{ background: 'rgba(168, 85, 247, 0.2)', color: '#e9d5ff', border: '1px solid rgba(168, 85, 247, 0.4)', padding: '1px 7px', borderRadius: '4px', fontSize: '0.675rem', fontWeight: 700, textTransform: 'uppercase', flexShrink: 0 }}>
               Pruned
             </span>
-          )}
+          ) : isFailed ? (
+            <span style={{ background: 'rgba(244, 63, 94, 0.2)', color: '#fca5a5', border: '1px solid rgba(244, 63, 94, 0.4)', padding: '1px 7px', borderRadius: '4px', fontSize: '0.675rem', fontWeight: 700, textTransform: 'uppercase', flexShrink: 0 }}>
+              Failed
+            </span>
+          ) : resultMessage ? (
+            <span style={{ background: 'rgba(20, 184, 166, 0.2)', color: '#99f6e4', border: '1px solid rgba(20, 184, 166, 0.4)', padding: '1px 7px', borderRadius: '4px', fontSize: '0.675rem', fontWeight: 700, textTransform: 'uppercase', flexShrink: 0 }}>
+              Completed
+            </span>
+          ) : null}
+
           {readFilePath ? (
             <span style={{ minWidth: 0, display: 'flex', alignItems: 'center', gap: '5px', overflow: 'hidden', color: 'var(--text-muted)', fontFamily: 'var(--font-code)', fontSize: '0.75rem' }}>
               <button
@@ -2051,178 +2050,281 @@ const ToolResultCard: React.FC<{
                 ({readFileLineCount} {readFileLineCount === 1 ? 'line' : 'lines'}, {readFileSize} bytes)
               </span>
             </span>
-          ) : summary && (
-            <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: isPruned ? '#d8b4fe' : isFailed ? '#f87171' : 'var(--text-muted)', fontFamily: 'var(--font-code)', fontSize: '0.75rem' }}>
-              {summary}
+          ) : displaySummary && (
+            <span
+              style={{
+                color: isPruned ? '#d8b4fe' : isFailed ? '#f87171' : 'var(--text-muted)',
+                fontFamily: 'var(--font-code)',
+                fontSize: '0.75rem',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                flex: 1,
+                minWidth: 0,
+              }}
+            >
+              {displaySummary}
             </span>
           )}
+
           {isWebSearch && sideDriftPages.length > 0 && (
-            <span style={{
-              display: 'inline-flex', alignItems: 'center', gap: '4px',
-              flexShrink: 0, padding: '2px 7px', borderRadius: '999px',
-              border: '1px solid rgba(56, 189, 248, 0.45)',
-              background: 'rgba(14, 116, 144, 0.2)',
-              color: '#7dd3fc', fontFamily: 'var(--font-code)', fontSize: '0.66rem', fontWeight: 700,
-            }}>
-              <Sparkles size={10} />
-              Side Drift ⚡ {sideDriftPages.length} page{sideDriftPages.length === 1 ? '' : 's'} read
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', flexShrink: 0, padding: '2px 7px', borderRadius: '999px', border: '1px solid rgba(56, 189, 248, 0.45)', background: 'rgba(14, 116, 144, 0.2)', color: '#7dd3fc', fontFamily: 'var(--font-code)', fontSize: '0.66rem', fontWeight: 700 }}>
+              <Sparkles size={10} /> Side Drift ⚡ {sideDriftPages.length} page{sideDriftPages.length === 1 ? '' : 's'} read
             </span>
           )}
-          {isWebSearch && sideDriftPages.length === 0 && (
-            <span style={{
-              display: 'inline-flex', alignItems: 'center', gap: '4px',
-              flexShrink: 0, padding: '2px 7px', borderRadius: '999px',
-              border: '1px solid rgba(148, 163, 184, 0.2)',
-              background: 'rgba(15, 23, 42, 0.3)',
-              color: 'var(--text-dim)', fontSize: '0.66rem',
-            }}>
-              <Sparkles size={10} />
-              Side Drift: no match
+
+          {isDeepResearch && resultMessage && (
+            <span title={`${resultMessage.content.length.toLocaleString()} chars (~${synthesisTokenEstimate.toLocaleString()} tokens)`} style={{ flexShrink: 0, padding: '2px 6px', borderRadius: '5px', border: '1px solid rgba(45, 212, 191, 0.28)', background: 'rgba(20, 184, 166, 0.1)', color: '#99f6e4', fontFamily: 'var(--font-code)', fontSize: '0.65rem' }}>
+              synthesis ~{synthesisTokenEstimate.toLocaleString()} tokens
             </span>
           )}
-          {isDeepResearch && (
-            <>
-              <span
-                title={`${message.content.length.toLocaleString()} model-payload characters; full result ${fullResultContent.length.toLocaleString()} characters (~${fullTokenEstimate.toLocaleString()} tokens)`}
-                style={{ flexShrink: 0, padding: '2px 6px', borderRadius: '5px', border: '1px solid rgba(45, 212, 191, 0.28)', background: 'rgba(20, 184, 166, 0.1)', color: '#99f6e4', fontFamily: 'var(--font-code)', fontSize: '0.65rem' }}
-              >
-                synthesis ~{synthesisTokenEstimate.toLocaleString()} tokens
-              </span>
-              {onRegenerateDeepResearch && (
-                <button
-                  type="button"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onRegenerateDeepResearch(message.id);
-                  }}
-                  disabled={isGenerating}
-                  title="Delete only messages after this research result and regenerate the final answer without rerunning research"
-                  style={{ flexShrink: 0, display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '3px 7px', borderRadius: '5px', border: '1px solid rgba(99, 102, 241, 0.35)', background: 'rgba(99, 102, 241, 0.12)', color: '#c7d2fe', cursor: isGenerating ? 'not-allowed' : 'pointer', opacity: isGenerating ? 0.45 : 1, fontSize: '0.66rem', fontWeight: 650 }}
-                >
-                  <RotateCcw size={11} /> Regenerate answer
-                </button>
-              )}
-            </>
-          )}
-          <ChevronDown size={15} style={{ marginLeft: 'auto', flexShrink: 0, transform: expanded ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s ease' }} />
         </div>
 
-        {expanded && (
-          <div style={{ padding: '0 12px 12px', borderTop: `1px solid ${borderTopColor}` }}>
-            {isPruned ? (
-              <div style={{ margin: '10px 0 0', padding: '10px 14px', background: 'rgba(168, 85, 247, 0.12)', border: '1px solid rgba(168, 85, 247, 0.3)', borderRadius: '6px', color: '#e9d5ff', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <Scissors size={16} color="#c084fc" style={{ flexShrink: 0 }} />
-                <span>{message.content}</span>
-              </div>
-            ) : (
-              <>
-                {/* View Mode Toggle Header Bar */}
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: '8px' }}>
-                  <div style={{ display: 'flex', gap: '6px' }}>
-                    <button
-                      type="button"
-                      onClick={() => setViewMode('formatted')}
-                      style={{
-                        padding: '3px 9px',
-                        borderRadius: '4px',
-                        border: '1px solid',
-                        borderColor: viewMode === 'formatted' ? mainColor : 'transparent',
-                        background: viewMode === 'formatted' ? activeBtnBg : 'transparent',
-                        color: viewMode === 'formatted' ? mainColor : 'var(--text-muted)',
-                        fontSize: '0.725rem',
-                        fontWeight: 600,
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '4px',
-                      }}
-                    >
-                      <Eye size={12} />
-                      <span>Formatted</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setViewMode('raw')}
-                      style={{
-                        padding: '3px 9px',
-                        borderRadius: '4px',
-                        border: '1px solid',
-                        borderColor: viewMode === 'raw' ? mainColor : 'transparent',
-                        background: viewMode === 'raw' ? activeBtnBg : 'transparent',
-                        color: viewMode === 'raw' ? mainColor : 'var(--text-muted)',
-                        fontSize: '0.725rem',
-                        fontWeight: 600,
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '4px',
-                      }}
-                    >
-                      <Code2 size={12} />
-                      <span>Raw JSON</span>
-                    </button>
-                  </div>
-                </div>
-
-                {/* Formatted View Content */}
-                {viewMode === 'formatted' ? (
-                  <>
-                    {isWebSearch && (
-                      <WebSearchResultsView
-                        query={parsedContent?.query || args?.query || ''}
-                        results={parsedContent?.results || []}
-                        mostRelevantPages={sideDriftPages}
-                      />
-                    )}
-                    {isWebPageRead && (
-                      <WebPageReaderView
-                        title={parsedContent?.title}
-                        url={parsedContent?.url || args?.url}
-                        markdown={parsedContent?.markdown}
-                      />
-                    )}
-                    {isDeepResearch && (
-                      <DeepResearchResultsView
-                        query={parsedContent?.query || args?.query || ''}
-                        searchesCompleted={parsedContent?.searches_completed || 0}
-                        searchResultsFound={parsedContent?.search_results_found}
-                        linkedPagesRead={parsedContent?.linked_pages_read || 0}
-                        researchDate={parsedContent?.research_date}
-                        status={parsedContent?.status}
-                        sources={parsedContent?.sources || []}
-                        images={parsedContent?.images || []}
-                        searchQueries={parsedContent?.search_queries || []}
-                        steps={parsedContent?.steps || []}
-                        errors={parsedContent?.errors || []}
-                        noteErrors={parsedContent?.note_errors || []}
-                        researchBudget={parsedContent?.research_budget}
-                        modelContext={message.content}
-                        fullContext={fullResultContent}
-                      />
-                    )}
-                    {!isWebSearch && !isWebPageRead && !isDeepResearch && fileDiff && (
-                      <FileDiff diff={fileDiff} />
-                    )}
-                    {!isWebSearch && !isWebPageRead && !isDeepResearch && !fileDiff && (
-                      <pre style={{ margin: '10px 0 0', maxHeight: '320px', overflow: 'auto', fontSize: '0.775rem' }}>
-                        {resultWithoutDiff ? JSON.stringify(resultWithoutDiff, null, 2) : message.content}
-                      </pre>
-                    )}
-                  </>
-                ) : (
-                  /* Raw View Content */
-                  <pre style={{ margin: '10px 0 0', maxHeight: '320px', overflow: 'auto', fontSize: '0.775rem' }}>
-                    {JSON.stringify(parsedContent || message.content, null, 2)}
-                  </pre>
-                )}
-              </>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0, marginLeft: '8px' }}>
+          {/* View Mode Tabs */}
+          <div style={{ display: 'flex', gap: '2px', background: 'rgba(15, 23, 42, 0.7)', padding: '2px', borderRadius: '6px', border: '1px solid var(--border-color)' }}>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setViewMode('formatted');
+              }}
+              title="Formatted View"
+              style={{
+                padding: '3px 8px',
+                borderRadius: '4px',
+                border: 'none',
+                background: viewMode === 'formatted' ? 'rgba(255, 255, 255, 0.15)' : 'transparent',
+                color: viewMode === 'formatted' ? '#fff' : 'var(--text-muted)',
+                fontSize: '0.72rem',
+                fontWeight: 600,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px',
+              }}
+            >
+              <Eye size={12} />
+              <span>Formatted</span>
+            </button>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setViewMode('raw_input');
+              }}
+              title="Raw Inputs JSON"
+              style={{
+                padding: '3px 8px',
+                borderRadius: '4px',
+                border: 'none',
+                background: viewMode === 'raw_input' ? 'rgba(255, 255, 255, 0.15)' : 'transparent',
+                color: viewMode === 'raw_input' ? '#fff' : 'var(--text-muted)',
+                fontSize: '0.72rem',
+                fontWeight: 600,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px',
+              }}
+            >
+              <Code2 size={12} />
+              <span>Input</span>
+            </button>
+            {resultMessage && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setViewMode('raw_result');
+                }}
+                title="Raw Result JSON"
+                style={{
+                  padding: '3px 8px',
+                  borderRadius: '4px',
+                  border: 'none',
+                  background: viewMode === 'raw_result' ? 'rgba(255, 255, 255, 0.15)' : 'transparent',
+                  color: viewMode === 'raw_result' ? '#fff' : 'var(--text-muted)',
+                  fontSize: '0.72rem',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                }}
+              >
+                <Code2 size={12} />
+                <span>Result</span>
+              </button>
             )}
           </div>
-        )}
+
+          {/* Copy Button */}
+          <button
+            type="button"
+            onClick={handleCopy}
+            title={viewMode === 'raw_result' ? 'Copy Raw Result' : 'Copy Raw Input Args'}
+            style={{ background: 'none', border: 'none', color: copied ? '#10b981' : 'var(--text-muted)', cursor: 'pointer', padding: '2px 4px', display: 'flex', alignItems: 'center', gap: '3px', fontSize: '0.72rem' }}
+          >
+            {copied ? <Check size={13} /> : <Copy size={13} />}
+          </button>
+
+          {/* Stop Button if Working */}
+          {isWorking && onCancelGeneration && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onCancelGeneration();
+              }}
+              title="Stop Execution"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '3px 7px', borderRadius: '5px', border: '1px solid rgba(239, 68, 68, 0.5)', background: 'rgba(239, 68, 68, 0.2)', color: '#fca5a5', fontSize: '0.7rem', fontWeight: 600, cursor: 'pointer' }}
+            >
+              <Square size={10} fill="currentColor" /> Stop
+            </button>
+          )}
+
+          <ChevronDown size={16} color={mainColor} style={{ transform: expanded ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s ease' }} />
+        </div>
       </div>
+
+      {/* Expanded Content Body */}
+      {expanded && (
+        <div style={{ padding: '12px', borderTop: `1px solid ${borderTopColor}`, background: 'rgba(10, 15, 28, 0.65)' }}>
+          {viewMode === 'raw_input' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)' }}>Invocation Parameters:</span>
+              <pre style={{ margin: 0, padding: '10px 12px', background: '#090d16', borderRadius: '8px', border: '1px solid var(--border-color)', fontFamily: 'var(--font-code)', fontSize: '0.8rem', color: '#fcd34d', whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: '350px', overflowY: 'auto' }}>
+                {JSON.stringify(args, null, 2)}
+              </pre>
+            </div>
+          )}
+
+          {viewMode === 'raw_result' && resultMessage && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)' }}>Raw Output Payload:</span>
+              <pre style={{ margin: 0, padding: '10px 12px', background: '#090d16', borderRadius: '8px', border: '1px solid var(--border-color)', fontFamily: 'var(--font-code)', fontSize: '0.8rem', color: '#a7f3d0', whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: '400px', overflowY: 'auto' }}>
+                {fullResultContent}
+              </pre>
+            </div>
+          )}
+
+          {viewMode === 'formatted' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              {/* Invocation Input Parameters */}
+              {args && Object.keys(args).length > 0 && (
+                <div style={{ background: 'rgba(15, 23, 42, 0.4)', padding: '8px 12px', borderRadius: '8px', border: '1px solid rgba(255, 255, 255, 0.05)' }}>
+                  <PrettierInvocationView name={toolName} args={args} />
+                </div>
+              )}
+
+              {/* Working Progress Block */}
+              {isWorking && (
+                toolName === 'deep_research' ? (
+                  <DeepResearchProgress args={args} progress={progress} onCancelGeneration={onCancelGeneration} />
+                ) : (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 14px', background: 'rgba(99, 102, 241, 0.12)', border: '1px solid rgba(99, 102, 241, 0.3)', borderRadius: '8px', color: '#c7d2fe', fontSize: '0.825rem' }}>
+                    <Loader2 size={16} className="spin" style={{ flexShrink: 0, color: 'var(--accent-primary)' }} />
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                      <span style={{ fontWeight: 600, color: '#e0e7ff' }}>Tool execution in progress...</span>
+                      <span style={{ fontFamily: 'var(--font-code)', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                        Running {toolName} {inputSummary ? `(${inputSummary})` : ''}
+                      </span>
+                    </div>
+                  </div>
+                )
+              )}
+
+              {/* Result Output Block */}
+              {resultMessage && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', borderTop: '1px solid rgba(255, 255, 255, 0.08)', paddingTop: '10px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <span style={{ fontSize: '0.75rem', fontWeight: 700, color: mainColor, display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      Execution Result Output:
+                    </span>
+
+                    {isDeepResearch && onRegenerateDeepResearch && (
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onRegenerateDeepResearch(resultMessage.id);
+                        }}
+                        disabled={isGenerating}
+                        title="Delete messages after this research result and regenerate the answer"
+                        style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '3px 7px', borderRadius: '5px', border: '1px solid rgba(99, 102, 241, 0.35)', background: 'rgba(99, 102, 241, 0.12)', color: '#c7d2fe', cursor: isGenerating ? 'not-allowed' : 'pointer', opacity: isGenerating ? 0.45 : 1, fontSize: '0.66rem', fontWeight: 650 }}
+                      >
+                        <RotateCcw size={11} /> Regenerate answer
+                      </button>
+                    )}
+                  </div>
+
+                  {isPruned ? (
+                    <div style={{ padding: '10px 14px', background: 'rgba(168, 85, 247, 0.12)', border: '1px solid rgba(168, 85, 247, 0.3)', borderRadius: '6px', color: '#e9d5ff', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <Scissors size={16} color="#c084fc" style={{ flexShrink: 0 }} />
+                      <span>{resultMessage.content}</span>
+                    </div>
+                  ) : (
+                    <>
+                      {isWebSearch && (
+                        <WebSearchResultsView
+                          query={parsedContent?.query || args?.query || ''}
+                          results={parsedContent?.results || []}
+                          mostRelevantPages={sideDriftPages}
+                        />
+                      )}
+                      {isWebPageRead && (
+                        <WebPageReaderView
+                          title={parsedContent?.title}
+                          url={parsedContent?.url || args?.url}
+                          markdown={parsedContent?.markdown}
+                        />
+                      )}
+                      {isDeepResearch && parsedContent?.sources && (
+                        <DeepResearchResultsView
+                          query={parsedContent?.query || args?.query || ''}
+                          searchesCompleted={parsedContent?.searches_completed || 0}
+                          searchResultsFound={parsedContent?.search_results_found}
+                          linkedPagesRead={parsedContent?.linked_pages_read || 0}
+                          researchDate={parsedContent?.research_date}
+                          status={parsedContent?.status}
+                          sources={parsedContent?.sources || []}
+                          images={parsedContent?.images || []}
+                          searchQueries={parsedContent?.search_queries || []}
+                          steps={parsedContent?.steps || []}
+                          errors={parsedContent?.errors || []}
+                          noteErrors={parsedContent?.note_errors || []}
+                          researchBudget={parsedContent?.research_budget}
+                          modelContext={resultMessage.content}
+                          fullContext={fullResultContent}
+                        />
+                      )}
+                      {fileDiff && <FileDiff diff={fileDiff} />}
+
+                      {!isWebSearch && !isWebPageRead && !(isDeepResearch && parsedContent?.sources) && !fileDiff && (
+                        <pre style={{ margin: 0, padding: '10px 12px', background: '#090d16', borderRadius: '8px', border: '1px solid var(--border-color)', fontFamily: 'var(--font-code)', fontSize: '0.8rem', color: isFailed ? '#fca5a5' : '#e2e8f0', whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: '350px', overflowY: 'auto' }}>
+                          {resultWithoutDiff ? JSON.stringify(resultWithoutDiff, null, 2) : fullResultContent}
+                        </pre>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 };
+
+const ToolInvocationCard: React.FC<{
+  name: string;
+  args: Record<string, any>;
+  defaultExpanded?: boolean;
+}> = ({ name, args, defaultExpanded = true }) => (
+  <ToolExecutionCard toolName={name} args={args} defaultExpanded={defaultExpanded} />
+);
 
 const CopyableCodeBlock: React.FC<{ code: string; language?: string }> = ({ code, language }) => {
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'error'>('idle');
@@ -3182,225 +3284,232 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
           </div>
         )}
 
-        {messages.map((msg) => {
-          if (msg.role === 'system' || msg.content.startsWith('[COMPACTED CONVERSATION SUMMARY]')) {
-            return <CompactedContextCard key={msg.id} message={msg} />;
-          }
+        {(() => {
+          const findMatchingToolResult = (
+            msgIdx: number,
+            tc: { id?: string; name: string },
+            tcIdx: number
+          ): ChatMessage | undefined => {
+            if (tc.id) {
+              const idMatch = messages.find((m) => m.role === 'tool' && m.tool_call_id === tc.id);
+              if (idMatch) return idMatch;
+            }
 
-          if (msg.role === 'user') {
-            return (
-              <div key={msg.id} className="animate-fade-in chat-message chat-message-user" style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
-                <div className="message-content" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px', maxWidth: '75%' }}>
-                  <div style={{ background: 'var(--accent-gradient)', color: '#fff', padding: '12px 16px', borderRadius: '16px 16px 4px 16px', fontSize: '0.925rem', lineHeight: 1.5, boxShadow: '0 4px 12px rgba(99, 102, 241, 0.25)', width: '100%' }}>
-                    <div style={{ whiteSpace: 'pre-wrap' }}>{msg.displayContent ?? msg.content}</div>
-                    {msg.imageAttachments && msg.imageAttachments.length > 0 && (
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '10px' }}>
-                        {msg.imageAttachments.map((img, idx) => (
-                          <div key={idx} onClick={() => setPreviewImage({ src: img.base64, alt: img.name })} style={{ borderRadius: '8px', overflow: 'hidden', border: '1px solid rgba(255, 255, 255, 0.2)', maxHeight: '160px', cursor: 'zoom-in' }} title="Click to enlarge">
-                            <img src={img.base64} alt={img.name} style={{ maxHeight: '160px', maxWidth: '240px', objectFit: 'cover', display: 'block' }} />
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                    {!msg.imageAttachments && msg.images && msg.images.length > 0 && (
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '10px' }}>
-                        {msg.images.map((imgBase64, idx) => {
-                          const src = imgBase64.startsWith('data:') ? imgBase64 : `data:image/png;base64,${imgBase64}`;
-                          return (
-                            <div key={idx} onClick={() => setPreviewImage({ src, alt: `Attached Image ${idx + 1}` })} style={{ borderRadius: '8px', overflow: 'hidden', border: '1px solid rgba(255, 255, 255, 0.2)', maxHeight: '160px', cursor: 'zoom-in' }} title="Click to enlarge">
-                              <img src={src} alt={`Attached Image ${idx + 1}`} style={{ maxHeight: '160px', maxWidth: '240px', objectFit: 'cover', display: 'block' }} />
+            const subsequentToolMsgs = messages
+              .slice(msgIdx + 1)
+              .filter((m) => m.role === 'tool');
+
+            const sameNameMsgs = subsequentToolMsgs.filter((m) => m.name === tc.name);
+            if (sameNameMsgs[tcIdx]) {
+              return sameNameMsgs[tcIdx];
+            }
+
+            return subsequentToolMsgs[tcIdx];
+          };
+
+          return messages.map((msg, msgIdx) => {
+            if (msg.role === 'system' || msg.content.startsWith('[COMPACTED CONVERSATION SUMMARY]')) {
+              return <CompactedContextCard key={msg.id} message={msg} />;
+            }
+
+            if (msg.role === 'user') {
+              return (
+                <div key={msg.id} className="animate-fade-in chat-message chat-message-user" style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
+                  <div className="message-content" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px', maxWidth: '75%' }}>
+                    <div style={{ background: 'var(--accent-gradient)', color: '#fff', padding: '12px 16px', borderRadius: '16px 16px 4px 16px', fontSize: '0.925rem', lineHeight: 1.5, boxShadow: '0 4px 12px rgba(99, 102, 241, 0.25)', width: '100%' }}>
+                      <div style={{ whiteSpace: 'pre-wrap' }}>{msg.displayContent ?? msg.content}</div>
+                      {msg.imageAttachments && msg.imageAttachments.length > 0 && (
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '10px' }}>
+                          {msg.imageAttachments.map((img, idx) => (
+                            <div key={idx} onClick={() => setPreviewImage({ src: img.base64, alt: img.name })} style={{ borderRadius: '8px', overflow: 'hidden', border: '1px solid rgba(255, 255, 255, 0.2)', maxHeight: '160px', cursor: 'zoom-in' }} title="Click to enlarge">
+                              <img src={img.base64} alt={img.name} style={{ maxHeight: '160px', maxWidth: '240px', objectFit: 'cover', display: 'block' }} />
                             </div>
+                          ))}
+                        </div>
+                      )}
+                      {!msg.imageAttachments && msg.images && msg.images.length > 0 && (
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '10px' }}>
+                          {msg.images.map((imgBase64, idx) => {
+                            const src = imgBase64.startsWith('data:') ? imgBase64 : `data:image/png;base64,${imgBase64}`;
+                            return (
+                              <div key={idx} onClick={() => setPreviewImage({ src, alt: `Attached Image ${idx + 1}` })} style={{ borderRadius: '8px', overflow: 'hidden', border: '1px solid rgba(255, 255, 255, 0.2)', maxHeight: '160px', cursor: 'zoom-in' }} title="Click to enlarge">
+                                <img src={src} alt={`Attached Image ${idx + 1}`} style={{ maxHeight: '160px', maxWidth: '240px', objectFit: 'cover', display: 'block' }} />
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                      {msg.attachments && msg.attachments.length > 0 && (
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '9px' }}>
+                          {msg.attachments.map((file, index) => (
+                            <button
+                              type="button"
+                              key={`${file.name}-${index}`}
+                              onClick={() => openAttachmentViewer(file)}
+                              title={`Open ${file.name}`}
+                              style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '4px 8px', border: '1px solid rgba(255, 255, 255, 0.18)', borderRadius: '7px', background: 'rgba(15, 23, 42, 0.28)', color: 'inherit', font: 'inherit', fontSize: '0.74rem', cursor: 'pointer' }}
+                            >
+                              <FileText size={13} /> {file.name} · {(file.size / 1024).toFixed(1)} KB
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleRewind(msg.id, msg.content)}
+                      disabled={isGenerating}
+                      title="Rewind context to this prompt (deletes all subsequent context)"
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        background: 'rgba(30, 41, 59, 0.4)',
+                        border: '1px solid var(--border-color)',
+                        borderRadius: '6px',
+                        padding: '2px 7px',
+                        color: 'var(--text-muted)',
+                        fontSize: '0.7rem',
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease',
+                      }}
+                    >
+                      <RotateCcw size={11} />
+                      <span>Rewind to this prompt</span>
+                    </button>
+                  </div>
+                  <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: 'rgba(255, 255, 255, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <User size={18} color="#fff" />
+                  </div>
+                </div>
+              );
+            }
+
+            if (msg.role === 'assistant') {
+              const toolCalls = msg.tool_calls || [];
+              const prevMsg = msgIdx > 0 ? messages[msgIdx - 1] : null;
+              const isConsecutiveAssistant = Boolean(
+                prevMsg && (prevMsg.role === 'assistant' || prevMsg.role === 'tool')
+              );
+
+              return (
+                <div key={msg.id} className="animate-fade-in chat-message" style={{ display: 'flex', gap: '12px', justifyContent: 'flex-start' }}>
+                  {!isConsecutiveAssistant ? (
+                    <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: 'var(--accent-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                      <Bot size={18} color="#fff" />
+                    </div>
+                  ) : (
+                    <div style={{ width: '32px', height: '32px', flexShrink: 0 }} />
+                  )}
+                  <div className="message-content" style={{ maxWidth: '80%', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    {(msg.content || msg.thinking) && (
+                      <AssistantResponse content={msg.content} thinking={msg.thinking} thinkingTokens={msg.thinkingTokens} />
+                    )}
+
+                    {toolCalls.length > 0 && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                        {toolCalls.map((tc, tcIdx) => {
+                          const matchingToolMsg = findMatchingToolResult(msgIdx, tc, tcIdx);
+                          const isWorking = Boolean(
+                            isGenerating &&
+                            activeToolCall &&
+                            activeToolCall.name === tc.name &&
+                            !matchingToolMsg
+                          );
+                          return (
+                            <ToolExecutionCard
+                              key={tc.id || `${tc.name}-${tcIdx}`}
+                              toolName={tc.name}
+                              args={tc.arguments || {}}
+                              resultMessage={matchingToolMsg}
+                              isWorking={isWorking}
+                              progress={isWorking ? activeToolCall?.progress : undefined}
+                              onOpenFile={openAttachmentViewer}
+                              isGenerating={isGenerating}
+                              onRegenerateDeepResearch={onRegenerateDeepResearch}
+                              onCancelGeneration={onCancelGeneration}
+                            />
                           );
                         })}
                       </div>
                     )}
-                    {msg.attachments && msg.attachments.length > 0 && (
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '9px' }}>
-                        {msg.attachments.map((file, index) => (
-                          <button
-                            type="button"
-                            key={`${file.name}-${index}`}
-                            onClick={() => openAttachmentViewer(file)}
-                            title={`Open ${file.name}`}
-                            style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '4px 8px', border: '1px solid rgba(255, 255, 255, 0.18)', borderRadius: '7px', background: 'rgba(15, 23, 42, 0.28)', color: 'inherit', font: 'inherit', fontSize: '0.74rem', cursor: 'pointer' }}
-                          >
-                            <FileText size={13} /> {file.name} · {(file.size / 1024).toFixed(1)} KB
-                          </button>
-                        ))}
-                      </div>
-                    )}
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => handleRewind(msg.id, msg.content)}
-                    disabled={isGenerating}
-                    title="Rewind context to this prompt (deletes all subsequent context)"
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '4px',
-                      background: 'rgba(30, 41, 59, 0.4)',
-                      border: '1px solid var(--border-color)',
-                      borderRadius: '6px',
-                      padding: '2px 7px',
-                      color: 'var(--text-muted)',
-                      fontSize: '0.7rem',
-                      cursor: 'pointer',
-                      transition: 'all 0.15s ease',
-                    }}
-                  >
-                    <RotateCcw size={11} />
-                    <span>Rewind to this prompt</span>
-                  </button>
                 </div>
-                <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: 'rgba(255, 255, 255, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                  <User size={18} color="#fff" />
-                </div>
-              </div>
-            );
-          }
+              );
+            }
 
-          if (msg.role === 'assistant') {
-            return (
-              <div key={msg.id} className="animate-fade-in chat-message" style={{ display: 'flex', gap: '12px', justifyContent: 'flex-start' }}>
+            if (msg.role === 'tool') {
+              const isClaimedByAssistant = messages.some((m, mIdx) => {
+                if (m.role !== 'assistant' || !m.tool_calls) return false;
+                return m.tool_calls.some((tc, tcIdx) => {
+                  const match = findMatchingToolResult(mIdx, tc, tcIdx);
+                  return match?.id === msg.id;
+                });
+              });
+
+              if (isClaimedByAssistant) {
+                return null;
+              }
+
+              const matchingCall = messages
+                .flatMap((message) => message.tool_calls || [])
+                .find((call) => call.id === msg.tool_call_id);
+              return (
+                <div key={msg.id} style={{ marginLeft: '44px', maxWidth: '80%' }}>
+                  <ToolExecutionCard
+                    toolName={msg.name || matchingCall?.name || 'tool'}
+                    args={matchingCall?.arguments || {}}
+                    resultMessage={msg}
+                    onOpenFile={openAttachmentViewer}
+                    isGenerating={isGenerating}
+                    onRegenerateDeepResearch={onRegenerateDeepResearch}
+                  />
+                </div>
+              );
+            }
+
+            return null;
+          });
+        })()}
+
+        {/* Streaming Assistant Card */}
+        {(streamingText || streamingThinking) && (() => {
+          const lastMsg = messages.length > 0 ? messages[messages.length - 1] : null;
+          const isStreamingConsecutive = Boolean(
+            lastMsg && (lastMsg.role === 'assistant' || lastMsg.role === 'tool')
+          );
+          return (
+            <div className="animate-fade-in" style={{ display: 'flex', gap: '12px', justifyContent: 'flex-start' }}>
+              {!isStreamingConsecutive ? (
                 <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: 'var(--accent-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                   <Bot size={18} color="#fff" />
                 </div>
-                <div className="message-content" style={{ maxWidth: '80%', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  {msg.tool_calls && msg.tool_calls.length > 0 && (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                      {msg.tool_calls.map((tc, idx) => (
-                        <ToolInvocationCard key={tc.id || idx} name={tc.name} args={tc.arguments || {}} />
-                      ))}
-                    </div>
-                  )}
-
-                  {(msg.content || msg.thinking) && (
-                    <AssistantResponse content={msg.content} thinking={msg.thinking} thinkingTokens={msg.thinkingTokens} />
-                  )}
-                </div>
+              ) : (
+                <div style={{ width: '32px', height: '32px', flexShrink: 0 }} />
+              )}
+              <div className="glass-panel" style={{ maxWidth: '80%', padding: '14px 18px', borderRadius: '16px 16px 16px 4px', fontSize: '0.925rem', lineHeight: 1.6 }}>
+                {streamingThinking && (
+                  <ThinkingBlock thinking={streamingThinking} isStreaming={!streamingText} />
+                )}
+                {streamingText && (
+                  <MarkdownContent content={streamingText} streaming />
+                )}
               </div>
-            );
-          }
-
-          if (msg.role === 'tool') {
-            const matchingCall = messages
-              .flatMap((message) => message.tool_calls || [])
-              .find((call) => call.id === msg.tool_call_id);
-            return (
-              <ToolResultCard
-                key={msg.id}
-                message={msg}
-                args={matchingCall?.arguments || {}}
-                onOpenFile={openAttachmentViewer}
-                isGenerating={isGenerating}
-                onRegenerateDeepResearch={onRegenerateDeepResearch}
-              />
-            );
-          }
-
-          return null;
-        })}
-
-        {/* Streaming Assistant Card */}
-        {(streamingText || streamingThinking) && (
-          <div className="animate-fade-in" style={{ display: 'flex', gap: '12px', justifyContent: 'flex-start' }}>
-            <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: 'var(--accent-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-              <Bot size={18} color="#fff" />
             </div>
-            <div className="glass-panel" style={{ maxWidth: '80%', padding: '14px 18px', borderRadius: '16px 16px 16px 4px', fontSize: '0.925rem', lineHeight: 1.6 }}>
-              {streamingThinking && (
-                <ThinkingBlock thinking={streamingThinking} isStreaming={!streamingText} />
-              )}
-              {streamingText && (
-                <MarkdownContent content={streamingText} streaming />
-              )}
-            </div>
+          );
+        })()}
+
+        {/* Standalone Active Tool Execution Indicator */}
+        {isGenerating && activeToolCall && !messages.some((m) => m.role === 'assistant' && m.tool_calls?.some((tc) => tc.name === activeToolCall.name && !messages.some((tm) => tm.role === 'tool' && tm.tool_call_id === tc.id))) && (
+          <div style={{ marginLeft: '44px', maxWidth: '80%' }}>
+            <ToolExecutionCard
+              toolName={activeToolCall.name}
+              args={activeToolCall.args || {}}
+              isWorking={true}
+              progress={activeToolCall.progress}
+              onCancelGeneration={onCancelGeneration}
+            />
           </div>
-        )}
-
-        {/* Active Tool Execution Indicator */}
-        {isGenerating && activeToolCall && (
-          activeToolCall.name === 'deep_research' ? (
-            <DeepResearchProgress args={activeToolCall.args || {}} progress={activeToolCall.progress} onCancelGeneration={onCancelGeneration} />
-          ) : (
-          <div
-            className="glass-panel animate-fade-in"
-            style={{
-              display: 'flex',
-              gap: '12px',
-              alignItems: 'center',
-              marginLeft: '44px',
-              padding: '12px 18px',
-              borderRadius: '12px',
-              border: '1px solid rgba(99, 102, 241, 0.4)',
-              background: 'rgba(99, 102, 241, 0.1)',
-              color: 'var(--accent-primary)',
-              fontSize: '0.875rem',
-              boxShadow: '0 4px 12px rgba(99, 102, 241, 0.15)',
-            }}
-          >
-            <Loader2 size={18} className="spin" style={{ flexShrink: 0, color: 'var(--accent-primary)' }} />
-            <div style={{ minWidth: 0, flex: 1 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                <span style={{ fontWeight: 700, color: 'var(--text-main)' }}>⚙️ Executing Tool:</span>
-                <span
-                  style={{
-                    fontFamily: 'var(--font-code)',
-                    background: 'rgba(99, 102, 241, 0.25)',
-                    padding: '2px 8px',
-                    borderRadius: '6px',
-                    color: '#a5b4fc',
-                    fontSize: '0.825rem',
-                    fontWeight: 600,
-                  }}
-                >
-                  {activeToolCall.name}
-                </span>
-              </div>
-              {activeToolCall.args && Object.keys(activeToolCall.args).length > 0 && (
-                <div
-                  style={{
-                    fontSize: '0.775rem',
-                    color: 'var(--text-muted)',
-                    marginTop: '4px',
-                    fontFamily: 'var(--font-code)',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  {activeToolCall.args.command
-                    ? `$ ${activeToolCall.args.command}`
-                    : activeToolCall.args.relative_path || activeToolCall.args.path || activeToolCall.args.query || activeToolCall.args.url || JSON.stringify(activeToolCall.args)}
-                </div>
-              )}
-            </div>
-            {onCancelGeneration && (
-              <button
-                type="button"
-                onClick={onCancelGeneration}
-                title="Stop execution"
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '4px',
-                  padding: '4px 9px',
-                  borderRadius: '6px',
-                  border: '1px solid rgba(239, 68, 68, 0.5)',
-                  background: 'rgba(239, 68, 68, 0.18)',
-                  color: '#fca5a5',
-                  fontSize: '0.72rem',
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  flexShrink: 0,
-                }}
-              >
-                <Square size={11} fill="currentColor" /> Stop
-              </button>
-            )}
-          </div>
-          )
         )}
 
         {isGenerating && !activeToolCall && !streamingText && !pendingApprovalCall && (
