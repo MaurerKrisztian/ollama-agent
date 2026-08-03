@@ -3,6 +3,7 @@ import os from 'node:os';
 import fsSync from 'node:fs';
 import { BUILTIN_TOOLS } from '../core/tools.js';
 import { DEFAULT_COMMAND_WHITELIST } from '../core/commandWhitelist.js';
+import { ContextPruningConfig } from '../core/types.js';
 
 export const CONFIG_FILE_PATH = path.join(os.homedir(), '.local-model-chat-config.json');
 export const CHAT_SESSIONS_FILE_PATH = path.join(os.homedir(), '.local-model-chat-sessions.json');
@@ -20,6 +21,12 @@ export interface PersistedConfig {
   complexityProfile: 'simple' | 'medium' | 'advanced';
   preventRepeatedCalls: boolean;
   enabledTools: Record<string, boolean>;
+  maxLoops: number;
+  temperature?: number;
+  contextWindow?: number;
+  systemPrompt?: string;
+  showWorkingDirInfo?: boolean;
+  pruningConfig?: ContextPruningConfig;
 }
 
 export function getInitialPersistedConfig(): PersistedConfig {
@@ -34,7 +41,13 @@ export function getInitialPersistedConfig(): PersistedConfig {
   let enableThinking = true;
   let preventRepeatedCalls = true;
   let complexityProfile: 'simple' | 'medium' | 'advanced' = 'simple';
+  let maxLoops = 25;
   let enabledTools = Object.fromEntries(BUILTIN_TOOLS.map((tool) => [tool.name, tool.name !== 'apply_patch']));
+  let temperature: number | undefined = undefined;
+  let contextWindow: number | undefined = undefined;
+  let systemPrompt: string | undefined = undefined;
+  let showWorkingDirInfo: boolean | undefined = undefined;
+  let pruningConfig: ContextPruningConfig | undefined = undefined;
 
   try {
     if (fsSync.existsSync(CONFIG_FILE_PATH)) {
@@ -73,6 +86,24 @@ export function getInitialPersistedConfig(): PersistedConfig {
       if (parsed.complexityProfile === 'simple' || parsed.complexityProfile === 'medium' || parsed.complexityProfile === 'advanced') {
         complexityProfile = parsed.complexityProfile;
       }
+      if (typeof parsed.maxLoops === 'number' && parsed.maxLoops >= 0 && parsed.maxLoops <= 50) {
+        maxLoops = parsed.maxLoops;
+      }
+      if (typeof parsed.temperature === 'number' && parsed.temperature >= 0 && parsed.temperature <= 2) {
+        temperature = parsed.temperature;
+      }
+      if (typeof parsed.contextWindow === 'number' && parsed.contextWindow > 0) {
+        contextWindow = parsed.contextWindow;
+      }
+      if (typeof parsed.systemPrompt === 'string') {
+        systemPrompt = parsed.systemPrompt;
+      }
+      if (typeof parsed.showWorkingDirInfo === 'boolean') {
+        showWorkingDirInfo = parsed.showWorkingDirInfo;
+      }
+      if (parsed.pruningConfig && typeof parsed.pruningConfig === 'object' && !Array.isArray(parsed.pruningConfig)) {
+        pruningConfig = parsed.pruningConfig;
+      }
       if (parsed.enabledTools && typeof parsed.enabledTools === 'object' && !Array.isArray(parsed.enabledTools)) {
         enabledTools = Object.fromEntries(BUILTIN_TOOLS.map((tool) => [
           tool.name,
@@ -91,7 +122,7 @@ export function getInitialPersistedConfig(): PersistedConfig {
   if (process.env.OLLAMA_MODEL) model = process.env.OLLAMA_MODEL;
   if (process.env.OLLAMA_CLASSIFIER_MODEL) classifierModel = process.env.OLLAMA_CLASSIFIER_MODEL;
 
-  return { workingDir, ollamaHost, ollamaToken, model, classifierModel, allowedCommands, terminalMode, fileEditMode, enableThinking, preventRepeatedCalls, complexityProfile, enabledTools };
+  return { workingDir, ollamaHost, ollamaToken, model, classifierModel, allowedCommands, terminalMode, fileEditMode, enableThinking, preventRepeatedCalls, complexityProfile, enabledTools, maxLoops, temperature, contextWindow, systemPrompt, showWorkingDirInfo, pruningConfig };
 }
 
 export function savePersistedConfig(updatedConfig: Record<string, any>): void {

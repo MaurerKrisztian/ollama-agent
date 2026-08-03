@@ -289,11 +289,93 @@ test('grep_search supports regex mode, case sensitivity, and file pattern filter
       query: 'Login',
       context_lines: 2,
       file_pattern: '*.feature',
+      highlight_match: true,
     });
     assert.equal(ctxRes.returned_matches, 1);
     assert.ok(ctxRes.matches[0].context);
     assert.ok(ctxRes.matches[0].context.length >= 3);
     assert.match(ctxRes.matches[0].content, />>>Login<<</);
+
+    // Test 6: Token optimization (grouped matches, max_line_length truncation & metadata)
+    await fs.writeFile(
+      path.join(workspace, 'longline.txt'),
+      'SHORT PREFIX ' + 'X'.repeat(500) + ' MATCHME ' + 'Y'.repeat(500) + '\nMATCHME AGAIN\n'
+    );
+    const optRes = await executor.executeTool('grep_search', {
+      query: 'MATCHME',
+      max_line_length: 50,
+      grouped: true,
+    });
+    assert.ok(optRes.grouped_matches);
+    assert.ok(optRes.files_scanned > 0);
+    assert.ok(typeof optRes.execution_time_ms === 'number');
+    assert.strictEqual(optRes.is_truncated, false);
+
+    const longFileMatches = optRes.grouped_matches.find((g: any) => g.file === 'longline.txt');
+    assert.ok(longFileMatches);
+    assert.equal(longFileMatches.matches.length, 2);
+    assert.match(longFileMatches.matches[0].content, /\[truncated \d+ chars\]/);
+
+    // Test 7: Multi-pattern includes & glob excludes
+    await fs.writeFile(path.join(workspace, 'app.ts'), 'export const targetVar = 1;\n');
+    await fs.writeFile(path.join(workspace, 'app.tsx'), 'export const targetVar = 2;\n');
+    await fs.writeFile(path.join(workspace, 'app.test.ts'), 'export const targetVar = 3;\n');
+
+    const globRes = await executor.executeTool('grep_search', {
+      query: 'targetVar',
+      includes: ['*.ts', '*.tsx'],
+      excludes: ['!*.test.ts'],
+    });
+
+    assert.equal(globRes.returned_matches, 2);
+    const files = globRes.matches.map((m: any) => m.file);
+    assert.ok(files.includes('app.ts'));
+    assert.ok(files.includes('app.tsx'));
+    assert.ok(!files.includes('app.test.ts'));
+
+    // Test 8: Spans, stateless pagination (offset/next_offset), and files_with_matches metrics
+    await fs.writeFile(
+      path.join(workspace, 'pagination.ts'),
+      'const item1 = 1;\nconst item2 = 2;\nconst item3 = 3;\nconst item4 = 4;\nconst item5 = 5;\n'
+    );
+
+    const page1 = await executor.executeTool('grep_search', {
+      query: 'const item',
+      max_results: 2,
+      offset: 0,
+      includes: ['pagination.ts'],
+    });
+    assert.equal(page1.returned_matches, 2);
+    assert.equal(page1.offset, 0);
+    assert.equal(page1.next_offset, 2);
+    assert.strictEqual(page1.has_more, true);
+    assert.ok(page1.matches[0].spans);
+    assert.equal(page1.matches[0].spans[0].start, 0);
+    assert.equal(page1.matches[0].spans[0].end, 10);
+    assert.equal(page1.files_with_matches, 1);
+
+    const page2 = await executor.executeTool('grep_search', {
+      query: 'const item',
+      max_results: 2,
+      offset: page1.next_offset,
+      includes: ['pagination.ts'],
+    });
+    assert.equal(page2.returned_matches, 2);
+    assert.equal(page2.offset, 2);
+    assert.equal(page2.next_offset, 4);
+    assert.strictEqual(page2.has_more, true);
+    assert.equal(page2.matches[0].content, 'const item3 = 3;');
+
+    const page3 = await executor.executeTool('grep_search', {
+      query: 'const item',
+      max_results: 2,
+      offset: page2.next_offset,
+      includes: ['pagination.ts'],
+    });
+    assert.equal(page3.returned_matches, 1);
+    assert.equal(page3.next_offset, null);
+    assert.strictEqual(page3.has_more, false);
+    assert.equal(page3.matches[0].content, 'const item5 = 5;');
   });
 });
 

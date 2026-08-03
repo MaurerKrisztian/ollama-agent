@@ -54,99 +54,12 @@ const io = new SocketIOServer(httpServer, {
 });
 const PORT = process.env.PORT || 3001;
 
-const CONFIG_FILE_PATH = path.join(os.homedir(), '.local-model-chat-config.json');
-const CHAT_SESSIONS_FILE_PATH = path.join(os.homedir(), '.local-model-chat-sessions.json');
-
-function getInitialPersistedConfig(): {
-  workingDir: string;
-  ollamaHost: string;
-  ollamaToken?: string;
-  model: string;
-  allowedCommands: string[];
-  terminalMode: 'confirm' | 'auto';
-  fileEditMode: 'confirm' | 'auto' | 'batch';
-  enableThinking: boolean;
-  classifierModel?: string;
-  complexityProfile: 'simple' | 'medium' | 'advanced';
-  enabledTools: Record<string, boolean>;
-} {
-  let workingDir = process.cwd();
-  let ollamaHost = process.env.OLLAMA_HOST || 'http://127.0.0.1:11434';
-  let ollamaToken = process.env.OLLAMA_TOKEN;
-  let model = process.env.OLLAMA_MODEL || 'qwen3.5:9b';
-  let classifierModel: string | undefined = undefined;
-  let allowedCommands = [...DEFAULT_COMMAND_WHITELIST];
-  let terminalMode: 'confirm' | 'auto' = 'confirm';
-  let fileEditMode: 'confirm' | 'auto' | 'batch' = 'batch';
-  let enableThinking = true;
-  let complexityProfile: 'simple' | 'medium' | 'advanced' = 'simple';
-  let enabledTools = Object.fromEntries(BUILTIN_TOOLS.map((tool) => [tool.name, tool.name !== 'apply_patch']));
-
-  try {
-    if (fsSync.existsSync(CONFIG_FILE_PATH)) {
-      const data = fsSync.readFileSync(CONFIG_FILE_PATH, 'utf8');
-      const parsed = JSON.parse(data);
-      if (parsed.workingDir && typeof parsed.workingDir === 'string' && fsSync.existsSync(parsed.workingDir)) {
-        workingDir = parsed.workingDir;
-      }
-      if (parsed.ollamaHost && typeof parsed.ollamaHost === 'string') {
-        ollamaHost = parsed.ollamaHost;
-      }
-      if (parsed.ollamaToken !== undefined && typeof parsed.ollamaToken === 'string') {
-        ollamaToken = parsed.ollamaToken;
-      }
-      if (parsed.model && typeof parsed.model === 'string') {
-        model = parsed.model;
-      }
-      if (parsed.classifierModel && typeof parsed.classifierModel === 'string') {
-        classifierModel = parsed.classifierModel;
-      }
-      if (Array.isArray(parsed.allowedCommands)) {
-        allowedCommands = parsed.allowedCommands;
-      }
-      if (parsed.terminalMode === 'confirm' || parsed.terminalMode === 'auto') {
-        terminalMode = parsed.terminalMode;
-      }
-      if (parsed.fileEditMode === 'confirm' || parsed.fileEditMode === 'auto' || parsed.fileEditMode === 'batch') {
-        fileEditMode = parsed.fileEditMode;
-      }
-      if (typeof parsed.enableThinking === 'boolean') {
-        enableThinking = parsed.enableThinking;
-      }
-      if (parsed.complexityProfile === 'simple' || parsed.complexityProfile === 'medium' || parsed.complexityProfile === 'advanced') {
-        complexityProfile = parsed.complexityProfile;
-      }
-      if (parsed.enabledTools && typeof parsed.enabledTools === 'object' && !Array.isArray(parsed.enabledTools)) {
-        enabledTools = Object.fromEntries(BUILTIN_TOOLS.map((tool) => [
-          tool.name,
-          parsed.enabledTools[tool.name] !== undefined
-            ? Boolean(parsed.enabledTools[tool.name])
-            : tool.name !== 'apply_patch',
-        ]));
-      }
-    }
-  } catch (_) {}
-
-  // Explicit environment configuration takes precedence over persisted UI settings.
-  if (process.env.WORKING_DIR && fsSync.existsSync(process.env.WORKING_DIR)) workingDir = process.env.WORKING_DIR;
-  if (process.env.OLLAMA_HOST) ollamaHost = process.env.OLLAMA_HOST;
-  if (process.env.OLLAMA_TOKEN !== undefined) ollamaToken = process.env.OLLAMA_TOKEN;
-  if (process.env.OLLAMA_MODEL) model = process.env.OLLAMA_MODEL;
-  if (process.env.OLLAMA_CLASSIFIER_MODEL) classifierModel = process.env.OLLAMA_CLASSIFIER_MODEL;
-
-  return { workingDir, ollamaHost, ollamaToken, model, classifierModel, allowedCommands, terminalMode, fileEditMode, enableThinking, complexityProfile, enabledTools };
-}
-
-function savePersistedConfig(updatedConfig: Record<string, any>) {
-  try {
-    let existing: Record<string, any> = {};
-    if (fsSync.existsSync(CONFIG_FILE_PATH)) {
-      existing = JSON.parse(fsSync.readFileSync(CONFIG_FILE_PATH, 'utf8'));
-    }
-    const merged = { ...existing, ...updatedConfig };
-    fsSync.writeFileSync(CONFIG_FILE_PATH, JSON.stringify(merged, null, 2), 'utf8');
-  } catch (_) {}
-}
+import {
+  CONFIG_FILE_PATH,
+  CHAT_SESSIONS_FILE_PATH,
+  getInitialPersistedConfig,
+  savePersistedConfig,
+} from './configStore.js';
 
 app.use(cors());
 app.use(express.json({ limit: '25mb' }));
@@ -161,8 +74,15 @@ const agent = new AgentEngine({
   ollamaToken: initialConfig.ollamaToken,
   workingDir: initialConfig.workingDir,
   enableThinking: initialConfig.enableThinking,
+  preventRepeatedCalls: initialConfig.preventRepeatedCalls,
   complexityProfile: initialConfig.complexityProfile,
   enabledTools: initialConfig.enabledTools,
+  maxLoops: initialConfig.maxLoops,
+  temperature: initialConfig.temperature,
+  contextWindow: initialConfig.contextWindow,
+  systemPrompt: initialConfig.systemPrompt,
+  showWorkingDirInfo: initialConfig.showWorkingDirInfo,
+  pruningConfig: initialConfig.pruningConfig,
 });
 
 const chatSessions = new ChatSessionStore(CHAT_SESSIONS_FILE_PATH);
@@ -219,6 +139,17 @@ const getPublicConfig = () => ({
   fileEditMode,
   allowedCommands: allowedCommandsState,
 });
+
+const getPublicConfigAsync = async () => {
+  const cfg = agent.getConfig();
+  const supportsThinking = await agent.checkModelThinkingSupport(cfg.model);
+  const effectiveThinking = (cfg.enableThinking !== false) && supportsThinking;
+  return {
+    ...getPublicConfig(),
+    supportsThinking,
+    effectiveThinking,
+  };
+};
 
 type ApprovalDecisionPayload = { decision: 'approve' | 'reject'; reason?: string };
 const pendingApprovalResolves = new Map<string, (payload: ApprovalDecisionPayload) => void>();
@@ -450,6 +381,11 @@ const getConfigState = () => ({
   context: agent.getContextManager().getContextInfo(),
 });
 
+const getConfigStateAsync = async () => ({
+  config: await getPublicConfigAsync(),
+  context: agent.getContextManager().getContextInfo(),
+});
+
 function broadcastTerminalSessions() {
   io.emit('terminal:sessions', listAllTerminalSessions());
 }
@@ -484,23 +420,31 @@ async function broadcastSystemMetrics() {
   try {
     io.emit('system:metrics', await getSystemMetrics());
   } catch (_) {
-    io.emit('system:metrics:error');
+    io.emit('system:metrics', null);
   } finally {
     metricsCollectionInFlight = false;
   }
 }
 
-io.on('connection', (socket) => {
-  socket.emit('config:state', getConfigState());
+function startLiveStateUpdates() {
+  if (liveStateInterval) return;
+  liveStateInterval = setInterval(() => {
+    broadcastSystemMetrics();
+    broadcastRunningModels();
+  }, 3000);
+}
+
+io.on('connection', async (socket) => {
+  startLiveStateUpdates();
+
   socket.emit('terminal:sessions', listAllTerminalSessions());
-  void broadcastSystemMetrics();
-  void broadcastRunningModels();
-  if (!liveStateInterval) {
-    liveStateInterval = setInterval(() => {
-      broadcastTerminalSessions();
-      void broadcastSystemMetrics();
-      void broadcastRunningModels();
-    }, 3000);
+  socket.emit('config:state', await getConfigStateAsync());
+  socket.emit('models:running', await agent.getRunningModels());
+
+  try {
+    socket.emit('system:metrics', await getSystemMetrics());
+  } catch (_) {
+    socket.emit('system:metrics', null);
   }
 
   socket.on('terminal:sessions:request', () => {
@@ -523,7 +467,8 @@ app.get('/api/models/show', async (req, res) => {
     const modelName = typeof req.query.name === 'string' ? req.query.name : agent.getConfig().model;
     try {
       const details = await agent.getModelDetails(modelName);
-      return res.json({ success: true, name: modelName, details });
+      const supportsThinking = await agent.checkModelThinkingSupport(modelName);
+      return res.json({ success: true, name: modelName, details, supportsThinking });
     } catch (err: any) {
       // If Ollama returns 404 (model not pulled or name missing tag), return success: false with error string (200 status)
       return res.json({ success: false, name: modelName, error: err.message });
@@ -534,9 +479,9 @@ app.get('/api/models/show', async (req, res) => {
 });
 
 // GET /api/config - Get current configuration & context stats
-app.get('/api/config', (req, res) => {
+app.get('/api/config', async (req, res) => {
   res.json({
-    config: getPublicConfig(),
+    config: await getPublicConfigAsync(),
     context: agent.getContextManager().getContextInfo(),
   });
 });
@@ -548,22 +493,20 @@ app.get('/api/directories', async (req, res) => {
       ? req.query.path.trim()
       : agent.getConfig().workingDir;
   const resolvedPath = path.resolve(requestedPath);
-
   try {
-    const stat = await fs.stat(resolvedPath);
-    if (!stat.isDirectory()) {
-      return res.status(400).json({ success: false, error: 'The selected path is not a directory.' });
+    const stats = await fs.stat(resolvedPath);
+    if (!stats.isDirectory()) {
+      return res.status(400).json({ success: false, error: 'Path is not a directory' });
     }
     const entries = await fs.readdir(resolvedPath, { withFileTypes: true });
     const directories = entries
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => ({ name: entry.name, path: path.join(resolvedPath, entry.name) }))
-      .sort((a, b) => a.name.localeCompare(b.name));
-    const parent = path.dirname(resolvedPath);
+      .filter((entry) => entry.isDirectory() && !entry.name.startsWith('.'))
+      .map((entry) => entry.name)
+      .sort((a, b) => a.localeCompare(b));
     res.json({
       success: true,
-      current: resolvedPath,
-      parent: parent === resolvedPath ? null : parent,
+      currentPath: resolvedPath,
+      parentPath: path.dirname(resolvedPath) !== resolvedPath ? path.dirname(resolvedPath) : null,
       directories,
     });
   } catch (err: any) {
@@ -572,7 +515,7 @@ app.get('/api/directories', async (req, res) => {
 });
 
 // POST /api/config - Update configuration
-app.post('/api/config', (req, res) => {
+app.post('/api/config', async (req, res) => {
   const { model, classifierModel, systemPrompt, workingDir, showWorkingDirInfo, ollamaHost, ollamaToken, temperature, contextWindow, maxLoops } = req.body;
 
   if (ollamaHost !== undefined) {
@@ -601,14 +544,27 @@ app.post('/api/config', (req, res) => {
     ollamaToken: agent.getOllamaToken(),
     model: currentConfig.model,
     classifierModel: currentConfig.classifierModel,
+    temperature: currentConfig.temperature,
+    contextWindow: currentConfig.contextWindow,
+    systemPrompt: currentConfig.systemPrompt,
+    showWorkingDirInfo: currentConfig.showWorkingDirInfo,
+    enableThinking: currentConfig.enableThinking,
+    maxLoops: currentConfig.maxLoops,
+    complexityProfile: currentConfig.complexityProfile,
+    preventRepeatedCalls: currentConfig.preventRepeatedCalls,
+    enabledTools: currentConfig.enabledTools,
+    allowedCommands: allowedCommandsState,
+    terminalMode: terminalRequireConfirm ? 'confirm' : 'auto',
+    fileEditMode,
   });
 
-  io.emit('config:state', getConfigState());
+  const asyncState = await getConfigStateAsync();
+  io.emit('config:state', asyncState);
 
   res.json({
     success: true,
-    config: getPublicConfig(),
-    context: agent.getContextManager().getContextInfo(),
+    config: asyncState.config,
+    context: asyncState.context,
   });
 });
 
@@ -1067,7 +1023,10 @@ app.get('/api/context/pruning', (_req, res) => {
 // POST /api/context/pruning - Update context pruning configuration
 app.post('/api/context/pruning', (req, res) => {
   const updates = req.body || {};
-  agent.getContextManager().setPruningConfig(updates);
+  for (const engine of getConfigurableEngines()) engine.updateConfig({ pruningConfig: updates });
+  savePersistedConfig({
+    pruningConfig: agent.getContextManager().getPruningConfig(),
+  });
   res.json({
     success: true,
     pruningConfig: agent.getContextManager().getPruningConfig(),
@@ -1099,7 +1058,10 @@ app.post('/api/chat/revert-files', async (req, res) => {
     return res.status(400).json({ success: false, error: 'sessionId, promptId and revertPaths are required.' });
   }
   const entries = sessionCheckpoints.get(sessionId) ?? [];
-  const checkpoint = entries.find((e) => e.promptId === promptId);
+  let checkpoint = entries.find((e) => e.promptId === promptId);
+  if (!checkpoint && entries.length > 0) {
+    checkpoint = entries[entries.length - 1];
+  }
   if (!checkpoint) {
     return res.status(404).json({ success: false, error: 'Checkpoint not found.' });
   }
@@ -1225,6 +1187,7 @@ app.post('/api/chat/tool-settings', (req, res) => {
     preventRepeatedCalls: agent.getConfig().preventRepeatedCalls,
     complexityProfile: agent.getConfig().complexityProfile,
     enabledTools: agent.getConfig().enabledTools,
+    maxLoops: agent.getConfig().maxLoops,
   });
 
   io.emit('config:state', getConfigState());
@@ -1437,15 +1400,21 @@ app.post('/api/chat', async (req, res) => {
   };
   const snapshotCache = new Map<string, string | null>(); // absolute path -> original content
 
-  const captureSnapshot = async (name: string, args: Record<string, any>) => {
-    // Determine the absolute file path being modified
-    const workingDir = sessionAgent.getConfig().workingDir || process.cwd();
-    const relativePath = args.relative_path || args.file_path || '';
-    if (!relativePath) return;
-    const absPath = path.isAbsolute(relativePath) ? relativePath : path.join(workingDir, relativePath);
+  const captureSnapshotByPath = async (absPath: string) => {
     if (snapshotCache.has(absPath)) return; // already captured for this turn
     let before: string | null = null;
     try {
+      const stat = await fs.stat(absPath);
+      if (stat.isDirectory()) {
+        const entries = await fs.readdir(absPath, { recursive: true, withFileTypes: true });
+        for (const entry of entries) {
+          if (entry.isFile()) {
+            const filePath = path.join(entry.path || (entry as any).parentPath || absPath, entry.name);
+            await captureSnapshotByPath(filePath);
+          }
+        }
+        return;
+      }
       before = await fs.readFile(absPath, 'utf8');
     } catch (_) {
       before = null; // file didn't exist
@@ -1454,12 +1423,41 @@ app.post('/api/chat', async (req, res) => {
     currentCheckpoint.snapshots.push({ path: absPath, before });
   };
 
+  const captureSnapshot = async (name: string, args: Record<string, any>) => {
+    // Determine the absolute file path being modified
+    const workingDir = sessionAgent.getConfig().workingDir || process.cwd();
+    const relativePath = args.relative_path || args.file_path || '';
+    if (!relativePath) return;
+    const absPath = path.isAbsolute(relativePath) ? relativePath : path.join(workingDir, relativePath);
+    await captureSnapshotByPath(absPath);
+  };
+
+  const captureCommandSnapshot = async (command: string) => {
+    if (!command) return;
+    const workingDir = sessionAgent.getConfig().workingDir || process.cwd();
+    const tokens = command.split(/\s+/).filter((t) => t && !t.startsWith('-'));
+    for (const token of tokens) {
+      const cleanToken = token.replace(/^['"]|['"]$/g, '');
+      if (!cleanToken) continue;
+      const absPath = path.isAbsolute(cleanToken) ? cleanToken : path.join(workingDir, cleanToken);
+      try {
+        await fs.access(absPath);
+        await captureSnapshotByPath(absPath);
+      } catch (_) {
+        // file doesn't exist yet
+      }
+    }
+  };
+
   // Intercept mutating tools to pause & ask for approval when required
   const executor = sessionAgent.getToolExecutor();
   const originalExecuteCommand = executor.executeCommand.bind(executor);
   const originalExecuteTool = executor.executeTool.bind(executor);
 
   executor.executeTool = async (name: string, args: Record<string, any>, onProgress?: (progress: any) => void) => {
+    if (name === 'start_terminal_session' && args.command) {
+      await captureCommandSnapshot(args.command);
+    }
     if (
       name === 'start_terminal_session' &&
       terminalRequireConfirm &&
@@ -1509,6 +1507,7 @@ app.post('/api/chat', async (req, res) => {
   };
 
   executor.executeCommand = async (command: string) => {
+    await captureCommandSnapshot(command);
     if (terminalRequireConfirm && !isCommandWhitelisted(command, allowedCommandsState)) {
       // Notify client to show approval card
       sendEvent('tool_approval_required', { name: 'execute_command', args: { command } });
@@ -1580,6 +1579,31 @@ app.post('/api/chat', async (req, res) => {
       ? await sessionAgent.regenerateDeepResearchAnswer(regenerateFromToolMessageId, sendCallbacks)
       : await sessionAgent.sendMessage(modelMessage, sendCallbacks);
 
+    // --- Filter out unchanged files (where before === after) ---
+    const verifiedSnapshots: typeof currentCheckpoint.snapshots = [];
+    for (const snap of currentCheckpoint.snapshots) {
+      let after: string | null = null;
+      try { after = await fs.readFile(snap.path, 'utf8'); } catch (_) { after = null; }
+      if (snap.before !== after) {
+        verifiedSnapshots.push(snap);
+      }
+    }
+    currentCheckpoint.snapshots = verifiedSnapshots;
+
+    // --- Save checkpoint ---
+    const existing = sessionCheckpoints.get(sessionId) ?? [];
+    if (currentCheckpoint.snapshots.length > 0) {
+      existing.push(currentCheckpoint);
+      sessionCheckpoints.set(sessionId, existing);
+      sendEvent('checkpoint_saved', {
+        promptId: currentCheckpoint.promptId,
+        promptText: currentCheckpoint.promptText,
+        timestamp: currentCheckpoint.timestamp,
+        snapshotCount: currentCheckpoint.snapshots.length,
+        snapshotPaths: currentCheckpoint.snapshots.map((s) => s.path),
+      });
+    }
+
     // --- Batch review: emit changed-files event (non-blocking) ---
     if (fileEditMode === 'batch' && currentCheckpoint.snapshots.length > 0 && !generationController.signal.aborted) {
       const changedFiles = await Promise.all(
@@ -1591,18 +1615,6 @@ app.post('/api/chat', async (req, res) => {
       );
       sendEvent('batch_review_ready', { promptId: currentCheckpoint.promptId, files: changedFiles });
     }
-
-    // --- Save checkpoint ---
-    const existing = sessionCheckpoints.get(sessionId) ?? [];
-    existing.push(currentCheckpoint);
-    sessionCheckpoints.set(sessionId, existing);
-    sendEvent('checkpoint_saved', {
-      promptId: currentCheckpoint.promptId,
-      promptText: currentCheckpoint.promptText,
-      timestamp: currentCheckpoint.timestamp,
-      snapshotCount: currentCheckpoint.snapshots.length,
-      snapshotPaths: currentCheckpoint.snapshots.map((s) => s.path),
-    });
 
     sendEvent('context_update', sessionAgent.getContextManager().getContextInfo());
     sendEvent('done', { content: finalContent });

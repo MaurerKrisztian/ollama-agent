@@ -321,6 +321,32 @@ export const BUILTIN_TOOLS: ToolDefinition[] = [
           type: 'boolean',
           description: 'Demarcate matched query in line content preview with >>>match<<<. Defaults to true.',
         },
+        max_line_length: {
+          type: 'number',
+          description: 'Maximum character length allowed per line content preview before truncating (default 300).',
+        },
+        grouped: {
+          type: 'boolean',
+          description: 'Set to true to group matches by file instead of returning a flat list, optimizing token overhead for LLMs.',
+        },
+        includes: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'List of glob patterns or extensions to include (e.g. ["*.ts", "*.tsx"], "src/**").',
+        },
+        excludes: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'List of glob patterns to exclude (e.g. ["*.test.ts", "**/dist/**"]). Patterns with leading "!" are also treated as exclusions.',
+        },
+        offset: {
+          type: 'number',
+          description: 'Number of initial matches to skip for stateless pagination (default 0).',
+        },
+        include_spans: {
+          type: 'boolean',
+          description: 'Include [{ start, end }] column index ranges of matches within the line content preview. Defaults to true.',
+        },
       },
       required: ['query'],
     },
@@ -1062,23 +1088,122 @@ export class ToolExecutor {
     return null;
   }
 
+  private globToRegExp(glob: string): RegExp {
+    let p = glob.trim();
+    if (p.startsWith('!')) p = p.slice(1);
+
+    let regexStr = p
+      .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+      .replace(/\*\*/g, '::ANY_DIR::')
+      .replace(/\*/g, '[^/]*')
+      .replace(/\?/g, '[^/]')
+      .replace(/::ANY_DIR::/g, '.*');
+
+    if (!p.includes('/')) {
+      regexStr = '(?:^|/)' + regexStr + '$';
+    } else {
+      regexStr = '^' + regexStr.replace(/^\\.\//, '') + '$';
+    }
+
+    return new RegExp(regexStr, 'i');
+  }
+
+  private compileGlobMatcher(
+    includes?: string | string[],
+    excludes?: string | string[],
+    legacyPattern?: string
+  ): (fileName: string, relativePath: string) => boolean {
+    const includeList: string[] = [];
+    const excludeList: string[] = [];
+
+    if (legacyPattern && legacyPattern.trim()) {
+      const lp = legacyPattern.trim();
+      if (lp.startsWith('*.')) {
+        includeList.push(`*${lp.slice(1)}`);
+      } else if (lp.startsWith('.')) {
+        includeList.push(`*${lp}`);
+      } else if (lp.includes('*')) {
+        includeList.push(lp);
+      } else {
+        includeList.push(`*${lp.startsWith('.') ? lp : '.' + lp}`);
+      }
+    }
+
+    if (includes) {
+      const incs = Array.isArray(includes) ? includes : [includes];
+      for (const i of incs) {
+        if (i && typeof i === 'string' && i.trim()) {
+          const trimmed = i.trim();
+          if (trimmed.startsWith('!')) {
+            excludeList.push(trimmed);
+          } else {
+            includeList.push(trimmed);
+          }
+        }
+      }
+    }
+
+    if (excludes) {
+      const excs = Array.isArray(excludes) ? excludes : [excludes];
+      for (const e of excs) {
+        if (e && typeof e === 'string' && e.trim()) {
+          excludeList.push(e.trim());
+        }
+      }
+    }
+
+    const includeRegexes = includeList.map((g) => this.globToRegExp(g));
+    const excludeRegexes = excludeList.map((g) => this.globToRegExp(g));
+
+    return (fileName: string, relativePath: string): boolean => {
+      for (const rx of excludeRegexes) {
+        if (rx.test(fileName) || rx.test(relativePath)) {
+          return false;
+        }
+      }
+
+      if (includeRegexes.length > 0) {
+        let matched = false;
+        for (const rx of includeRegexes) {
+          if (rx.test(fileName) || rx.test(relativePath)) {
+            matched = true;
+            break;
+          }
+        }
+        if (!matched) return false;
+      }
+
+      return true;
+    };
+  }
+
   private async grepDirectory(
     dir: string,
     query: string,
-    results: Array<{ file: string; line: number; content: string; context?: string[] }>,
+    results: Array<{ file: string; line: number; content: string; spans?: Array<{ start: number; end: number }>; context?: string[] }>,
     depth: number = 0,
     options: {
       is_regex?: boolean;
       case_sensitive?: boolean;
       whole_word?: boolean;
       file_pattern?: string;
+      includes?: string | string[];
+      excludes?: string | string[];
       context_lines?: number;
       max_results?: number;
       highlight_match?: boolean;
+      max_line_length?: number;
+      offset?: number;
+      include_spans?: boolean;
+      stats?: {
+        files_scanned: number;
+        total_matches: number;
+        files_with_matches: Set<string>;
+      };
     } = {}
   ): Promise<void> {
     const maxResults = Math.min(200, Math.max(1, options.max_results || 50));
-    if (depth > 6 || results.length >= maxResults) return;
+    if (depth > 6) return;
 
     try {
       const items = await fs.readdir(dir, { withFileTypes: true });
@@ -1090,72 +1215,88 @@ export class ToolExecutor {
       }
       const flags = (options.case_sensitive ? '' : 'i') + 'g';
       const matcher = new RegExp(pattern, flags);
-
-      let patternMatcher: ((fileName: string) => boolean) | null = null;
-      if (options.file_pattern && options.file_pattern.trim()) {
-        const pat = options.file_pattern.trim();
-        if (pat.startsWith('*.')) {
-          const ext = pat.slice(1).toLowerCase();
-          patternMatcher = (fn) => fn.toLowerCase().endsWith(ext);
-        } else if (pat.startsWith('.')) {
-          const ext = pat.toLowerCase();
-          patternMatcher = (fn) => fn.toLowerCase().endsWith(ext);
-        } else if (pat.includes('*')) {
-          const regexStr = '^' + pat.replace(/\./g, '\\.').replace(/\*/g, '.*') + '$';
-          const r = new RegExp(regexStr, 'i');
-          patternMatcher = (fn) => r.test(fn);
-        } else {
-          const ext = '.' + pat.toLowerCase();
-          patternMatcher = (fn) => fn.toLowerCase().endsWith(ext) || fn.toLowerCase().includes(pat.toLowerCase());
-        }
-      }
+      const globMatcher = this.compileGlobMatcher(options.includes, options.excludes, options.file_pattern);
 
       const ctxLines = Math.min(5, Math.max(0, options.context_lines || 0));
       const doHighlight = options.highlight_match !== false;
+      const maxLineLen = Math.max(20, options.max_line_length || 300);
+
+      const truncateText = (text: string): string => {
+        if (text.length <= maxLineLen) return text;
+        return text.slice(0, maxLineLen) + `... [truncated ${text.length - maxLineLen} chars]`;
+      };
 
       for (const item of items) {
-        if (results.length >= maxResults) break;
         const fullPath = path.join(dir, item.name);
+        const relativePath = path.relative(this.workingDir, fullPath);
+
         if (item.isFile() && !item.name.startsWith('.')) {
-          if (patternMatcher && !patternMatcher(item.name)) {
+          if (!globMatcher(item.name, relativePath)) {
             continue;
+          }
+
+          if (options.stats) {
+            options.stats.files_scanned++;
           }
 
           try {
             const content = await fs.readFile(fullPath, 'utf-8');
             const lines = content.split('\n');
             lines.forEach((lineText, idx) => {
-              if (results.length >= maxResults) return;
-
               matcher.lastIndex = 0;
               if (matcher.test(lineText)) {
-                matcher.lastIndex = 0;
-                const formattedContent = doHighlight
-                  ? lineText.replace(matcher, (m) => `>>>${m}<<<`).trim()
-                  : lineText.trim();
-
-                let contextSnippet: string[] | undefined = undefined;
-                if (ctxLines > 0) {
-                  const startLine = Math.max(0, idx - ctxLines);
-                  const endLine = Math.min(lines.length, idx + ctxLines + 1);
-                  contextSnippet = lines.slice(startLine, endLine).map((l, offset) => {
-                    const lineNum = startLine + offset + 1;
-                    const isMatchLine = lineNum === idx + 1;
-                    const prefix = isMatchLine ? `> ${lineNum}: ` : `  ${lineNum}: `;
-                    matcher.lastIndex = 0;
-                    const lineVal = isMatchLine && doHighlight
-                      ? l.replace(matcher, (m) => `>>>${m}<<<`)
-                      : l;
-                    return `${prefix}${lineVal}`;
-                  });
+                if (options.stats) {
+                  options.stats.total_matches++;
+                  options.stats.files_with_matches.add(relativePath);
                 }
 
-                results.push({
-                  file: path.relative(this.workingDir, fullPath),
-                  line: idx + 1,
-                  content: formattedContent,
-                  context: contextSnippet,
-                });
+                const offsetVal = Math.max(0, options.offset || 0);
+                const currentMatchIndex = options.stats ? options.stats.total_matches : (results.length + 1);
+
+                if (currentMatchIndex > offsetVal && results.length < maxResults) {
+                  matcher.lastIndex = 0;
+                  const trimmedLine = lineText.trim();
+                  const rawContent = doHighlight
+                    ? lineText.replace(matcher, (m) => `>>>${m}<<<`).trim()
+                    : trimmedLine;
+                  const formattedContent = truncateText(rawContent);
+
+                  let spans: Array<{ start: number; end: number }> | undefined = undefined;
+                  if (options.include_spans !== false) {
+                    spans = [];
+                    let matchExec: RegExpExecArray | null;
+                    const spanMatcher = new RegExp(pattern, flags);
+                    while ((matchExec = spanMatcher.exec(trimmedLine)) !== null) {
+                      spans.push({ start: matchExec.index, end: matchExec.index + matchExec[0].length });
+                      if (!spanMatcher.global || matchExec[0].length === 0) break;
+                    }
+                    if (spans.length === 0) spans = undefined;
+                  }
+
+                  let contextSnippet: string[] | undefined = undefined;
+                  if (ctxLines > 0) {
+                    const startLine = Math.max(0, idx - ctxLines);
+                    const endLine = Math.min(lines.length, idx + ctxLines + 1);
+                    contextSnippet = lines.slice(startLine, endLine).map((l, offset) => {
+                      const lineNum = startLine + offset + 1;
+                      const isMatchLine = lineNum === idx + 1;
+                      const prefix = isMatchLine ? `> ${lineNum}: ` : `  ${lineNum}: `;
+                      matcher.lastIndex = 0;
+                      const lineVal = isMatchLine && doHighlight
+                        ? l.replace(matcher, (m) => `>>>${m}<<<`)
+                        : l;
+                      return truncateText(`${prefix}${lineVal}`);
+                    });
+                  }
+
+                  results.push({
+                    file: relativePath,
+                    line: idx + 1,
+                    content: formattedContent,
+                    spans,
+                    context: contextSnippet,
+                  });
+                }
               }
             });
           } catch (_) {}
@@ -1565,7 +1706,7 @@ export class ToolExecutor {
       }
 
       case 'grep_search': {
-        const { query, relative_path, is_regex, case_sensitive, whole_word, file_pattern, context_lines, max_results, highlight_match } = args;
+        const { query, relative_path, is_regex, case_sensitive, whole_word, file_pattern, includes, excludes, context_lines, max_results, highlight_match, max_line_length, grouped, offset, include_spans } = args;
         if (!query) return { error: 'Parameter query is required.' };
         const searchDir = relative_path ? path.resolve(this.workingDir, relative_path) : this.workingDir;
         
@@ -1579,17 +1720,71 @@ export class ToolExecutor {
           }
 
           const maxLimit = Math.min(200, Math.max(1, Number(max_results) || 50));
-          const results: Array<{ file: string; line: number; content: string; context?: string[] }> = [];
+          const currentOffset = Math.max(0, Number(offset) || 0);
+          const results: Array<{ file: string; line: number; content: string; spans?: Array<{ start: number; end: number }>; context?: string[] }> = [];
+          const stats = {
+            files_scanned: 0,
+            total_matches: 0,
+            files_with_matches: new Set<string>(),
+          };
+          const startTime = Date.now();
 
           await this.grepDirectory(searchDir, query, results, 0, {
             is_regex,
             case_sensitive,
             whole_word,
             file_pattern,
+            includes,
+            excludes,
             context_lines: Number(context_lines) || 0,
             max_results: maxLimit,
-            highlight_match,
+            highlight_match: highlight_match === true,
+            max_line_length: max_line_length ? Number(max_line_length) : 300,
+            offset: currentOffset,
+            include_spans: include_spans !== false,
+            stats,
           });
+
+          const executionTimeMs = Date.now() - startTime;
+          const totalMatchesCount = stats.total_matches;
+          const returnedMatchesCount = results.length;
+          const hasMore = currentOffset + returnedMatchesCount < totalMatchesCount;
+          const nextOffset = hasMore ? currentOffset + returnedMatchesCount : null;
+          const isTruncated = hasMore || returnedMatchesCount >= maxLimit;
+
+          if (grouped) {
+            const groupedMap = new Map<string, Array<{ line: number; content: string; spans?: Array<{ start: number; end: number }>; context?: string[] }>>();
+            for (const m of results) {
+              if (!groupedMap.has(m.file)) groupedMap.set(m.file, []);
+              groupedMap.get(m.file)!.push({ line: m.line, content: m.content, spans: m.spans, context: m.context });
+            }
+            const groupedMatches = Array.from(groupedMap.entries()).map(([file, fileMatches]) => ({
+              file,
+              matches: fileMatches,
+            }));
+
+            return {
+              query,
+              is_regex: !!is_regex,
+              case_sensitive: !!case_sensitive,
+              whole_word: !!whole_word,
+              file_pattern: file_pattern || null,
+              includes: includes || null,
+              excludes: excludes || null,
+              context_lines: Number(context_lines) || 0,
+              max_results: maxLimit,
+              offset: currentOffset,
+              next_offset: nextOffset,
+              has_more: hasMore,
+              total_matches: totalMatchesCount,
+              returned_matches: returnedMatchesCount,
+              files_scanned: stats.files_scanned,
+              files_with_matches: stats.files_with_matches.size,
+              is_truncated: isTruncated,
+              execution_time_ms: executionTimeMs,
+              grouped_matches: groupedMatches,
+            };
+          }
 
           return {
             query,
@@ -1597,10 +1792,19 @@ export class ToolExecutor {
             case_sensitive: !!case_sensitive,
             whole_word: !!whole_word,
             file_pattern: file_pattern || null,
+            includes: includes || null,
+            excludes: excludes || null,
             context_lines: Number(context_lines) || 0,
             max_results: maxLimit,
-            total_matches: results.length,
-            returned_matches: results.length,
+            offset: currentOffset,
+            next_offset: nextOffset,
+            has_more: hasMore,
+            total_matches: totalMatchesCount,
+            returned_matches: returnedMatchesCount,
+            files_scanned: stats.files_scanned,
+            files_with_matches: stats.files_with_matches.size,
+            is_truncated: isTruncated,
+            execution_time_ms: executionTimeMs,
             matches: results,
           };
         } catch (err: any) {

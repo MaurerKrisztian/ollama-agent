@@ -3,6 +3,7 @@ import { X, ShieldAlert, Terminal, Edit3, Wrench, Check, RefreshCw, Cpu, RotateC
 import { ToolSettings, ToolComplexityProfile } from '../types';
 import { JsonEditor } from './JsonEditor';
 import { ToolTogglePanel } from './ToolTogglePanel';
+import { DEFAULT_COMMAND_WHITELIST } from '../../../core/commandWhitelist.js';
 
 export const TOOL_DESCRIPTIONS: Record<string, { description: string; parameters?: Record<string, any> }> = {
   list_directory: {
@@ -291,7 +292,7 @@ export const ToolSettingsModal: React.FC<ToolSettingsModalProps> = ({
     e.preventDefault();
     const trimmed = newCmdInput.trim();
     if (!trimmed) return;
-    const current = settings.allowedCommands || ['ls', 'pwd'];
+    const current = settings.allowedCommands || DEFAULT_COMMAND_WHITELIST;
     if (!current.includes(trimmed)) {
       onUpdateSettings({
         ...settings,
@@ -302,7 +303,7 @@ export const ToolSettingsModal: React.FC<ToolSettingsModalProps> = ({
   };
 
   const handleRemoveAllowedCommand = (cmdToRemove: string) => {
-    const current = settings.allowedCommands || ['ls', 'pwd'];
+    const current = settings.allowedCommands || DEFAULT_COMMAND_WHITELIST;
     onUpdateSettings({
       ...settings,
       allowedCommands: current.filter((c) => c !== cmdToRemove),
@@ -526,7 +527,7 @@ export const ToolSettingsModal: React.FC<ToolSettingsModalProps> = ({
               </p>
 
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '10px' }}>
-                {(settings.allowedCommands || ['ls', 'pwd']).map((cmd) => (
+                {(settings.allowedCommands || DEFAULT_COMMAND_WHITELIST).map((cmd) => (
                   <span
                     key={cmd}
                     style={{
@@ -743,23 +744,54 @@ export const ToolSettingsModal: React.FC<ToolSettingsModalProps> = ({
                   Model Reasoning / Thinking
                 </span>
               </div>
-              <span
-                style={{
-                  fontSize: '0.8rem',
-                  fontWeight: 700,
-                  fontFamily: 'var(--font-code)',
-                  color: settings.enableThinking !== false ? '#c084fc' : 'var(--text-muted)',
-                  background: settings.enableThinking !== false ? 'rgba(192, 132, 252, 0.15)' : 'rgba(148, 163, 184, 0.15)',
-                  padding: '2px 8px',
-                  borderRadius: '6px',
-                  border: `1px solid ${settings.enableThinking !== false ? 'rgba(192, 132, 252, 0.3)' : 'rgba(148, 163, 184, 0.3)'}`,
-                }}
-              >
-                {settings.enableThinking !== false ? 'Enabled' : 'Disabled'}
-              </span>
+              {(() => {
+                const isUserEnabled = settings.enableThinking !== false;
+                const supportsThinking = settings.supportsThinking !== false;
+                const isEffectiveON = isUserEnabled && supportsThinking;
+                const isUnsupported = isUserEnabled && !supportsThinking;
+
+                let label = 'Disabled';
+                let color = 'var(--text-muted)';
+                let bg = 'rgba(148, 163, 184, 0.15)';
+                let border = 'rgba(148, 163, 184, 0.3)';
+
+                if (isEffectiveON) {
+                  label = 'Enabled';
+                  color = '#c084fc';
+                  bg = 'rgba(192, 132, 252, 0.15)';
+                  border = 'rgba(192, 132, 252, 0.3)';
+                } else if (isUnsupported) {
+                  label = 'Unsupported by Model';
+                  color = '#eab308';
+                  bg = 'rgba(234, 179, 8, 0.15)';
+                  border = 'rgba(234, 179, 8, 0.3)';
+                }
+
+                return (
+                  <span
+                    style={{
+                      fontSize: '0.8rem',
+                      fontWeight: 700,
+                      fontFamily: 'var(--font-code)',
+                      color,
+                      background: bg,
+                      padding: '2px 8px',
+                      borderRadius: '6px',
+                      border: `1px solid ${border}`,
+                    }}
+                  >
+                    {label}
+                  </span>
+                );
+              })()}
             </div>
             <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', lineHeight: 1.5, marginBottom: '12px' }}>
               Allows reasoning models (e.g. Qwen 2.5/3.5, DeepSeek R1) to output thinking steps before generating actions or answers.
+              {settings.enableThinking !== false && settings.supportsThinking === false && (
+                <span style={{ display: 'block', marginTop: '4px', color: '#eab308', fontWeight: 500 }}>
+                  ⚠️ Current model does not support thinking capabilities. Thinking is automatically disabled for generations.
+                </span>
+              )}
             </p>
             <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '0.825rem', color: 'var(--text-main)', fontWeight: 500 }}>
               <input

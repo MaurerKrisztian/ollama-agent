@@ -15,14 +15,14 @@ export interface BatchReviewFile {
 }
 
 type DiffLine = {
-  type: 'context' | 'add' | 'remove';
+  type: 'context' | 'add' | 'remove' | 'hunk_header';
   content: string;
   oldLine?: number;
   newLine?: number;
 };
-type SimpleDiff = { lines: DiffLine[]; truncated: boolean };
+type SimpleDiff = { lines: DiffLine[]; firstChangedIndex: number; truncated: boolean };
 
-// Build a simple diff from before/after strings for display
+// Build a smart hunk-based diff from before/after strings focusing on actual changes
 function buildSimpleDiff(before: string | null, after: string | null): SimpleDiff | null {
   if (before === null && after === null) return null;
   if (before === after) return null;
@@ -30,43 +30,88 @@ function buildSimpleDiff(before: string | null, after: string | null): SimpleDif
   const beforeLines = (before ?? '').split('\n');
   const afterLines = (after ?? '').split('\n');
 
-  // For new files just show the entire after as adds
   if (before === null) {
-    return {
-      lines: afterLines.map((content, i) => ({ type: 'add' as const, newLine: i + 1, content })),
-      truncated: afterLines.length > 120,
-    };
-  }
-  // For deleted files show before as removes
-  if (after === null) {
-    return {
-      lines: beforeLines.map((content, i) => ({ type: 'remove' as const, oldLine: i + 1, content })),
-      truncated: beforeLines.length > 120,
-    };
+    const lines: DiffLine[] = afterLines.map((content, i) => ({ type: 'add' as const, newLine: i + 1, content }));
+    return { lines: lines.slice(0, 500), firstChangedIndex: 0, truncated: lines.length > 500 };
   }
 
-  // Simple line-by-line diff (LCS not needed — just highlight changed lines)
-  const lines: DiffLine[] = [];
+  if (after === null) {
+    const lines: DiffLine[] = beforeLines.map((content, i) => ({ type: 'remove' as const, oldLine: i + 1, content }));
+    return { lines: lines.slice(0, 500), firstChangedIndex: 0, truncated: lines.length > 500 };
+  }
+
+  // Calculate line diffs
+  const allDiffs: { type: 'context' | 'add' | 'remove'; b?: string; a?: string; oldL?: number; newL?: number }[] = [];
   const maxLen = Math.max(beforeLines.length, afterLines.length);
-  let oldLine = 1;
-  let newLine = 1;
-  let truncated = false;
+  let oldL = 1;
+  let newL = 1;
+
   for (let i = 0; i < maxLen; i++) {
-    if (lines.length >= 120) { truncated = true; break; }
     const b = beforeLines[i];
     const a = afterLines[i];
     if (b === undefined) {
-      lines.push({ type: 'add', newLine: newLine++, content: a });
+      allDiffs.push({ type: 'add', a, newL: newL++ });
     } else if (a === undefined) {
-      lines.push({ type: 'remove', oldLine: oldLine++, content: b });
+      allDiffs.push({ type: 'remove', b, oldL: oldL++ });
     } else if (b === a) {
-      lines.push({ type: 'context', oldLine: oldLine++, newLine: newLine++, content: b });
+      allDiffs.push({ type: 'context', b, oldL: oldL++, newL: newL++ });
     } else {
-      lines.push({ type: 'remove', oldLine: oldLine++, content: b });
-      lines.push({ type: 'add', newLine: newLine++, content: a });
+      allDiffs.push({ type: 'remove', b, oldL: oldL });
+      allDiffs.push({ type: 'add', a, newL: newL });
+      oldL++;
+      newL++;
     }
   }
-  return { lines, truncated };
+
+  const changedIndices: number[] = [];
+  allDiffs.forEach((d, idx) => {
+    if (d.type !== 'context') changedIndices.push(idx);
+  });
+
+  if (changedIndices.length === 0) return null;
+
+  // Build context windows around changes (radius 3 lines)
+  const contextRadius = 3;
+  const showIndices = new Set<number>();
+  changedIndices.forEach((idx) => {
+    for (let c = Math.max(0, idx - contextRadius); c <= Math.min(allDiffs.length - 1, idx + contextRadius); c++) {
+      showIndices.add(c);
+    }
+  });
+
+  const sortedIndices = Array.from(showIndices).sort((a, b) => a - b);
+  const lines: DiffLine[] = [];
+  let firstChangedIndex = -1;
+  let lastIdx = -1;
+
+  for (const idx of sortedIndices) {
+    if (lastIdx !== -1 && idx > lastIdx + 1) {
+      const item = allDiffs[idx];
+      lines.push({
+        type: 'hunk_header',
+        content: `@@ -${item.oldL ?? '...'} +${item.newL ?? '...'} @@`,
+      });
+    }
+    const d = allDiffs[idx];
+    if (d.type !== 'context' && firstChangedIndex === -1) {
+      firstChangedIndex = lines.length;
+    }
+
+    if (d.type === 'add') {
+      lines.push({ type: 'add', content: d.a ?? '', newLine: d.newL });
+    } else if (d.type === 'remove') {
+      lines.push({ type: 'remove', content: d.b ?? '', oldLine: d.oldL });
+    } else {
+      lines.push({ type: 'context', content: d.b ?? '', oldLine: d.oldL, newLine: d.newL });
+    }
+    lastIdx = idx;
+  }
+
+  return {
+    lines,
+    firstChangedIndex: firstChangedIndex >= 0 ? firstChangedIndex : 0,
+    truncated: lines.length > 500,
+  };
 }
 
 interface DiffViewProps {
@@ -76,31 +121,71 @@ interface DiffViewProps {
 
 const DiffView: React.FC<DiffViewProps> = ({ before, after }) => {
   const diff = useMemo<SimpleDiff | null>(() => buildSimpleDiff(before, after), [before, after]);
+  const firstChangeRef = React.useRef<HTMLTableRowElement | null>(null);
+
+  React.useEffect(() => {
+    if (firstChangeRef.current) {
+      firstChangeRef.current.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }
+  }, [diff]);
+
   if (!diff) return <div style={{ padding: '8px 12px', color: 'var(--text-dim)', fontSize: '0.78rem' }}>No visible changes.</div>;
 
   return (
-    <div style={{ fontFamily: 'var(--font-code)', fontSize: '0.78rem', background: 'rgba(0,0,0,0.35)', borderRadius: '6px', overflow: 'auto', maxHeight: '260px', border: '1px solid rgba(255,255,255,0.08)' }}>
+    <div style={{ fontFamily: 'var(--font-code)', fontSize: '0.78rem', background: 'rgba(10,12,18,0.75)', borderRadius: '6px', overflow: 'auto', maxHeight: '280px', border: '1px solid rgba(255,255,255,0.1)' }}>
       <table style={{ borderCollapse: 'collapse', width: '100%', minWidth: 'max-content' }}>
         <tbody>
           {diff.lines.map((line, i) => {
-            const bg =
-              line.type === 'add' ? 'rgba(16,185,129,0.12)' :
-              line.type === 'remove' ? 'rgba(239,68,68,0.12)' :
+            if (line.type === 'hunk_header') {
+              return (
+                <tr key={i} style={{ background: 'rgba(59,130,246,0.15)', color: '#93c5fd', borderLeft: '3px solid #3b82f6' }}>
+                  <td colSpan={4} style={{ padding: '3px 12px', fontSize: '0.72rem', fontWeight: 600, fontStyle: 'italic', fontFamily: 'var(--font-code)' }}>
+                    {line.content}
+                  </td>
+                </tr>
+              );
+            }
+            const isFirstChange = i === diff.firstChangedIndex;
+            const isAdd = line.type === 'add';
+            const isRemove = line.type === 'remove';
+
+            const rowBg =
+              isAdd ? 'rgba(16,185,129,0.14)' :
+              isRemove ? 'rgba(239,68,68,0.14)' :
               'transparent';
-            const color =
-              line.type === 'add' ? '#4ade80' :
-              line.type === 'remove' ? '#f87171' : 'var(--text-main)';
-            const prefix = line.type === 'add' ? '+' : line.type === 'remove' ? '-' : ' ';
+
+            const borderLeft =
+              isAdd ? '3px solid #10b981' :
+              isRemove ? '3px solid #ef4444' :
+              '3px solid transparent';
+
+            const textColor =
+              isAdd ? '#4ade80' :
+              isRemove ? '#f87171' :
+              'rgba(229,231,235,0.85)';
+
+            const numBg =
+              isAdd ? 'rgba(16,185,129,0.2)' :
+              isRemove ? 'rgba(239,68,68,0.2)' :
+              'rgba(0,0,0,0.2)';
+
+            const numColor =
+              isAdd ? '#a7f3d0' :
+              isRemove ? '#fca5a5' :
+              'var(--text-dim, #9ca3af)';
+
+            const prefix = isAdd ? '+' : isRemove ? '-' : ' ';
+
             return (
-              <tr key={i} style={{ background: bg }}>
-                <td style={{ padding: '1px 8px', color: 'var(--text-dim)', userSelect: 'none', textAlign: 'right', minWidth: '32px', fontSize: '0.7rem' }}>
+              <tr key={i} ref={isFirstChange ? firstChangeRef : undefined} style={{ background: rowBg, borderLeft }}>
+                <td style={{ padding: '1px 8px', background: numBg, color: numColor, userSelect: 'none', textAlign: 'right', minWidth: '34px', fontSize: '0.7rem', borderRight: '1px solid rgba(255,255,255,0.05)' }}>
                   {'oldLine' in line && line.oldLine != null ? line.oldLine : ''}
                 </td>
-                <td style={{ padding: '1px 8px', color: 'var(--text-dim)', userSelect: 'none', textAlign: 'right', minWidth: '32px', fontSize: '0.7rem' }}>
+                <td style={{ padding: '1px 8px', background: numBg, color: numColor, userSelect: 'none', textAlign: 'right', minWidth: '34px', fontSize: '0.7rem', borderRight: '1px solid rgba(255,255,255,0.08)' }}>
                   {'newLine' in line && line.newLine != null ? line.newLine : ''}
                 </td>
-                <td style={{ padding: '1px 6px', color, userSelect: 'none', minWidth: '16px' }}>{prefix}</td>
-                <td style={{ padding: '1px 8px 1px 0', color, whiteSpace: 'pre' }}>{line.content}</td>
+                <td style={{ padding: '1px 6px', color: textColor, fontWeight: 700, userSelect: 'none', minWidth: '16px', textAlign: 'center' }}>{prefix}</td>
+                <td style={{ padding: '1px 10px 1px 2px', color: textColor, whiteSpace: 'pre' }}>{line.content}</td>
               </tr>
             );
           })}
@@ -108,7 +193,7 @@ const DiffView: React.FC<DiffViewProps> = ({ before, after }) => {
       </table>
       {diff.truncated && (
         <div style={{ padding: '4px 12px', color: 'var(--text-muted)', fontSize: '0.75rem', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
-          Diff truncated — showing first 120 lines.
+          Diff truncated — showing first 500 lines.
         </div>
       )}
     </div>

@@ -1,4 +1,4 @@
-import { ChatMessage, OllamaModelInfo, OllamaRunningModelInfo, ToolDefinition } from './types.js';
+import { ChatMessage, OllamaModelInfo, OllamaRunningModelInfo, ToolDefinition, ollamaModelNamesMatch } from './types.js';
 
 export interface OllamaChatOptions {
   host: string;
@@ -41,6 +41,7 @@ export interface OllamaPullProgress {
 export class OllamaClient {
   private host: string;
   private authToken?: string;
+  private thinkingSupportCache: Map<string, boolean> = new Map();
 
   constructor(host: string = 'http://127.0.0.1:11434', authToken?: string) {
     this.host = host.replace(/\/$/, '');
@@ -49,6 +50,7 @@ export class OllamaClient {
 
   public setHost(host: string) {
     this.host = host.replace(/\/$/, '');
+    this.thinkingSupportCache.clear();
   }
 
   public getHost(): string {
@@ -120,6 +122,74 @@ export class OllamaClient {
     } catch (err: any) {
       throw new Error(`Failed to fetch model details for "${modelName}": ${err.message}`);
     }
+  }
+
+  /**
+   * Check if a model supports thinking/reasoning dynamically directly via Ollama API responses.
+   * Queries Ollama /api/tags and /api/show for capabilities, template, parameters, and modelfile.
+   */
+  public async checkModelThinkingSupport(modelName: string): Promise<boolean> {
+    if (!modelName) return false;
+    const cacheKey = `${this.host}::${modelName}`;
+    if (this.thinkingSupportCache.has(cacheKey)) {
+      return this.thinkingSupportCache.get(cacheKey)!;
+    }
+
+    let isSupported = false;
+
+    try {
+      // 1. Inspect model capabilities dynamically returned from Ollama /api/tags
+      const models = await this.getModels();
+      const targetModel = models.find(
+        (m) => ollamaModelNamesMatch(m.name, modelName) || ollamaModelNamesMatch(m.digest, modelName)
+      );
+
+      if (targetModel && Array.isArray(targetModel.capabilities)) {
+        const caps = targetModel.capabilities.map((c) => (c || '').toLowerCase());
+        if (caps.includes('thinking') || caps.includes('reasoning')) {
+          isSupported = true;
+        }
+      }
+
+      // 2. Query Ollama POST /api/show for model capabilities, template, parameters, and modelfile
+      if (!isSupported) {
+        const details = await this.getModelDetails(modelName);
+        if (details) {
+          const caps: string[] = Array.isArray(details.capabilities)
+            ? details.capabilities.map((c: string) => (c || '').toLowerCase())
+            : [];
+
+          if (caps.includes('thinking') || caps.includes('reasoning')) {
+            isSupported = true;
+          } else {
+            const template = (details.template || '').toLowerCase();
+            const modelfile = (details.modelfile || '').toLowerCase();
+            const parameters = (details.parameters || '').toLowerCase();
+
+            if (
+              template.includes('<think>') ||
+              template.includes('</think>') ||
+              template.includes('.think') ||
+              template.includes('.thinking') ||
+              template.includes('reasoning_content') ||
+              template.includes('<|thought|>') ||
+              template.includes('<thought>') ||
+              template.includes('<reasoning>') ||
+              template.includes('[think]') ||
+              modelfile.includes('think') ||
+              parameters.includes('think')
+            ) {
+              isSupported = true;
+            }
+          }
+        }
+      }
+    } catch (_) {
+      // If API query fails, default to false
+    }
+
+    this.thinkingSupportCache.set(cacheKey, isSupported);
+    return isSupported;
   }
 
   /** Download a model and report Ollama's streamed progress events. */

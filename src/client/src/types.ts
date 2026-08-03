@@ -17,9 +17,15 @@ export interface AgentConfig {
   showWorkingDirInfo: boolean;
   contextWindow?: number;
   maxLoops?: number;
+  terminalMode?: 'confirm' | 'auto';
+  fileEditMode?: 'confirm' | 'auto' | 'batch';
+  allowedCommands?: string[];
+  preventRepeatedCalls?: boolean;
   ollamaTokenConfigured?: boolean;
   pruningConfig?: ContextPruningConfig;
   enableThinking?: boolean;
+  supportsThinking?: boolean;
+  effectiveThinking?: boolean;
   complexityProfile?: ToolComplexityProfile;
   enabledTools?: Record<string, boolean>;
 }
@@ -33,6 +39,8 @@ export interface ToolSettings {
   maxLoops?: number;
   complexityProfile?: ToolComplexityProfile;
   enableThinking?: boolean;
+  supportsThinking?: boolean;
+  effectiveThinking?: boolean;
   preventRepeatedCalls?: boolean;
   enabledTools: {
     list_directory: boolean;

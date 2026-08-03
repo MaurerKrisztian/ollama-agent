@@ -309,31 +309,60 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
 
         {/* Thinking Toggle */}
-        {onToggleThinking && (
-          <button
-            className="header-thinking-control"
-            type="button"
-            onClick={() => onToggleThinking(config.enableThinking === false)}
-            title={config.enableThinking !== false ? "Disable Model Reasoning / Thinking" : "Enable Model Reasoning / Thinking"}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              padding: '6px 12px',
-              borderRadius: '8px',
-              border: config.enableThinking !== false ? '1px solid rgba(168, 85, 247, 0.5)' : '1px solid var(--border-color)',
-              background: config.enableThinking !== false ? 'rgba(168, 85, 247, 0.15)' : 'rgba(15, 23, 42, 0.6)',
-              color: config.enableThinking !== false ? '#c084fc' : 'var(--text-muted)',
-              fontSize: '0.8rem',
-              fontWeight: 600,
-              cursor: 'pointer',
-              transition: 'all 0.15s ease',
-            }}
-          >
-            <Brain size={15} color={config.enableThinking !== false ? '#c084fc' : 'var(--text-muted)'} />
-            <span>Thinking: {config.enableThinking !== false ? 'ON' : 'OFF'}</span>
-          </button>
-        )}
+        {onToggleThinking && (() => {
+          const isUserEnabled = config.enableThinking !== false;
+          const supportsThinking = config.supportsThinking !== false;
+          const isEffectiveON = isUserEnabled && supportsThinking;
+          const isUnsupported = isUserEnabled && !supportsThinking;
+
+          let btnColor = 'var(--text-muted)';
+          let btnBorder = '1px solid var(--border-color)';
+          let btnBg = 'rgba(15, 23, 42, 0.6)';
+          let btnText = 'Thinking: OFF';
+          let btnTitle = 'Enable Model Reasoning / Thinking';
+
+          if (isEffectiveON) {
+            btnColor = '#c084fc';
+            btnBorder = '1px solid rgba(168, 85, 247, 0.5)';
+            btnBg = 'rgba(168, 85, 247, 0.15)';
+            btnText = 'Thinking: ON';
+            btnTitle = 'Disable Model Reasoning / Thinking';
+          } else if (isUnsupported) {
+            btnColor = '#eab308';
+            btnBorder = '1px solid rgba(234, 179, 8, 0.4)';
+            btnBg = 'rgba(234, 179, 8, 0.12)';
+            btnText = 'Thinking: OFF (Unsupported)';
+            btnTitle = `Current model "${config.model}" does not support reasoning/thinking output`;
+          } else {
+            btnTitle = 'Enable Model Reasoning / Thinking (Currently User Disabled)';
+          }
+
+          return (
+            <button
+              className="header-thinking-control"
+              type="button"
+              onClick={() => onToggleThinking(!isUserEnabled)}
+              title={btnTitle}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '6px 12px',
+                borderRadius: '8px',
+                border: btnBorder,
+                background: btnBg,
+                color: btnColor,
+                fontSize: '0.8rem',
+                fontWeight: 600,
+                cursor: 'pointer',
+                transition: 'all 0.15s ease',
+              }}
+            >
+              <Brain size={15} color={btnColor} />
+              <span>{btnText}</span>
+            </button>
+          );
+        })()}
 
         {/* VRAM Loaded Indicator Badge */}
         {(() => {

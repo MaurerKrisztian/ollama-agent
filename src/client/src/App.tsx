@@ -14,6 +14,7 @@ import { ModelSettingsModal } from './components/ModelSettingsModal';
 import { TerminalSessionsModal } from './components/TerminalSessionsModal';
 import { RightTerminalSidebar } from './components/RightTerminalSidebar';
 import { AgentConfig, BatchReviewFile, ChatMessage, ChatSessionSummary, CheckpointEntry, ContextInfo, OllamaModelInfo, OllamaRunningModelInfo, PendingApprovalCall, SystemMetrics, TerminalSessionInfo, TextAttachment, ToolSettings, ollamaModelNamesMatch } from './types';
+import { DEFAULT_COMMAND_WHITELIST } from '../../core/commandWhitelist.js';
 
 export const App: React.FC = () => {
   const [activeView, setActiveView] = useState<'chat' | 'benchmark'>('chat');
@@ -32,7 +33,7 @@ export const App: React.FC = () => {
   const [toolSettings, setToolSettings] = useState<ToolSettings>({
     terminalMode: 'confirm',
     fileEditMode: 'batch',
-    allowedCommands: ['ls', 'pwd'],
+    allowedCommands: [...DEFAULT_COMMAND_WHITELIST],
     maxLoops: 25,
     preventRepeatedCalls: true,
     enabledTools: {
@@ -219,10 +220,26 @@ export const App: React.FC = () => {
     });
     socket.on('config:state', (data: { config?: AgentConfig; context?: ContextInfo }) => {
       if (data.config) {
-        setConfig((prev) => ({ ...prev, ...data.config }));
-        if (data.config.workingDir) {
-          localStorage.setItem('local-model-chat.workingDir', data.config.workingDir);
+        const cfg = data.config;
+        setConfig((prev) => ({ ...prev, ...cfg }));
+        if (cfg.workingDir) {
+          localStorage.setItem('local-model-chat.workingDir', cfg.workingDir);
         }
+        setToolSettings((prev) => ({
+          ...prev,
+          terminalMode: cfg.terminalMode || prev.terminalMode,
+          fileEditMode: cfg.fileEditMode || prev.fileEditMode,
+          allowedCommands: Array.isArray(cfg.allowedCommands)
+            ? cfg.allowedCommands
+            : prev.allowedCommands,
+          complexityProfile: cfg.complexityProfile || prev.complexityProfile,
+          maxLoops: cfg.maxLoops ?? prev.maxLoops,
+          enableThinking: cfg.enableThinking ?? prev.enableThinking,
+          preventRepeatedCalls: cfg.preventRepeatedCalls ?? prev.preventRepeatedCalls,
+          enabledTools: cfg.enabledTools
+            ? { ...prev.enabledTools, ...cfg.enabledTools }
+            : prev.enabledTools,
+        }));
       }
     });
     return () => {
@@ -244,11 +261,25 @@ export const App: React.FC = () => {
         let activeContext = data.context;
 
         const savedWorkingDir = localStorage.getItem('local-model-chat.workingDir');
+        const savedOllamaHost = localStorage.getItem('local-model-chat.ollamaHost');
+        const savedOllamaToken = localStorage.getItem('local-model-chat.ollamaToken');
+
+        const updateBody: Record<string, any> = {};
         if (savedWorkingDir && savedWorkingDir !== data.config?.workingDir) {
+          updateBody.workingDir = savedWorkingDir;
+        }
+        if (savedOllamaHost && savedOllamaHost !== data.config?.ollamaHost) {
+          updateBody.ollamaHost = savedOllamaHost;
+        }
+        if (savedOllamaToken !== null && savedOllamaToken !== undefined && savedOllamaToken !== data.config?.ollamaToken) {
+          updateBody.ollamaToken = savedOllamaToken;
+        }
+
+        if (Object.keys(updateBody).length > 0) {
           const savedDirRes = await fetch('/api/config', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ workingDir: savedWorkingDir }),
+            body: JSON.stringify(updateBody),
           });
           if (savedDirRes.ok) {
             const savedDirData = await savedDirRes.json();
@@ -265,6 +296,12 @@ export const App: React.FC = () => {
           if (activeConfig.workingDir) {
             localStorage.setItem('local-model-chat.workingDir', activeConfig.workingDir);
           }
+          if (activeConfig.ollamaHost) {
+            localStorage.setItem('local-model-chat.ollamaHost', activeConfig.ollamaHost);
+          }
+          if (activeConfig.ollamaToken !== undefined) {
+            localStorage.setItem('local-model-chat.ollamaToken', activeConfig.ollamaToken || '');
+          }
           setToolSettings((prev) => ({
             ...prev,
             terminalMode: activeConfig.terminalMode || prev.terminalMode,
@@ -275,6 +312,7 @@ export const App: React.FC = () => {
             complexityProfile: activeConfig.complexityProfile || prev.complexityProfile,
             maxLoops: activeConfig.maxLoops ?? prev.maxLoops,
             enableThinking: activeConfig.enableThinking ?? prev.enableThinking,
+            preventRepeatedCalls: activeConfig.preventRepeatedCalls ?? prev.preventRepeatedCalls,
             enabledTools: activeConfig.enabledTools
               ? { ...prev.enabledTools, ...activeConfig.enabledTools }
               : prev.enabledTools,
@@ -359,11 +397,22 @@ export const App: React.FC = () => {
 
   const handleSelectModel = async (newModel: string) => {
     setConfig((prev) => ({ ...prev, model: newModel }));
-    await fetch('/api/config', {
+    const res = await fetch('/api/config', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ model: newModel }),
     });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.config) {
+        setConfig(data.config);
+        setToolSettings((prev) => ({
+          ...prev,
+          supportsThinking: data.config.supportsThinking,
+          effectiveThinking: data.config.effectiveThinking,
+        }));
+      }
+    }
   };
 
   const handleChangeTemperature = async (newTemp: number) => {
@@ -475,6 +524,11 @@ export const App: React.FC = () => {
     const modelsData = await parseResponse(modelsRes);
     if (!modelsRes.ok || !modelsData.success) {
       throw new Error(modelsData.error || `Could not connect to Ollama server at ${ollamaHost}`);
+    }
+
+    localStorage.setItem('local-model-chat.ollamaHost', ollamaHost);
+    if (ollamaToken !== undefined) {
+      localStorage.setItem('local-model-chat.ollamaToken', ollamaToken);
     }
 
     setConfig(configData.config);
@@ -977,6 +1031,7 @@ export const App: React.FC = () => {
           checkpoints={checkpoints}
           isReverting={isReverting}
           onRevertToCheckpoint={handleRevertToCheckpoint}
+          onImportConfig={(importedCfg) => setConfig(importedCfg)}
         />
         {activeView === 'chat' ? (
           <ChatWindow

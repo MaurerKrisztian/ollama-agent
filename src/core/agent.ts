@@ -572,6 +572,11 @@ export class AgentEngine {
     return this.ollamaClient.getModelDetails(targetModel);
   }
 
+  public async checkModelThinkingSupport(name?: string): Promise<boolean> {
+    const targetModel = name || this.config.model;
+    return this.ollamaClient.checkModelThinkingSupport(targetModel);
+  }
+
   public async pullModel(
     name: string,
     onProgress?: (progress: OllamaPullProgress) => void,
@@ -773,12 +778,15 @@ ${conversationText}`;
         continuationReminder = null;
       }
 
+      const modelSupportsThinking = await this.ollamaClient.checkModelThinkingSupport(this.config.model);
+      const effectiveThinking = (this.config.enableThinking !== false) && modelSupportsThinking;
+
       const res = await this.ollamaClient.chatStream({
         host: this.config.ollamaHost,
         model: this.config.model,
         temperature: isContinuationAttempt ? 0 : this.config.temperature,
         contextWindow: this.config.contextWindow,
-        enableThinking: this.config.enableThinking,
+        enableThinking: effectiveThinking,
         messages: messagesForOllama,
         tools: activeTools,
         onChunk: callbacks?.onChunk,

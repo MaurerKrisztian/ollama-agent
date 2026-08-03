@@ -334,7 +334,14 @@ export const ModelSettingsModal: React.FC<ModelSettingsModalProps> = ({
           <section className="model-settings-section model-thinking-setting">
             <div>
               <label htmlFor="model-thinking"><Brain size={17} /> Thinking mode</label>
-              <p>Show reasoning for models that support thinking output.</p>
+              <p>
+                Show reasoning for models that support thinking output.
+                {config.enableThinking !== false && config.supportsThinking === false && (
+                  <span style={{ display: 'block', color: '#eab308', marginTop: '2px', fontWeight: 500 }}>
+                    ⚠️ Current model does not support thinking.
+                  </span>
+                )}
+              </p>
             </div>
             <button
               id="model-thinking"
@@ -344,7 +351,7 @@ export const ModelSettingsModal: React.FC<ModelSettingsModalProps> = ({
               className={`model-toggle ${config.enableThinking !== false ? 'active' : ''}`}
               onClick={() => onToggleThinking(config.enableThinking === false)}
             >
-              <span /> {config.enableThinking !== false ? 'On' : 'Off'}
+              <span /> {config.enableThinking !== false ? (config.supportsThinking === false ? 'On (Unsupported)' : 'On') : 'Off'}
             </button>
           </section>
         </div>

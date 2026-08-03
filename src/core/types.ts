@@ -150,6 +150,7 @@ export interface OllamaModelInfo {
   modified_at: string;
   size: number;
   digest: string;
+  capabilities?: string[];
   details?: {
     format?: string;
     family?: string;
@@ -157,6 +158,12 @@ export interface OllamaModelInfo {
     quantization_level?: string;
   };
 }
+
+export const normalizeOllamaModelName = (name: string): string =>
+  name.trim().toLowerCase().replace(/:latest$/i, '');
+
+export const ollamaModelNamesMatch = (left: string | undefined, right: string | undefined): boolean =>
+  Boolean(left && right && normalizeOllamaModelName(left) === normalizeOllamaModelName(right));
 
 export interface OllamaRunningModelInfo {
   name: string;

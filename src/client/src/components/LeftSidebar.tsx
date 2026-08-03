@@ -20,6 +20,8 @@ import {
   Check,
   RotateCcw,
   Clock,
+  Download,
+  Upload,
 } from 'lucide-react';
 import { AgentConfig, ChatSessionSummary, CheckpointEntry, SystemMetrics } from '../types';
 
@@ -50,6 +52,7 @@ interface LeftSidebarProps {
   checkpoints?: CheckpointEntry[];
   isReverting?: boolean;
   onRevertToCheckpoint?: (promptId: string) => void;
+  onImportConfig?: (config: AgentConfig) => void;
 }
 
 export const LeftSidebar: React.FC<LeftSidebarProps> = ({
@@ -79,8 +82,66 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
   checkpoints = [],
   isReverting = false,
   onRevertToCheckpoint,
+  onImportConfig,
 }) => {
   const [copiedSessionId, setCopiedSessionId] = useState<string | null>(null);
+  const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
+  const [editingTitle, setEditingTitle] = useState<string>('');
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+
+  const handleExportUserConfig = async () => {
+    try {
+      const res = await fetch('/api/config');
+      const data = await res.json();
+      const exportObject = {
+        version: '1.1',
+        exportedAt: new Date().toISOString(),
+        config: data.config || config,
+      };
+      const blob = new Blob([JSON.stringify(exportObject, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `user-config-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err: any) {
+      alert(`Failed to export user configuration: ${err.message}`);
+    }
+  };
+
+  const handleConfigFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+      const importedConfig = parsed.config || parsed;
+      if (typeof importedConfig !== 'object' || !importedConfig) {
+        throw new Error('Invalid JSON format in user configuration file.');
+      }
+      const res = await fetch('/api/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(importedConfig),
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => null);
+        throw new Error(errData?.error || `HTTP ${res.status}`);
+      }
+      const data = await res.json();
+      if (data.success && data.config) {
+        onImportConfig?.(data.config);
+        alert('User configuration loaded and applied successfully!');
+      }
+    } catch (err: any) {
+      alert(`Failed to load configuration file: ${err.message}`);
+    } finally {
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
 
   if (!isOpen) return null;
 
@@ -554,6 +615,69 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
             value={config.temperature !== undefined ? config.temperature : 0.2}
             onChange={(e) => onChangeTemperature(parseFloat(e.target.value))}
             style={{ width: '100%', accentColor: 'var(--accent-amber)', cursor: 'pointer' }}
+          />
+        </div>
+
+        {/* User Config Export / Load */}
+        <div>
+          <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: '8px' }}>
+            User Config File
+          </span>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+            <button
+              type="button"
+              onClick={handleExportUserConfig}
+              title="Export and download all current user configuration settings as a JSON file"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '6px',
+                padding: '8px 10px',
+                borderRadius: '8px',
+                border: '1px solid var(--border-color)',
+                background: 'rgba(30, 41, 59, 0.4)',
+                color: 'var(--text-main)',
+                fontSize: '0.78rem',
+                fontWeight: 600,
+                cursor: 'pointer',
+                transition: 'all 0.15s ease',
+              }}
+            >
+              <Download size={14} color="var(--accent-teal)" />
+              <span>Export Config</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              title="Upload and load a saved user configuration JSON file"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '6px',
+                padding: '8px 10px',
+                borderRadius: '8px',
+                border: '1px solid var(--border-color)',
+                background: 'rgba(30, 41, 59, 0.4)',
+                color: 'var(--text-main)',
+                fontSize: '0.78rem',
+                fontWeight: 600,
+                cursor: 'pointer',
+                transition: 'all 0.15s ease',
+              }}
+            >
+              <Upload size={14} color="var(--accent-primary)" />
+              <span>Load Config</span>
+            </button>
+          </div>
+          <input
+            type="file"
+            ref={fileInputRef}
+            onChange={handleConfigFileChange}
+            accept=".json"
+            style={{ display: 'none' }}
           />
         </div>
 
