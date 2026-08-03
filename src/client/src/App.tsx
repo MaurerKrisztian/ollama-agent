@@ -13,7 +13,7 @@ import { ModelDetailsModal } from './components/ModelDetailsModal';
 import { ModelSettingsModal } from './components/ModelSettingsModal';
 import { TerminalSessionsModal } from './components/TerminalSessionsModal';
 import { RightTerminalSidebar } from './components/RightTerminalSidebar';
-import { AgentConfig, ChatMessage, ChatSessionSummary, ContextInfo, OllamaModelInfo, OllamaRunningModelInfo, PendingApprovalCall, SystemMetrics, TerminalSessionInfo, TextAttachment, ToolSettings, ollamaModelNamesMatch } from './types';
+import { AgentConfig, BatchReviewFile, ChatMessage, ChatSessionSummary, CheckpointEntry, ContextInfo, OllamaModelInfo, OllamaRunningModelInfo, PendingApprovalCall, SystemMetrics, TerminalSessionInfo, TextAttachment, ToolSettings, ollamaModelNamesMatch } from './types';
 
 export const App: React.FC = () => {
   const [activeView, setActiveView] = useState<'chat' | 'benchmark'>('chat');
@@ -81,6 +81,11 @@ export const App: React.FC = () => {
   const [pendingApprovalCall, setPendingApprovalCall] = useState<PendingApprovalCall | null>(null);
   const [isSubmittingToolApproval, setIsSubmittingToolApproval] = useState(false);
   const [activeToolCall, setActiveToolCall] = useState<{ name: string; args?: any; progress?: any } | null>(null);
+  const [batchReview, setBatchReview] = useState<BatchReviewFile[] | null>(null);
+  const [batchReviewPromptId, setBatchReviewPromptId] = useState<string | null>(null);
+  const [isSubmittingBatchReview, setIsSubmittingBatchReview] = useState(false);
+  const [checkpoints, setCheckpoints] = useState<CheckpointEntry[]>([]);
+  const [isReverting, setIsReverting] = useState(false);
   const [systemMetrics, setSystemMetrics] = useState<SystemMetrics | null>(null);
   const [terminalSessions, setTerminalSessions] = useState<TerminalSessionInfo[]>([]);
   const [terminalSessionsModalOpen, setTerminalSessionsModalOpen] = useState(false);
@@ -105,6 +110,22 @@ export const App: React.FC = () => {
       setContextInfo(eventData);
     } else if (eventType === 'tool_approval_required') {
       setPendingApprovalCall({ name: eventData.name, args: eventData.args, diff: eventData.diff });
+    } else if (eventType === 'batch_review_ready') {
+      setBatchReviewPromptId(eventData.promptId ?? null);
+      setBatchReview(
+        (eventData.files ?? []).map((f: any) => ({ path: f.path, before: f.before, after: f.after, revert: false }))
+      );
+    } else if (eventType === 'checkpoint_saved') {
+      setCheckpoints((prev) => [
+        ...prev,
+        {
+          promptId: eventData.promptId,
+          promptText: eventData.promptText,
+          timestamp: eventData.timestamp,
+          sessionId: activeSessionId,
+          snapshots: [],
+        },
+      ]);
     } else if (eventType === 'tool_start') {
       setPendingApprovalCall(null);
       setActiveToolCall({ name: eventData.name, args: eventData.args });
@@ -495,6 +516,10 @@ export const App: React.FC = () => {
     const url = new URL(window.location.href);
     url.searchParams.set('session', data.activeSessionId || sessionId);
     window.history.replaceState(null, '', url);
+    // Reset per-session state
+    setBatchReview(null);
+    setBatchReviewPromptId(null);
+    setCheckpoints([]);
   };
 
   const handleRenameChatSession = async (sessionId: string, title: string) => {
@@ -636,6 +661,66 @@ export const App: React.FC = () => {
       alert(`Failed to reject tool call: ${err.message}`);
     } finally {
       setIsSubmittingToolApproval(false);
+    }
+  };
+
+  const handleBatchReviewToggle = (path: string) => {
+    setBatchReview((prev) =>
+      prev ? prev.map((f) => f.path === path ? { ...f, revert: !f.revert } : f) : prev
+    );
+  };
+
+  const handleBatchReviewConfirm = async (revertPaths: string[]) => {
+    if (isSubmittingBatchReview) return;
+    // Nothing to revert — just dismiss the card
+    if (revertPaths.length === 0) {
+      setBatchReview(null);
+      setBatchReviewPromptId(null);
+      return;
+    }
+    setIsSubmittingBatchReview(true);
+    try {
+      const response = await fetch('/api/chat/revert-files', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId: activeSessionId, promptId: batchReviewPromptId, revertPaths }),
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => null);
+        throw new Error(data?.error || `Server response error ${response.status}`);
+      }
+      setBatchReview(null);
+      setBatchReviewPromptId(null);
+    } catch (err: any) {
+      alert(`Failed to revert files: ${err.message}`);
+    } finally {
+      setIsSubmittingBatchReview(false);
+    }
+  };
+
+  const handleRevertToCheckpoint = async (promptId: string) => {
+    if (isReverting) return;
+    if (!window.confirm('Revert all file changes made after this prompt? This cannot be undone.')) return;
+    setIsReverting(true);
+    try {
+      const response = await fetch('/api/chat/revert', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId: activeSessionId, promptId }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        throw new Error(data?.error || `Revert failed (${response.status})`);
+      }
+      setCheckpoints((prev) => {
+        const idx = prev.findIndex((c) => c.promptId === promptId);
+        return idx >= 0 ? prev.slice(0, idx + 1) : prev;
+      });
+      alert(`Reverted ${data.reverted} file(s) to this checkpoint.`);
+    } catch (err: any) {
+      alert(`Revert failed: ${err.message}`);
+    } finally {
+      setIsReverting(false);
     }
   };
 
@@ -824,6 +909,9 @@ export const App: React.FC = () => {
           systemMetrics={systemMetrics}
           activeTerminalCount={terminalSessions.filter((s) => s.status === 'running').length}
           onOpenTerminalSessions={() => setTerminalSidebarOpen((prev) => !prev)}
+          checkpoints={checkpoints}
+          isReverting={isReverting}
+          onRevertToCheckpoint={handleRevertToCheckpoint}
         />
         {activeView === 'chat' ? (
           <ChatWindow
@@ -838,11 +926,16 @@ export const App: React.FC = () => {
             pendingApprovalCall={pendingApprovalCall}
             isSubmittingToolApproval={isSubmittingToolApproval}
             activeToolCall={activeToolCall}
+            pendingBatchEdits={batchReview}
+            isSubmittingBatchApproval={isSubmittingBatchReview}
             supportsVision={supportsVision}
             onSendMessage={handleSendMessage}
             onCancelGeneration={handleCancelGeneration}
             onApproveToolCall={handleApproveToolCall}
             onRejectToolCall={handleRejectToolCall}
+            onBatchApprove={handleBatchReviewConfirm}
+            onBatchRejectAll={() => handleBatchReviewConfirm([])}
+            onBatchToggle={handleBatchReviewToggle}
             onRewindToMessage={handleRewindToMessage}
             onRegenerateDeepResearch={handleRegenerateDeepResearch}
             onClearChat={handleNewChat}

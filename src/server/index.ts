@@ -196,14 +196,24 @@ function getChatRuntime(sessionId: string): ChatRuntime {
 createChatRuntime(chatSessions.getActiveId(), agent);
 
 let terminalRequireConfirm = initialConfig.terminalMode === 'confirm';
-let fileEditRequireConfirm = initialConfig.fileEditMode === 'confirm';
+let fileEditMode: 'confirm' | 'auto' | 'batch' = initialConfig.fileEditMode;
 let allowedCommandsState: string[] = initialConfig.allowedCommands;
+
+// ----- Checkpoint system -----
+type FileSnapshot = { path: string; before: string | null };
+type CheckpointEntry = {
+  promptId: string;
+  promptText: string;
+  timestamp: number;
+  snapshots: FileSnapshot[];
+};
+const sessionCheckpoints = new Map<string, CheckpointEntry[]>(); // sessionId -> entries
 
 const getPublicConfig = () => ({
   ...agent.getConfig(),
   ollamaTokenConfigured: agent.hasOllamaToken(),
   terminalMode: terminalRequireConfirm ? 'confirm' : 'auto',
-  fileEditMode: fileEditRequireConfirm ? 'confirm' : 'auto',
+  fileEditMode,
   allowedCommands: allowedCommandsState,
 });
 
@@ -1075,14 +1085,101 @@ app.post('/api/chat/tool-approval', (req, res) => {
   }
 });
 
+// POST /api/chat/revert-files - Selectively revert individual files from a checkpoint
+app.post('/api/chat/revert-files', async (req, res) => {
+  const { sessionId, promptId, revertPaths } = req.body as {
+    sessionId?: string;
+    promptId?: string;
+    revertPaths?: string[];
+  };
+  if (!sessionId || !promptId || !Array.isArray(revertPaths)) {
+    return res.status(400).json({ success: false, error: 'sessionId, promptId and revertPaths are required.' });
+  }
+  const entries = sessionCheckpoints.get(sessionId) ?? [];
+  const checkpoint = entries.find((e) => e.promptId === promptId);
+  if (!checkpoint) {
+    return res.status(404).json({ success: false, error: 'Checkpoint not found.' });
+  }
+  const pathSet = new Set(revertPaths);
+  const toRevert = checkpoint.snapshots.filter((s) => pathSet.has(s.path));
+  const errors: string[] = [];
+  for (const snap of toRevert) {
+    try {
+      if (snap.before === null) {
+        await fs.unlink(snap.path).catch(() => {});
+      } else {
+        await fs.mkdir(path.dirname(snap.path), { recursive: true });
+        await fs.writeFile(snap.path, snap.before, 'utf8');
+      }
+    } catch (err: any) {
+      errors.push(`${snap.path}: ${err.message}`);
+    }
+  }
+  if (errors.length > 0) {
+    return res.status(207).json({ success: false, errors, reverted: toRevert.length - errors.length });
+  }
+  res.json({ success: true, reverted: toRevert.length });
+});
+
+// GET /api/chat/checkpoints - Return checkpoint list for a session
+app.get('/api/chat/checkpoints', (req, res) => {
+  const sessionId = typeof req.query.sessionId === 'string' ? req.query.sessionId : '';
+  res.json({ success: true, checkpoints: sessionCheckpoints.get(sessionId) ?? [] });
+});
+
+// POST /api/chat/revert - Revert ALL files to the state before a given promptId (full checkpoint revert)
+app.post('/api/chat/revert', async (req, res) => {
+  const { sessionId, promptId } = req.body as { sessionId?: string; promptId?: string };
+  if (!sessionId || !promptId) {
+    return res.status(400).json({ success: false, error: 'sessionId and promptId are required.' });
+  }
+  const entries = sessionCheckpoints.get(sessionId) ?? [];
+  const targetIdx = entries.findIndex((e) => e.promptId === promptId);
+  if (targetIdx === -1) {
+    return res.status(404).json({ success: false, error: 'Checkpoint not found.' });
+  }
+  // Collect all snapshots AFTER the target checkpoint (in reverse order so later writes win)
+  const toRevert = entries.slice(targetIdx + 1).flatMap((e) => e.snapshots);
+  // Deduplicate: keep the latest snapshot per path (first seen when reversed)
+  const seen = new Set<string>();
+  const unique: FileSnapshot[] = [];
+  for (const snap of [...toRevert].reverse()) {
+    if (!seen.has(snap.path)) {
+      seen.add(snap.path);
+      unique.push(snap);
+    }
+  }
+  const errors: string[] = [];
+  for (const snap of unique) {
+    try {
+      if (snap.before === null) {
+        // File didn't exist before — delete it (best-effort)
+        await fs.unlink(snap.path).catch(() => {});
+      } else {
+        await fs.mkdir(path.dirname(snap.path), { recursive: true });
+        await fs.writeFile(snap.path, snap.before, 'utf8');
+      }
+    } catch (err: any) {
+      errors.push(`${snap.path}: ${err.message}`);
+    }
+  }
+  // Remove checkpoints after the target
+  sessionCheckpoints.set(sessionId, entries.slice(0, targetIdx + 1));
+  if (errors.length > 0) {
+    return res.status(207).json({ success: false, errors, reverted: unique.length - errors.length });
+  }
+  res.json({ success: true, reverted: unique.length });
+});
+
+
 // POST /api/chat/tool-settings - Update tool approval preferences & max loops & thinking
 app.post('/api/chat/tool-settings', (req, res) => {
-  const { terminalMode, fileEditMode, allowedCommands, maxLoops, enableThinking, preventRepeatedCalls, complexityProfile, enabledTools } = req.body;
+  const { terminalMode, fileEditMode: newFileEditMode, allowedCommands, maxLoops, enableThinking, preventRepeatedCalls, complexityProfile, enabledTools } = req.body;
   if (terminalMode === 'confirm' || terminalMode === 'auto') {
     terminalRequireConfirm = terminalMode === 'confirm';
   }
-  if (fileEditMode === 'confirm' || fileEditMode === 'auto') {
-    fileEditRequireConfirm = fileEditMode === 'confirm';
+  if (newFileEditMode === 'confirm' || newFileEditMode === 'auto' || newFileEditMode === 'batch') {
+    fileEditMode = newFileEditMode;
   }
   if (Array.isArray(allowedCommands)) {
     allowedCommandsState = allowedCommands.map((c) => String(c).trim()).filter(Boolean);
@@ -1112,7 +1209,7 @@ app.post('/api/chat/tool-settings', (req, res) => {
   savePersistedConfig({
     allowedCommands: allowedCommandsState,
     terminalMode: terminalRequireConfirm ? 'confirm' : 'auto',
-    fileEditMode: fileEditRequireConfirm ? 'confirm' : 'auto',
+    fileEditMode,
     enableThinking: agent.getConfig().enableThinking,
     preventRepeatedCalls: agent.getConfig().preventRepeatedCalls,
     complexityProfile: agent.getConfig().complexityProfile,
@@ -1124,7 +1221,7 @@ app.post('/api/chat/tool-settings', (req, res) => {
   res.json({
     success: true,
     terminalRequireConfirm,
-    fileEditRequireConfirm,
+    fileEditMode,
     allowedCommands: allowedCommandsState,
     config: getPublicConfig(),
   });
@@ -1319,6 +1416,33 @@ app.post('/api/chat', async (req, res) => {
     }
   });
 
+  // Checkpoint: create a new entry for this prompt turn
+  const promptId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const currentCheckpoint: CheckpointEntry = {
+    promptId,
+    promptText: typeof message === 'string' ? message.slice(0, 200) : '',
+    timestamp: Date.now(),
+    snapshots: [],
+  };
+  const snapshotCache = new Map<string, string | null>(); // absolute path -> original content
+
+  const captureSnapshot = async (name: string, args: Record<string, any>) => {
+    // Determine the absolute file path being modified
+    const workingDir = sessionAgent.getConfig().workingDir || process.cwd();
+    const relativePath = args.relative_path || args.file_path || '';
+    if (!relativePath) return;
+    const absPath = path.isAbsolute(relativePath) ? relativePath : path.join(workingDir, relativePath);
+    if (snapshotCache.has(absPath)) return; // already captured for this turn
+    let before: string | null = null;
+    try {
+      before = await fs.readFile(absPath, 'utf8');
+    } catch (_) {
+      before = null; // file didn't exist
+    }
+    snapshotCache.set(absPath, before);
+    currentCheckpoint.snapshots.push({ path: absPath, before });
+  };
+
   // Intercept mutating tools to pause & ask for approval when required
   const executor = sessionAgent.getToolExecutor();
   const originalExecuteCommand = executor.executeCommand.bind(executor);
@@ -1343,24 +1467,32 @@ app.post('/api/chat', async (req, res) => {
         };
       }
     }
-    if (['edit_file', 'replace_file', 'create_file', 'apply_patch'].includes(name) && fileEditRequireConfirm) {
-      let diff: FileDiff | undefined = undefined;
-      try {
-        diff = await executor.previewFileDiff(name, args);
-      } catch (_) {}
+    if (['edit_file', 'replace_file', 'create_file', 'apply_patch'].includes(name)) {
+      // Always snapshot before writing (for checkpoint revert)
+      await captureSnapshot(name, args);
 
-      sendEvent('tool_approval_required', { name, args, diff });
-      const { decision, reason } = await new Promise<ApprovalDecisionPayload>((resolve) => {
-        pendingApprovalResolves.set(sessionId, resolve);
-      });
-      if (decision === 'reject') {
-        const msg = reason ? `File edit rejected by user: "${reason}"` : 'File edit rejected by user in Web UI.';
-        return {
-          error: msg,
-          file_path: args.relative_path,
-          cancelled: true,
-        };
+      if (fileEditMode === 'confirm') {
+        // Per-edit approval flow
+        let diff: FileDiff | undefined = undefined;
+        try {
+          diff = await executor.previewFileDiff(name, args);
+        } catch (_) {}
+
+        sendEvent('tool_approval_required', { name, args, diff });
+        const { decision, reason } = await new Promise<ApprovalDecisionPayload>((resolve) => {
+          pendingApprovalResolves.set(sessionId, resolve);
+        });
+        if (decision === 'reject') {
+          const msg = reason ? `File edit rejected by user: "${reason}"` : 'File edit rejected by user in Web UI.';
+          return {
+            error: msg,
+            file_path: args.relative_path,
+            cancelled: true,
+          };
+        }
       }
+      // fileEditMode === 'auto' or 'batch': execute immediately
+      // (batch mode snapshots already captured above; review card shown after turn)
     }
     return originalExecuteTool(name, args, onProgress);
   };
@@ -1433,6 +1565,26 @@ app.post('/api/chat', async (req, res) => {
     const finalContent = isDeepResearchRegeneration
       ? await sessionAgent.regenerateDeepResearchAnswer(regenerateFromToolMessageId, sendCallbacks)
       : await sessionAgent.sendMessage(modelMessage, sendCallbacks);
+
+    // --- Batch review: emit changed-files event (non-blocking) ---
+    if (fileEditMode === 'batch' && currentCheckpoint.snapshots.length > 0 && !generationController.signal.aborted) {
+      const changedFiles = await Promise.all(
+        currentCheckpoint.snapshots.map(async (snap) => {
+          let after: string | null = null;
+          try { after = await fs.readFile(snap.path, 'utf8'); } catch (_) { after = null; }
+          return { path: snap.path, before: snap.before, after };
+        }),
+      );
+      sendEvent('batch_review_ready', { promptId, files: changedFiles });
+    }
+
+    // --- Save checkpoint (only if files were actually touched) ---
+    if (currentCheckpoint.snapshots.length > 0) {
+      const existing = sessionCheckpoints.get(sessionId) ?? [];
+      existing.push(currentCheckpoint);
+      sessionCheckpoints.set(sessionId, existing);
+      sendEvent('checkpoint_saved', { promptId, promptText: currentCheckpoint.promptText, timestamp: currentCheckpoint.timestamp, snapshotCount: currentCheckpoint.snapshots.length });
+    }
 
     sendEvent('context_update', sessionAgent.getContextManager().getContextInfo());
     sendEvent('done', { content: finalContent });

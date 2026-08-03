@@ -14,7 +14,7 @@ export interface PersistedConfig {
   model: string;
   allowedCommands: string[];
   terminalMode: 'confirm' | 'auto';
-  fileEditMode: 'confirm' | 'auto';
+  fileEditMode: 'confirm' | 'auto' | 'batch';
   enableThinking: boolean;
   classifierModel?: string;
   complexityProfile: 'simple' | 'medium' | 'advanced';
@@ -30,7 +30,7 @@ export function getInitialPersistedConfig(): PersistedConfig {
   let classifierModel: string | undefined = undefined;
   let allowedCommands = [...DEFAULT_COMMAND_WHITELIST];
   let terminalMode: 'confirm' | 'auto' = 'confirm';
-  let fileEditMode: 'confirm' | 'auto' = 'confirm';
+  let fileEditMode: 'confirm' | 'auto' | 'batch' = 'confirm';
   let enableThinking = true;
   let preventRepeatedCalls = true;
   let complexityProfile: 'simple' | 'medium' | 'advanced' = 'simple';
@@ -61,7 +61,7 @@ export function getInitialPersistedConfig(): PersistedConfig {
       if (parsed.terminalMode === 'confirm' || parsed.terminalMode === 'auto') {
         terminalMode = parsed.terminalMode;
       }
-      if (parsed.fileEditMode === 'confirm' || parsed.fileEditMode === 'auto') {
+      if (parsed.fileEditMode === 'confirm' || parsed.fileEditMode === 'auto' || parsed.fileEditMode === 'batch') {
         fileEditMode = parsed.fileEditMode;
       }
       if (typeof parsed.enableThinking === 'boolean') {

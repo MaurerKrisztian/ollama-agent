@@ -18,8 +18,10 @@ import {
   Trash2,
   Link,
   Check,
+  RotateCcw,
+  Clock,
 } from 'lucide-react';
-import { AgentConfig, ChatSessionSummary, SystemMetrics } from '../types';
+import { AgentConfig, ChatSessionSummary, CheckpointEntry, SystemMetrics } from '../types';
 
 interface LeftSidebarProps {
   isOpen: boolean;
@@ -45,6 +47,9 @@ interface LeftSidebarProps {
   systemMetrics?: SystemMetrics | null;
   activeTerminalCount?: number;
   onOpenTerminalSessions?: () => void;
+  checkpoints?: CheckpointEntry[];
+  isReverting?: boolean;
+  onRevertToCheckpoint?: (promptId: string) => void;
 }
 
 export const LeftSidebar: React.FC<LeftSidebarProps> = ({
@@ -71,6 +76,9 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
   systemMetrics,
   activeTerminalCount = 0,
   onOpenTerminalSessions,
+  checkpoints = [],
+  isReverting = false,
+  onRevertToCheckpoint,
 }) => {
   const [copiedSessionId, setCopiedSessionId] = useState<string | null>(null);
 
@@ -267,6 +275,64 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
             ))}
           </div>
         </div>
+
+        {/* Checkpoint Timeline */}
+        {checkpoints.length > 0 && onRevertToCheckpoint && (
+          <div>
+            <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: '8px' }}>
+              File Checkpoints
+            </span>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+              {checkpoints.map((cp, idx) => (
+                <div
+                  key={cp.promptId}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: '8px',
+                    padding: '8px 10px',
+                    borderRadius: '8px',
+                    background: 'rgba(20, 184, 166, 0.07)',
+                    border: '1px solid rgba(20, 184, 166, 0.2)',
+                  }}
+                >
+                  <Clock size={12} color="var(--accent-teal)" style={{ flexShrink: 0, marginTop: '3px' }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '0.75rem', color: 'var(--text-main)', fontWeight: 500 }}>
+                      {cp.promptText || `Prompt ${idx + 1}`}
+                    </span>
+                    <span style={{ display: 'block', fontSize: '0.65rem', color: 'var(--text-dim)', marginTop: '2px' }}>
+                      {new Date(cp.timestamp).toLocaleTimeString()}
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => onRevertToCheckpoint(cp.promptId)}
+                    disabled={isReverting}
+                    title="Revert all file changes made after this prompt"
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      background: 'rgba(20, 184, 166, 0.15)',
+                      border: '1px solid rgba(20, 184, 166, 0.4)',
+                      color: 'var(--accent-teal)',
+                      borderRadius: '5px',
+                      padding: '3px 7px',
+                      fontSize: '0.7rem',
+                      fontWeight: 600,
+                      cursor: isReverting ? 'not-allowed' : 'pointer',
+                      opacity: isReverting ? 0.5 : 1,
+                      flexShrink: 0,
+                    }}
+                  >
+                    <RotateCcw size={11} />
+                    <span>Revert</span>
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Views Switcher */}
         <div>

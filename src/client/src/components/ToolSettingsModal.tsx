@@ -283,7 +283,7 @@ export const ToolSettingsModal: React.FC<ToolSettingsModalProps> = ({
     onUpdateSettings({ ...settings, terminalMode: mode });
   };
 
-  const handleFileEditModeChange = (mode: 'confirm' | 'auto') => {
+  const handleFileEditModeChange = (mode: 'confirm' | 'auto' | 'batch') => {
     onUpdateSettings({ ...settings, fileEditMode: mode });
   };
 
@@ -653,7 +653,28 @@ export const ToolSettingsModal: React.FC<ToolSettingsModalProps> = ({
                 }}
               >
                 <ShieldAlert size={16} />
-                <span>Require Confirmation (Default)</span>
+                <span>Confirm Each Edit</span>
+              </button>
+
+              <button
+                onClick={() => handleFileEditModeChange('batch')}
+                style={{
+                  flex: 1,
+                  padding: '10px 14px',
+                  borderRadius: '8px',
+                  border: `1px solid ${settings.fileEditMode === 'batch' ? 'var(--accent-teal)' : 'var(--border-color)'}`,
+                  background: settings.fileEditMode === 'batch' ? 'rgba(20, 184, 166, 0.15)' : 'rgba(30, 41, 59, 0.4)',
+                  color: settings.fileEditMode === 'batch' ? 'var(--accent-teal)' : 'var(--text-muted)',
+                  fontSize: '0.85rem',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '6px',
+                }}
+              >
+                <span>📦 Batch Approval</span>
               </button>
             </div>
           </div>

@@ -3,7 +3,8 @@ import { createPortal } from 'react-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Send, Square, Wrench, CheckCircle2, XCircle, ShieldAlert, User, Bot, Loader2, FileText, Folder, Terminal, Edit3, Search, PlusCircle, Sparkles, Code2, Eye, ChevronDown, ChevronRight, Brain, X, Globe, ExternalLink, Layers, RotateCcw, Copy, Check, Scissors, Info, Image as ImageIcon, CornerDownRight } from 'lucide-react';
-import { ChatMessage, FileDiffData, ImageAttachment, PendingApprovalCall, TextAttachment } from '../types';
+import { ChatMessage, FileDiffData, ImageAttachment, BatchReviewFile, PendingApprovalCall, TextAttachment } from '../types';
+import { BatchReviewCard } from './chat/BatchReviewCard';
 import { getLinkPresentation } from '../linkPresentation';
 import { findActiveSkillMention } from '../skillMention';
 
@@ -2641,11 +2642,16 @@ interface ChatWindowProps {
   pendingApprovalCall?: PendingApprovalCall | null;
   isSubmittingToolApproval?: boolean;
   activeToolCall?: { name: string; args?: any; progress?: any } | null;
+  pendingBatchEdits?: BatchReviewFile[] | null;
+  isSubmittingBatchApproval?: boolean;
   supportsVision?: boolean;
   onSendMessage: (msg: string, attachments?: TextAttachment[], imageAttachments?: import('../types').ImageAttachment[]) => void;
   onCancelGeneration: () => void;
   onApproveToolCall?: () => void;
   onRejectToolCall?: (reason?: string) => void;
+  onBatchApprove?: (approvedIds: string[]) => void;
+  onBatchRejectAll?: () => void;
+  onBatchToggle?: (editId: string) => void;
   onRewindToMessage?: (messageId: string, promptContent: string) => void;
   onRegenerateDeepResearch?: (toolMessageId: string) => void;
   onClearChat?: () => void;
@@ -2750,11 +2756,16 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   pendingApprovalCall,
   isSubmittingToolApproval = false,
   activeToolCall,
+  pendingBatchEdits,
+  isSubmittingBatchApproval = false,
   supportsVision,
   onSendMessage,
   onCancelGeneration,
   onApproveToolCall,
   onRejectToolCall,
+  onBatchApprove,
+  onBatchRejectAll,
+  onBatchToggle,
   onRewindToMessage,
   onRegenerateDeepResearch,
   onClearChat,
@@ -3525,6 +3536,16 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
               </button>
             </div>
           </div>
+        )}
+
+        {/* Batch File Edit Review Card */}
+        {pendingBatchEdits && pendingBatchEdits.length > 0 && onBatchApprove && onBatchToggle && (
+          <BatchReviewCard
+            files={pendingBatchEdits}
+            isSubmitting={isSubmittingBatchApproval}
+            onConfirm={onBatchApprove}
+            onToggleRevert={onBatchToggle}
+          />
         )}
 
         <div ref={messagesEndRef} />

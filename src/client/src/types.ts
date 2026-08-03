@@ -28,7 +28,7 @@ export type ToolComplexityProfile = 'simple' | 'medium' | 'advanced';
 
 export interface ToolSettings {
   terminalMode: 'confirm' | 'auto';
-  fileEditMode: 'confirm' | 'auto';
+  fileEditMode: 'confirm' | 'auto' | 'batch';
   allowedCommands?: string[];
   maxLoops?: number;
   complexityProfile?: ToolComplexityProfile;
@@ -182,6 +182,26 @@ export interface PendingApprovalCall {
   name: string;
   args: Record<string, any>;
   diff?: FileDiffData;
+}
+
+export interface BatchReviewFile {
+  path: string;
+  before: string | null;
+  after: string | null;
+  revert: boolean;
+}
+
+export interface CheckpointFileSnapshot {
+  path: string;
+  before: string | null; // null = file did not exist before this prompt
+}
+
+export interface CheckpointEntry {
+  promptId: string;
+  promptText: string;
+  timestamp: number;
+  sessionId: string;
+  snapshots: CheckpointFileSnapshot[];
 }
 
 export interface TerminalInputHistoryItem {
