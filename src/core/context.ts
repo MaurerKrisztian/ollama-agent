@@ -253,6 +253,19 @@ export class ContextManager {
   }
 
   /**
+   * Remove specific messages by their IDs.
+   * Used to evict stale tool-result/assistant-request pairs (e.g. superseded read_file calls)
+   * so a fresh execution can replace them without duplicating context.
+   */
+  public removeMessagesByIds(ids: Set<string>): void {
+    if (ids.size === 0) return;
+    this.messages = this.messages.filter((m) => !ids.has(m.id));
+    if (this.pruningConfig.enabled) {
+      this.applyPruning();
+    }
+  }
+
+  /**
    * Applies enabled context pruning strategies (Superseded File Reads, Post-Mutation Invalidation, and Tool Output TTL)
    */
   public applyPruning(): void {

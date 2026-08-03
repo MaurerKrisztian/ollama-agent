@@ -202,6 +202,7 @@ export interface CheckpointEntry {
   timestamp: number;
   sessionId: string;
   snapshots: CheckpointFileSnapshot[];
+  snapshotPaths?: string[];
 }
 
 export interface TerminalInputHistoryItem {

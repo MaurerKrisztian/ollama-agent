@@ -1583,7 +1583,7 @@ app.post('/api/chat', async (req, res) => {
       const existing = sessionCheckpoints.get(sessionId) ?? [];
       existing.push(currentCheckpoint);
       sessionCheckpoints.set(sessionId, existing);
-      sendEvent('checkpoint_saved', { promptId, promptText: currentCheckpoint.promptText, timestamp: currentCheckpoint.timestamp, snapshotCount: currentCheckpoint.snapshots.length });
+      sendEvent('checkpoint_saved', { promptId, promptText: currentCheckpoint.promptText, timestamp: currentCheckpoint.timestamp, snapshotCount: currentCheckpoint.snapshots.length, snapshotPaths: currentCheckpoint.snapshots.map((s) => s.path) });
     }
 
     sendEvent('context_update', sessionAgent.getContextManager().getContextInfo());

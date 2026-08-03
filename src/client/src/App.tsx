@@ -86,6 +86,7 @@ export const App: React.FC = () => {
   const [isSubmittingBatchReview, setIsSubmittingBatchReview] = useState(false);
   const [checkpoints, setCheckpoints] = useState<CheckpointEntry[]>([]);
   const [isReverting, setIsReverting] = useState(false);
+  const [rewindConfirm, setRewindConfirm] = useState<{ messageId: string; promptId: string; snapshotPaths: string[] } | null>(null);
   const [systemMetrics, setSystemMetrics] = useState<SystemMetrics | null>(null);
   const [terminalSessions, setTerminalSessions] = useState<TerminalSessionInfo[]>([]);
   const [terminalSessionsModalOpen, setTerminalSessionsModalOpen] = useState(false);
@@ -124,6 +125,7 @@ export const App: React.FC = () => {
           timestamp: eventData.timestamp,
           sessionId: activeSessionId,
           snapshots: [],
+          snapshotPaths: eventData.snapshotPaths ?? [],
         },
       ]);
     } else if (eventType === 'tool_start') {
@@ -550,15 +552,27 @@ export const App: React.FC = () => {
     }
   };
 
-  const handleRewindToMessage = async (messageId: string) => {
+  const handleRewindToMessage = (messageId: string) => {
+    // Look up the checkpoint matching this message to find affected files
+    const checkpoint = checkpoints.find((c) => c.promptId === messageId);
+    const paths = checkpoint?.snapshotPaths ?? [];
+    setRewindConfirm({ messageId, promptId: messageId, snapshotPaths: paths });
+  };
+
+  const handleConfirmRewind = async () => {
+    if (!rewindConfirm) return;
+    const { messageId, promptId, snapshotPaths } = rewindConfirm;
+    setRewindConfirm(null);
+    setIsReverting(true);
     try {
-      const res = await fetch('/api/chat/rewind', {
+      // 1. Rewind conversation context
+      const rewindRes = await fetch('/api/chat/rewind', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ messageId, sessionId: activeSessionId }),
       });
-      if (res.ok) {
-        const data = await res.json();
+      if (rewindRes.ok) {
+        const data = await rewindRes.json();
         if (data.success) {
           setContextInfo(data.context);
           setMessages((prev) => {
@@ -567,7 +581,20 @@ export const App: React.FC = () => {
           });
         }
       }
+      // 2. Revert files if there are any snapshots
+      if (snapshotPaths.length > 0) {
+        await fetch('/api/chat/revert', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionId: activeSessionId, promptId }),
+        });
+        setCheckpoints((prev) => {
+          const idx = prev.findIndex((c) => c.promptId === promptId);
+          return idx >= 0 ? prev.slice(0, idx + 1) : prev;
+        });
+      }
     } catch (_) {}
+    setIsReverting(false);
   };
 
   const handleCompactContext = async () => {
@@ -1038,6 +1065,91 @@ export const App: React.FC = () => {
         onRefreshSessions={fetchTerminalSessions}
         onTerminateSession={handleTerminateTerminalSession}
       />
+
+      {/* Rewind confirmation modal */}
+      {rewindConfirm && (
+        <div
+          style={{
+            position: 'fixed', inset: 0, zIndex: 9999,
+            background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}
+          onClick={() => setRewindConfirm(null)}
+        >
+          <div
+            style={{
+              background: 'var(--bg-secondary, #1e1e2e)',
+              border: '1px solid var(--border, #313244)',
+              borderRadius: '12px',
+              padding: '24px',
+              maxWidth: '480px',
+              width: '90%',
+              boxShadow: '0 24px 48px rgba(0,0,0,0.5)',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 style={{ margin: '0 0 8px', fontSize: '16px', fontWeight: 600, color: 'var(--text-primary, #cdd6f4)' }}>
+              ⏪ Rewind to this prompt?
+            </h3>
+            <p style={{ margin: '0 0 16px', fontSize: '13px', color: 'var(--text-secondary, #a6adc8)' }}>
+              The conversation context will be rewound. All messages after this point will be removed.
+            </p>
+            {rewindConfirm.snapshotPaths.length > 0 ? (
+              <>
+                <p style={{ margin: '0 0 8px', fontSize: '13px', color: 'var(--text-secondary, #a6adc8)' }}>
+                  The following {rewindConfirm.snapshotPaths.length} file{rewindConfirm.snapshotPaths.length !== 1 ? 's' : ''} will also be reverted to their state before this prompt:
+                </p>
+                <ul style={{
+                  margin: '0 0 20px', padding: '10px 14px',
+                  background: 'var(--bg-tertiary, #181825)',
+                  borderRadius: '8px', listStyle: 'none',
+                  maxHeight: '160px', overflowY: 'auto',
+                  border: '1px solid var(--border, #313244)',
+                }}>
+                  {rewindConfirm.snapshotPaths.map((p) => (
+                    <li key={p} style={{
+                      fontSize: '12px', fontFamily: 'monospace',
+                      color: 'var(--text-accent, #89b4fa)',
+                      padding: '2px 0',
+                      wordBreak: 'break-all',
+                    }}>
+                      {p}
+                    </li>
+                  ))}
+                </ul>
+              </>
+            ) : (
+              <p style={{ margin: '0 0 20px', fontSize: '13px', color: 'var(--text-muted, #6c7086)', fontStyle: 'italic' }}>
+                No file changes will be reverted (no files were modified by this prompt).
+              </p>
+            )}
+            <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+              <button
+                onClick={() => setRewindConfirm(null)}
+                style={{
+                  padding: '8px 16px', borderRadius: '8px', border: '1px solid var(--border, #313244)',
+                  background: 'transparent', color: 'var(--text-secondary, #a6adc8)',
+                  fontSize: '13px', cursor: 'pointer',
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmRewind}
+                disabled={isReverting}
+                style={{
+                  padding: '8px 16px', borderRadius: '8px', border: 'none',
+                  background: 'var(--accent-warn, #f38ba8)', color: '#11111b',
+                  fontSize: '13px', fontWeight: 600, cursor: isReverting ? 'not-allowed' : 'pointer',
+                  opacity: isReverting ? 0.6 : 1,
+                }}
+              >
+                {isReverting ? 'Reverting…' : rewindConfirm.snapshotPaths.length > 0 ? 'Rewind & Revert Files' : 'Rewind'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

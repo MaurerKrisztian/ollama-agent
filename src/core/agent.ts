@@ -865,6 +865,45 @@ ${conversationText}`;
             automaticReadResult?.error &&
             /ENOENT|no such file or directory|File not found/i.test(automaticReadResult.error);
 
+          // For repeated identical read_file calls: prune stale results from context and
+          // reset counters so the main dispatch ternary treats the call as fresh.
+          if (
+            call.name === 'read_file' &&
+            this.config.preventRepeatedCalls !== false &&
+            (executedCallFingerprintsThisTurn.get(callFingerprint) || 0) +
+              (failedToolCalls.get(callFingerprint) || 0) >= 2
+          ) {
+            const allMessages = this.contextManager.getMessages();
+            const idsToRemove = new Set<string>();
+
+            for (const msg of allMessages) {
+              if (msg.role === 'assistant' && msg.tool_calls) {
+                const matchingCalls = msg.tool_calls.filter(
+                  (tc) => JSON.stringify([tc.name, tc.arguments]) === callFingerprint,
+                );
+                if (matchingCalls.length > 0) {
+                  // Only remove the assistant message if ALL of its tool calls are this
+                  // identical read_file — otherwise we'd orphan other tool results.
+                  if (msg.tool_calls.length === matchingCalls.length) {
+                    idsToRemove.add(msg.id);
+                  }
+                  // Always remove the corresponding tool-result messages.
+                  for (const tc of matchingCalls) {
+                    const resultMsg = allMessages.find(
+                      (m) => m.role === 'tool' && m.tool_call_id === tc.id,
+                    );
+                    if (resultMsg) idsToRemove.add(resultMsg.id);
+                  }
+                }
+              }
+            }
+
+            this.contextManager.removeMessagesByIds(idsToRemove);
+            // Reset counters so the main ternary below no longer considers this repeated.
+            executedCallFingerprintsThisTurn.delete(callFingerprint);
+            failedToolCalls.delete(callFingerprint);
+          }
+
           const toolResult =
             mutationPath && !hasReadMutationTarget
               ? automaticReadResult?.error
