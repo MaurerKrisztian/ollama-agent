@@ -1,5 +1,8 @@
-import express from 'express';
-import cors from 'cors';
+import type { Request, Response, NextFunction } from 'express';
+import { createRequire } from 'node:module';
+const require = createRequire(import.meta.url);
+const express: typeof import('express') = require('express');
+const cors: typeof import('cors') = require('cors');
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
@@ -1124,7 +1127,15 @@ app.post('/api/chat/revert-files', async (req, res) => {
 // GET /api/chat/checkpoints - Return checkpoint list for a session
 app.get('/api/chat/checkpoints', (req, res) => {
   const sessionId = typeof req.query.sessionId === 'string' ? req.query.sessionId : '';
-  res.json({ success: true, checkpoints: sessionCheckpoints.get(sessionId) ?? [] });
+  const entries = sessionCheckpoints.get(sessionId) ?? [];
+  const formatted = entries.map((e) => ({
+    promptId: e.promptId,
+    promptText: e.promptText,
+    timestamp: e.timestamp,
+    snapshotPaths: e.snapshots.map((s) => s.path),
+    snapshotCount: e.snapshots.length,
+  }));
+  res.json({ success: true, checkpoints: formatted });
 });
 
 // POST /api/chat/revert - Revert ALL files to the state before a given promptId (full checkpoint revert)
@@ -1138,12 +1149,12 @@ app.post('/api/chat/revert', async (req, res) => {
   if (targetIdx === -1) {
     return res.status(404).json({ success: false, error: 'Checkpoint not found.' });
   }
-  // Collect all snapshots AFTER the target checkpoint (in reverse order so later writes win)
-  const toRevert = entries.slice(targetIdx + 1).flatMap((e) => e.snapshots);
-  // Deduplicate: keep the latest snapshot per path (first seen when reversed)
+  // Collect all snapshots at and after the target checkpoint (in reverse order so earliest pre-prompt state wins)
+  const toRevert = entries.slice(targetIdx).flatMap((e) => e.snapshots);
+  // Deduplicate: keep the earliest snapshot per path when iterating forward (earliest pre-prompt state)
   const seen = new Set<string>();
   const unique: FileSnapshot[] = [];
-  for (const snap of [...toRevert].reverse()) {
+  for (const snap of toRevert) {
     if (!seen.has(snap.path)) {
       seen.add(snap.path);
       unique.push(snap);
@@ -1163,8 +1174,8 @@ app.post('/api/chat/revert', async (req, res) => {
       errors.push(`${snap.path}: ${err.message}`);
     }
   }
-  // Remove checkpoints after the target
-  sessionCheckpoints.set(sessionId, entries.slice(0, targetIdx + 1));
+  // Remove checkpoints at and after the target
+  sessionCheckpoints.set(sessionId, entries.slice(0, targetIdx));
   if (errors.length > 0) {
     return res.status(207).json({ success: false, errors, reverted: unique.length - errors.length });
   }
@@ -1534,6 +1545,9 @@ app.post('/api/chat', async (req, res) => {
         sendEvent('thinking_chunk', { chunk: thinkingChunk });
       },
       onMessageAdded: (msg) => {
+        if (msg.role === 'user' && currentCheckpoint.promptId !== msg.id) {
+          currentCheckpoint.promptId = msg.id;
+        }
         saveChatSession(sessionId, sessionAgent);
         sendEvent('message_added', msg);
       },
@@ -1575,16 +1589,20 @@ app.post('/api/chat', async (req, res) => {
           return { path: snap.path, before: snap.before, after };
         }),
       );
-      sendEvent('batch_review_ready', { promptId, files: changedFiles });
+      sendEvent('batch_review_ready', { promptId: currentCheckpoint.promptId, files: changedFiles });
     }
 
-    // --- Save checkpoint (only if files were actually touched) ---
-    if (currentCheckpoint.snapshots.length > 0) {
-      const existing = sessionCheckpoints.get(sessionId) ?? [];
-      existing.push(currentCheckpoint);
-      sessionCheckpoints.set(sessionId, existing);
-      sendEvent('checkpoint_saved', { promptId, promptText: currentCheckpoint.promptText, timestamp: currentCheckpoint.timestamp, snapshotCount: currentCheckpoint.snapshots.length, snapshotPaths: currentCheckpoint.snapshots.map((s) => s.path) });
-    }
+    // --- Save checkpoint ---
+    const existing = sessionCheckpoints.get(sessionId) ?? [];
+    existing.push(currentCheckpoint);
+    sessionCheckpoints.set(sessionId, existing);
+    sendEvent('checkpoint_saved', {
+      promptId: currentCheckpoint.promptId,
+      promptText: currentCheckpoint.promptText,
+      timestamp: currentCheckpoint.timestamp,
+      snapshotCount: currentCheckpoint.snapshots.length,
+      snapshotPaths: currentCheckpoint.snapshots.map((s) => s.path),
+    });
 
     sendEvent('context_update', sessionAgent.getContextManager().getContextInfo());
     sendEvent('done', { content: finalContent });

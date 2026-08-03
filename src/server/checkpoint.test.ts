@@ -50,13 +50,13 @@ async function applyRevert(
     throw new Error(`Checkpoint '${targetPromptId}' not found`);
   }
 
-  // All snapshots AFTER target (we are undoing these)
-  const toRevert = entries.slice(targetIdx + 1).flatMap((e) => e.snapshots);
+  // All snapshots AT AND AFTER target (we are undoing these to restore pre-target state)
+  const toRevert = entries.slice(targetIdx).flatMap((e) => e.snapshots);
 
-  // Deduplicate: keep the latest (first seen when reversed)
+  // Deduplicate: keep the earliest snapshot per path (first seen when iterating forward)
   const seen = new Set<string>();
   const unique: FileSnapshot[] = [];
-  for (const snap of [...toRevert].reverse()) {
+  for (const snap of toRevert) {
     if (!seen.has(snap.path)) {
       seen.add(snap.path);
       unique.push(snap);
@@ -77,7 +77,7 @@ async function applyRevert(
     }
   }
 
-  const remaining = entries.slice(0, targetIdx + 1);
+  const remaining = entries.slice(0, targetIdx);
   return { reverted: remaining, errors, revertedCount: unique.length };
 }
 
@@ -212,8 +212,8 @@ test('revert restores a file when there is a later checkpoint that modified it',
     // Simulate what p2 wrote to disk
     await fs.writeFile(filePath, 'modified', 'utf8');
 
-    // Revert to p1 — should undo p2 and restore 'original'
-    const { revertedCount, reverted } = await applyRevert(entries, 'p1');
+    // Revert p2 — should undo p2 and restore 'original'
+    const { revertedCount, reverted } = await applyRevert(entries, 'p2');
 
     const content = await fs.readFile(filePath, 'utf8');
     assert.equal(content, 'original', 'file should be restored to its pre-p2 state');
@@ -222,7 +222,7 @@ test('revert restores a file when there is a later checkpoint that modified it',
   });
 });
 
-test('revert to the only checkpoint (no snapshots after it) is a no-op', async () => {
+test('revert to a prompt with no snapshots is a no-op', async () => {
   await withTempDir(async (dir) => {
     const filePath = path.join(dir, 'src', 'index.ts');
     await fs.mkdir(path.dirname(filePath), { recursive: true });
@@ -231,19 +231,19 @@ test('revert to the only checkpoint (no snapshots after it) is a no-op', async (
     const entries: CheckpointEntry[] = [
       {
         promptId: 'p1',
-        promptText: 'Rename function',
+        promptText: 'Question prompt',
         timestamp: 1,
-        snapshots: [{ path: filePath, before: 'original' }],
+        snapshots: [],
       },
     ];
 
-    // p1 is the only checkpoint — nothing after it to undo
+    // p1 has no snapshots — nothing to undo
     const { revertedCount, reverted } = await applyRevert(entries, 'p1');
 
     const content = await fs.readFile(filePath, 'utf8');
-    assert.equal(content, 'on-disk', 'file should not be touched when reverting to the only checkpoint');
+    assert.equal(content, 'on-disk', 'file should not be touched when reverting to prompt with no snapshots');
     assert.equal(revertedCount, 0, 'no snapshots to revert');
-    assert.equal(reverted.length, 1, 'p1 remains');
+    assert.equal(reverted.length, 0, 'p1 removed');
   });
 });
 
@@ -270,7 +270,7 @@ test('revert removes a newly created file (before === null)', async () => {
 
     await fs.writeFile(filePath, 'new content', 'utf8');
 
-    await applyRevert(entries, 'p1');
+    await applyRevert(entries, 'p2');
 
     let exists = true;
     try {
@@ -320,17 +320,14 @@ test('revert across multiple prompts restores each file to its earliest captured
     await fs.writeFile(fileA, 'a-after-p3', 'utf8');
     await fs.writeFile(fileB, 'b-after-p2', 'utf8');
 
-    // Revert to p0: should undo p1, p2, p3
-    const { reverted, revertedCount } = await applyRevert(entries, 'p0');
+    // Revert to p1: should undo p1, p2, p3
+    const { reverted, revertedCount } = await applyRevert(entries, 'p1');
 
     assert.equal(reverted.length, 1, 'only p0 should remain');
     assert.equal(revertedCount, 2, 'two unique files were affected');
 
-    // a.ts: latest snapshot for a is p3 (a-after-p1 → we revert to that)
-    // Dedup reverses the slice [p1,p2,p3] → reversed [p3,p2,p1]
-    // First unique a.ts seen from reversed = p3's snapshot (a-after-p1)
     const aContent = await fs.readFile(fileA, 'utf8');
-    assert.equal(aContent, 'a-after-p1', 'file A should be at the state captured in p3 snapshot');
+    assert.equal(aContent, 'a-original', 'file A should be restored to its pre-p1 original state');
 
     const bContent = await fs.readFile(fileB, 'utf8');
     assert.equal(bContent, 'b-original', 'file B should be restored to its p2 snapshot value');
@@ -348,15 +345,15 @@ test('revert throws when promptId is not found', async () => {
   );
 });
 
-test('revert of the last checkpoint (nothing after it) is a no-op', async () => {
+test('revert of a checkpoint with 0 snapshots is a no-op on disk', async () => {
   const entries: CheckpointEntry[] = [
     { promptId: 'p1', promptText: '', timestamp: 1, snapshots: [{ path: '/tmp/x', before: 'old' }] },
     { promptId: 'p2', promptText: '', timestamp: 2, snapshots: [] },
   ];
 
   const { revertedCount, reverted } = await applyRevert(entries, 'p2');
-  assert.equal(revertedCount, 0, 'nothing after p2 to revert');
-  assert.equal(reverted.length, 2, 'both checkpoints remain');
+  assert.equal(revertedCount, 0, 'nothing in p2 to revert');
+  assert.equal(reverted.length, 1, 'p1 remains');
 });
 
 // ---------------------------------------------------------------------------

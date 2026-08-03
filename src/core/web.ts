@@ -1,8 +1,10 @@
 import dns from 'node:dns/promises';
 import net from 'node:net';
+import { createRequire } from 'node:module';
+const require = createRequire(import.meta.url);
 import { Readability } from '@mozilla/readability';
 import { JSDOM, VirtualConsole } from 'jsdom';
-import TurndownService from 'turndown';
+const TurndownService = require('turndown');
 
 const USER_AGENT = 'LocalModelChat/1.1 (+https://github.com/local-model-chat)';
 const REQUEST_TIMEOUT_MS = 12_000;

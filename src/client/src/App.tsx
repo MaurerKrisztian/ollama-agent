@@ -323,6 +323,7 @@ export const App: React.FC = () => {
               setActiveToolCall(null);
             }
             sessionStorage.setItem('local-model-chat.activeSessionId', initialSessionId);
+            fetchCheckpoints(initialSessionId);
           }
         }
       }
@@ -451,20 +452,29 @@ export const App: React.FC = () => {
     const body: Record<string, string> = { ollamaHost };
     if (ollamaToken !== undefined) body.ollamaToken = ollamaToken;
 
+    const parseResponse = async (res: Response) => {
+      const text = await res.text();
+      try {
+        return text ? JSON.parse(text) : {};
+      } catch (_) {
+        return {};
+      }
+    };
+
     const configRes = await fetch('/api/config', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
-    const configData = await configRes.json();
+    const configData = await parseResponse(configRes);
     if (!configRes.ok || !configData.success) {
-      throw new Error(configData.error || 'Could not save Ollama connection.');
+      throw new Error(configData.error || `Could not save Ollama connection (${configRes.status}).`);
     }
 
     const modelsRes = await fetch('/api/models');
-    const modelsData = await modelsRes.json();
+    const modelsData = await parseResponse(modelsRes);
     if (!modelsRes.ok || !modelsData.success) {
-      throw new Error(modelsData.error || 'Saved, but could not connect to the Ollama server.');
+      throw new Error(modelsData.error || `Could not connect to Ollama server at ${ollamaHost}`);
     }
 
     setConfig(configData.config);
@@ -493,6 +503,19 @@ export const App: React.FC = () => {
     }
   };
 
+  const fetchCheckpoints = async (sid: string) => {
+    if (!sid) return;
+    try {
+      const res = await fetch(`/api/chat/checkpoints?sessionId=${encodeURIComponent(sid)}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && Array.isArray(data.checkpoints)) {
+          setCheckpoints(data.checkpoints);
+        }
+      }
+    } catch (_) {}
+  };
+
   const handleSelectChatSession = async (sessionId: string) => {
     if (isGenerating || sessionId === activeSessionId) return;
     const res = await fetch(`/api/chat/sessions/${encodeURIComponent(sessionId)}/activate`, { method: 'POST' });
@@ -518,10 +541,10 @@ export const App: React.FC = () => {
     const url = new URL(window.location.href);
     url.searchParams.set('session', data.activeSessionId || sessionId);
     window.history.replaceState(null, '', url);
-    // Reset per-session state
+    // Reset per-session state and fetch checkpoints
     setBatchReview(null);
     setBatchReviewPromptId(null);
-    setCheckpoints([]);
+    fetchCheckpoints(data.activeSessionId || sessionId);
   };
 
   const handleRenameChatSession = async (sessionId: string, title: string) => {
@@ -552,10 +575,25 @@ export const App: React.FC = () => {
     }
   };
 
-  const handleRewindToMessage = (messageId: string) => {
-    // Look up the checkpoint matching this message to find affected files
-    const checkpoint = checkpoints.find((c) => c.promptId === messageId);
-    const paths = checkpoint?.snapshotPaths ?? [];
+  const handleRewindToMessage = async (messageId: string) => {
+    let currentCheckpoints = checkpoints;
+    try {
+      const cpRes = await fetch(`/api/chat/checkpoints?sessionId=${encodeURIComponent(activeSessionId)}`);
+      if (cpRes.ok) {
+        const cpData = await cpRes.json();
+        if (cpData.success && Array.isArray(cpData.checkpoints)) {
+          currentCheckpoints = cpData.checkpoints;
+          setCheckpoints(cpData.checkpoints);
+        }
+      }
+    } catch (_) {}
+
+    const targetIdx = currentCheckpoints.findIndex((c) => c.promptId === messageId);
+    let paths: string[] = [];
+    if (targetIdx !== -1) {
+      const affectedCheckpoints = currentCheckpoints.slice(targetIdx);
+      paths = Array.from(new Set(affectedCheckpoints.flatMap((c) => c.snapshotPaths || [])));
+    }
     setRewindConfirm({ messageId, promptId: messageId, snapshotPaths: paths });
   };
 
@@ -565,7 +603,15 @@ export const App: React.FC = () => {
     setRewindConfirm(null);
     setIsReverting(true);
     try {
-      // 1. Rewind conversation context
+      // 1. Revert files first if there are any file snapshots
+      if (snapshotPaths.length > 0) {
+        await fetch('/api/chat/revert', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionId: activeSessionId, promptId }),
+        });
+      }
+      // 2. Rewind conversation context
       const rewindRes = await fetch('/api/chat/rewind', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -581,20 +627,12 @@ export const App: React.FC = () => {
           });
         }
       }
-      // 2. Revert files if there are any snapshots
-      if (snapshotPaths.length > 0) {
-        await fetch('/api/chat/revert', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ sessionId: activeSessionId, promptId }),
-        });
-        setCheckpoints((prev) => {
-          const idx = prev.findIndex((c) => c.promptId === promptId);
-          return idx >= 0 ? prev.slice(0, idx + 1) : prev;
-        });
-      }
-    } catch (_) {}
-    setIsReverting(false);
+      fetchCheckpoints(activeSessionId);
+    } catch (err: any) {
+      alert(`Rewind failed: ${err?.message || err}`);
+    } finally {
+      setIsReverting(false);
+    }
   };
 
   const handleCompactContext = async () => {
