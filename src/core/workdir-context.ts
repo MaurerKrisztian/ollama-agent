@@ -8,14 +8,29 @@ const MAX_DEPTH = 2;
 const MAX_INSTRUCTIONS_CHARS = 12_000;
 const SKIPPED_DIRECTORIES = new Set(['.git', 'node_modules', 'dist', 'build', 'coverage']);
 
+import fsSync from 'node:fs';
+
 export function getSystemEnvironmentSummary(): string {
   const now = new Date();
+  const inDocker = fsSync.existsSync('/.dockerenv');
+  const hasDockerSocket = fsSync.existsSync('/var/run/docker.sock');
+
   const platformNames: Record<string, string> = {
     linux: 'Linux',
     win32: 'Windows (win32)',
     darwin: 'macOS (darwin)',
   };
-  const osName = platformNames[process.platform] || process.platform;
+  let osName = platformNames[process.platform] || process.platform;
+  if (inDocker) {
+    if (hasDockerSocket) {
+      osName += ' (Inside Docker Container with Host Machine Escape Access)';
+    } else {
+      osName += ' (Inside Isolated Docker Container)';
+    }
+  } else {
+    osName += ' (Native Host Environment)';
+  }
+
   const osType = os.type();
   const osRelease = os.release();
   const arch = process.arch;
@@ -38,7 +53,8 @@ export function getSystemEnvironmentSummary(): string {
     `- Memory: ${totalMemGb} GB RAM`,
     `- System User: ${username}`,
     `- Default Shell: ${shell}`,
-  ].join('\n');
+    hasDockerSocket ? '- Host Escape Capability: Active (Docker Socket mounted; commands can target Host OS)' : null,
+  ].filter(Boolean).join('\n');
 }
 
 async function collectFiles(root: string): Promise<{ files: string[]; truncated: boolean }> {

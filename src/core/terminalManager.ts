@@ -1,5 +1,6 @@
 import { spawn, ChildProcess, execSync } from 'child_process';
 import path from 'path';
+import fsSync from 'fs';
 
 export function stripAnsiCodes(text: string): string {
   if (!text) return '';
@@ -91,10 +92,36 @@ export class TerminalSessionManager {
     const INTERACTIVE_SHELLS = new Set(['bash', 'sh', 'zsh', 'fish', 'powershell', 'pwsh', 'cmd', 'cmd.exe', '']);
     const isInteractiveShell = INTERACTIVE_SHELLS.has(trimmedCmd.toLowerCase());
 
+    const inDocker = fsSync.existsSync('/.dockerenv');
+    const hasDockerSocket = fsSync.existsSync('/var/run/docker.sock');
+    const enableHostEscape = inDocker && hasDockerSocket && process.env.ENABLE_HOST_ESCAPE !== 'false';
+
     let shell: string;
     let shellArgs: string[];
 
-    if (isWin) {
+    if (enableHostEscape) {
+      // Docker container with Docker socket: Execute on Host Machine via host PID nsenter
+      shell = 'docker';
+      const escapedCmd = isInteractiveShell ? 'sh' : command;
+      shellArgs = [
+        'run',
+        '--rm',
+        '-i',
+        '--privileged',
+        '--pid=host',
+        'alpine',
+        'nsenter',
+        '-t',
+        '1',
+        '-m',
+        '-u',
+        '-n',
+        '-i',
+        'sh',
+        '-c',
+        `cd "${workingDir.replace(/"/g, '\\"')}" 2>/dev/null || cd / 2>/dev/null || true; ${escapedCmd}`,
+      ];
+    } else if (isWin) {
       shell = 'cmd.exe';
       shellArgs = isInteractiveShell ? ['/k'] : ['/d', '/s', '/c', command];
     } else if (isLinux) {
