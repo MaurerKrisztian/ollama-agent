@@ -457,6 +457,47 @@ test('buildPatchFileDiff handles multi-hunk patch diffs correctly', () => {
   assert.equal(added[1].content, 'function bar2() {}');
 });
 
+test('edit_file unescapes literal \\n in target_text and replacement_text as fallback', async () => {
+  await withWorkspace(async (workspace, executor) => {
+    await fs.writeFile(
+      path.join(workspace, 'app.js'),
+      'function render() {\n  todoList.innerHTML = filtered.map(t => `\n    <li>${t.text}</li>\n  `).join("");\n}\n'
+    );
+
+    const result = await executor.executeTool('edit_file', {
+      relative_path: 'app.js',
+      target_text: '  todoList.innerHTML = filtered.map(t => `\\n    <li>${t.text}</li>\\n  `).join("");',
+      replacement_text: '  todoList.innerHTML = filtered.map(t => `\\n    <li class="item">${t.text}</li>\\n  `).join("");',
+    });
+
+    assert.equal(result.success, true);
+    const updated = await fs.readFile(path.join(workspace, 'app.js'), 'utf-8');
+    assert.match(updated, /<li class="item">\${t\.text}<\/li>/);
+  });
+});
+
+test('edit_file falls back to unbounded search if start_line/end_line bounds fail to match', async () => {
+  await withWorkspace(async (workspace, executor) => {
+    await fs.writeFile(
+      path.join(workspace, 'app.js'),
+      'line 1\nline 2\nline 3\nline 4\nline 5\nconst target = "hello";\n'
+    );
+
+    const result = await executor.executeTool('edit_file', {
+      relative_path: 'app.js',
+      start_line: 1,
+      end_line: 3, // Target is actually at line 6
+      target_text: 'const target = "hello";',
+      replacement_text: 'const target = "world";',
+    });
+
+    assert.equal(result.success, true);
+    const updated = await fs.readFile(path.join(workspace, 'app.js'), 'utf-8');
+    assert.match(updated, /const target = "world";/);
+  });
+});
+
+
 
 
 

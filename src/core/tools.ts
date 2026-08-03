@@ -951,6 +951,7 @@ export class ToolExecutor {
     targetText: string,
     startLine?: number | string,
     endLine?: number | string,
+    isFallback: boolean = false,
   ): string | null {
     let searchContent = content;
 
@@ -1031,6 +1032,29 @@ export class ToolExecutor {
           (trimmedTarget.includes('computeHash') && line.includes('computeHash'))
         ) {
           return line;
+        }
+      }
+    }
+
+    // 5. Fallback Normalization: ONLY run if primary search fails (returns null)
+    if (!isFallback) {
+      // Fallback 5a: Try unescaping literal '\\n' sequences in targetText
+      if (targetText.includes('\\n')) {
+        const unescaped = targetText.replace(/\\n/g, '\n');
+        const match = this.findMatchingTargetCode(content, unescaped, startLine, endLine, true);
+        if (match) return match;
+      }
+
+      // Fallback 5b: If startLine/endLine bounds were specified, try searching full file without bounds
+      if (startLine !== undefined || endLine !== undefined) {
+        const unboundedMatch = this.findMatchingTargetCode(content, targetText, undefined, undefined, true);
+        if (unboundedMatch) return unboundedMatch;
+
+        // Fallback 5c: Try both unescaping '\\n' AND searching without line bounds
+        if (targetText.includes('\\n')) {
+          const unescaped = targetText.replace(/\\n/g, '\n');
+          const combinedMatch = this.findMatchingTargetCode(content, unescaped, undefined, undefined, true);
+          if (combinedMatch) return combinedMatch;
         }
       }
     }
