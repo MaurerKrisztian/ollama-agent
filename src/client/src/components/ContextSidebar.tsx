@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import { X, Copy, Check, FileJson, AlignLeft, Layers, FolderTree, RefreshCw, Cpu, Sparkles, Scissors, SlidersHorizontal, FolderOpen, Settings } from 'lucide-react';
+import { X, Copy, Check, FileJson, AlignLeft, Layers, FolderTree, RefreshCw, Cpu, Sparkles, Scissors, SlidersHorizontal, FolderOpen, Settings, BookOpen } from 'lucide-react';
 import { AgentConfig, ContextInfo, ContextPruningConfig } from '../types';
 
 interface ContextSidebarProps {
@@ -112,7 +112,7 @@ export const ContextSidebar: React.FC<ContextSidebarProps> = ({
   onOpenWorkingDirPicker,
   onToggleWorkingDirInfo,
 }) => {
-  const [activeTab, setActiveTab] = useState<'formatted' | 'json' | 'workdir' | 'pruning' | 'settings'>('formatted');
+  const [activeTab, setActiveTab] = useState<'formatted' | 'json' | 'workdir' | 'pruning' | 'settings' | 'skills'>('formatted');
   const [copied, setCopied] = useState(false);
   const [workdirContext, setWorkdirContext] = useState('');
   const [workdirEnabled, setWorkdirEnabled] = useState(false);
@@ -122,6 +122,58 @@ export const ContextSidebar: React.FC<ContextSidebarProps> = ({
 
   const [pruningConfig, setPruningConfig] = useState<ContextPruningConfig | null>(null);
   const [pruningLoading, setPruningLoading] = useState(false);
+
+  interface SkillItem {
+    name: string;
+    description: string;
+    path: string;
+  }
+  const [skills, setSkills] = useState<SkillItem[]>([]);
+  const [skillsLoading, setSkillsLoading] = useState(false);
+  const [skillsError, setSkillsError] = useState('');
+  const [expandedSkillName, setExpandedSkillName] = useState<string | null>(null);
+  const [expandedSkillContent, setExpandedSkillContent] = useState<string>('');
+  const [expandedSkillLoading, setExpandedSkillLoading] = useState(false);
+
+  const fetchSkills = useCallback(async () => {
+    setSkillsLoading(true);
+    setSkillsError('');
+    try {
+      const res = await fetch('/api/skills');
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not load skills.');
+      setSkills(Array.isArray(data.skills) ? data.skills : []);
+    } catch (err: any) {
+      setSkillsError(err.message);
+    } finally {
+      setSkillsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (isOpen && activeTab === 'skills') void fetchSkills();
+  }, [isOpen, activeTab, fetchSkills]);
+
+  const handleExpandSkill = useCallback(async (name: string) => {
+    if (expandedSkillName === name) {
+      setExpandedSkillName(null);
+      setExpandedSkillContent('');
+      return;
+    }
+    setExpandedSkillLoading(true);
+    try {
+      const res = await fetch(`/api/skills/${encodeURIComponent(name)}/raw`);
+      if (!res.ok) throw new Error('Could not load skill content.');
+      const data = await res.json();
+      setExpandedSkillContent(data.content || '');
+      setExpandedSkillName(name);
+    } catch {
+      setExpandedSkillContent('Failed to load skill instructions.');
+      setExpandedSkillName(name);
+    } finally {
+      setExpandedSkillLoading(false);
+    }
+  }, [expandedSkillName]);
 
   const fetchPruningConfig = useCallback(async () => {
     setPruningLoading(true);
@@ -455,6 +507,25 @@ export const ContextSidebar: React.FC<ContextSidebarProps> = ({
             <Settings size={13} />
             <span>Settings</span>
           </button>
+          <button
+            onClick={() => setActiveTab('skills')}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+              padding: '5px 8px',
+              borderRadius: '6px',
+              border: 'none',
+              fontSize: '0.75rem',
+              fontWeight: 500,
+              cursor: 'pointer',
+              background: activeTab === 'skills' ? 'var(--accent-primary)' : 'transparent',
+              color: activeTab === 'skills' ? '#fff' : 'var(--text-muted)',
+            }}
+          >
+            <BookOpen size={13} />
+            <span>Skills</span>
+          </button>
         </div>
 
         <div style={{ display: 'flex', gap: '4px' }}>
@@ -669,6 +740,84 @@ export const ContextSidebar: React.FC<ContextSidebarProps> = ({
               </div>
             </div>
           )
+        ) : activeTab === 'skills' ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div>
+                <div style={{ fontWeight: 600, color: '#fff', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <BookOpen size={16} color="var(--accent-primary)" />
+                  Active Skills
+                </div>
+                <div style={{ fontSize: '0.725rem', color: 'var(--text-muted)', marginTop: '2px' }}>Skills loaded from workspace and bundled sources</div>
+              </div>
+              {skillsLoading && (
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Loading…</span>
+              )}
+            </div>
+            {skillsError ? (
+              <div style={{ padding: '12px', background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: '8px', color: '#fca5a5', fontSize: '0.8rem' }}>
+                {skillsError}
+              </div>
+            ) : skills.length === 0 ? (
+              <div style={{ padding: '24px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.85rem', lineHeight: 1.5 }}>
+                No workspace or bundled skills found.<br />
+                <span style={{ fontSize: '0.75rem' }}>Create a <code style={{ background: 'rgba(255,255,255,0.06)', padding: '2px 5px', borderRadius: '4px' }}>.agent/skills/&lt;name&gt;/SKILL.md</code> to add one.</span>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                {skills.map((skill, idx) => (
+                  <div
+                    key={idx}
+                    onClick={() => handleExpandSkill(skill.name)}
+                    style={{
+                      padding: '12px 14px',
+                      background: expandedSkillName === skill.name ? 'rgba(99, 102, 241, 0.15)' : 'rgba(30, 41, 59, 0.5)',
+                      border: `1px solid ${expandedSkillName === skill.name ? 'rgba(99, 102, 241, 0.5)' : 'var(--border-color)'}`,
+                      borderRadius: '8px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '6px',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <span style={{ fontWeight: 600, color: '#fff', fontSize: '0.825rem' }}>@skill:{skill.name}</span>
+                      <span style={{
+                        fontSize: '0.65rem',
+                        padding: '2px 8px',
+                        borderRadius: '999px',
+                        background: skill.path.startsWith('bundled:') ? 'rgba(139, 92, 246, 0.15)' : 'rgba(34, 197, 94, 0.15)',
+                        color: skill.path.startsWith('bundled:') ? '#a78bfa' : '#4ade80',
+                        border: `1px solid ${skill.path.startsWith('bundled:') ? 'rgba(139, 92, 246, 0.3)' : 'rgba(34, 197, 94, 0.3)'}`,
+                      }}>
+                        {skill.path.startsWith('bundled:') ? 'Bundled' : 'Workspace'}
+                      </span>
+                    </div>
+                    <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: 0, lineHeight: 1.4 }}>
+                      {skill.description}
+                    </p>
+                    <div style={{ fontSize: '0.675rem', color: 'var(--text-dim)', fontFamily: 'monospace' }}>
+                      Source: {skill.path}
+                    </div>
+                    {expandedSkillName === skill.name && (
+                      <div style={{ marginTop: '4px', borderTop: '1px solid rgba(99, 102, 241, 0.3)', paddingTop: '8px' }}>
+                        {expandedSkillLoading ? (
+                          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Loading instructions…</div>
+                        ) : expandedSkillContent ? (
+                          <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: '0.725rem', color: '#cbd5e1', lineHeight: 1.5, background: 'rgba(15, 23, 42, 0.6)', padding: '8px 10px', borderRadius: '6px', margin: 0, maxHeight: '300px', overflow: 'auto' }}>
+                            {expandedSkillContent}
+                          </pre>
+                        ) : (
+                          <div style={{ fontSize: '0.75rem', color: '#fca5a5' }}>Failed to load instructions.</div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         ) : !contextInfo && activeTab !== 'workdir' ? (
           <div style={{ color: 'var(--text-dim)', fontSize: '0.85rem' }}>No context loaded.</div>
         ) : activeTab === 'formatted' ? (

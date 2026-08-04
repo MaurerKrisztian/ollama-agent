@@ -100,6 +100,49 @@ function getConfigurableEngines(): AgentEngine[] {
   return [...new Set([agent, ...[...chatRuntimes.values()].map(({ engine }) => engine)])];
 }
 
+// GET /api/skills - List valid workspace and application-bundled skills
+app.get('/api/skills', async (_req, res) => {
+  try {
+    res.json({ skills: await listProjectSkills(agent.getConfig().workingDir) });
+  } catch (err: any) {
+    res.status(500).json({ skills: [], error: err.message });
+  }
+});
+
+// GET /api/skills/:name - Get full skill content including instructions
+app.get('/api/skills/:name', async (req, res) => {
+  const name = req.params.name;
+  if (!name || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name)) {
+    return res.status(400).json({ error: 'Invalid skill name.' });
+  }
+  try {
+    const skill = await loadProjectSkill(agent.getConfig().workingDir, name);
+    if (!skill) {
+      return res.status(404).json({ error: `Skill "${name}" not found.` });
+    }
+    res.json({ success: true, skill });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/skills/:name/raw - Get raw SKILL.md content for a skill
+app.get('/api/skills/:name/raw', async (req, res) => {
+  const name = req.params.name;
+  if (!name || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name)) {
+    return res.status(400).json({ error: 'Invalid skill name.' });
+  }
+  try {
+    const skill = await loadProjectSkill(agent.getConfig().workingDir, name);
+    if (!skill) {
+      return res.status(404).json({ error: `Skill "${name}" not found.` });
+    }
+    res.json({ success: true, content: skill.instructions });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 function createChatRuntime(sessionId: string, existingEngine?: AgentEngine): ChatRuntime {
   const session = chatSessions.getSession(sessionId);
   if (!session) throw new Error('Chat session not found.');
