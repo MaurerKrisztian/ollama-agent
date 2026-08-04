@@ -10,6 +10,7 @@
     "dev": "concurrently -n server,client -c cyan,magenta \"npm run dev:server\" \"npm run dev:client\"",
     "dev:server": "tsx watch src/server/index.ts",
     "dev:client": "vite --config src/client/vite.config.ts src/client",
+    "start:no-watch": "npm run build:client && PORT=3002 tsx src/server/index.ts",
     "build": "npm run build:client && npm run build:server",
     "cli": "tsx src/cli/index.ts",
     "build:client": "vite build --config src/client/vite.config.ts src/client",
