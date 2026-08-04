@@ -517,6 +517,51 @@ export const ToolSettingsModal: React.FC<ToolSettingsModalProps> = ({
               </button>
             </div>
 
+            {/* GUI Terminal Mode Sub-Section */}
+            <div style={{ marginTop: '16px', paddingTop: '14px', borderTop: '1px solid rgba(255, 255, 255, 0.1)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div>
+                  <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-main)' }}>
+                    🖥️ GUI Terminal Window Mode
+                  </div>
+                  <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', margin: '2px 0 0 0' }}>
+                    Launch terminal processes in visible desktop GUI windows (e.g. gnome-terminal, konsole, kitty, xterm, wt.exe).
+                  </p>
+                </div>
+                <label style={{ display: 'inline-flex', alignItems: 'center', cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={Boolean(settings.terminalGuiMode)}
+                    onChange={(e) => onUpdateSettings({ ...settings, terminalGuiMode: e.target.checked })}
+                    style={{ width: '18px', height: '18px', cursor: 'pointer' }}
+                  />
+                </label>
+              </div>
+
+              {settings.terminalGuiMode && (
+                <div style={{ marginTop: '10px' }}>
+                  <label style={{ fontSize: '0.78rem', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>
+                    Custom Launcher Command (Optional, e.g. "alacritty -e"):
+                  </label>
+                  <input
+                    type="text"
+                    value={settings.customTerminalCmd || ''}
+                    onChange={(e) => onUpdateSettings({ ...settings, customTerminalCmd: e.target.value })}
+                    placeholder="Leave empty for auto-detection ($TERMINAL, gnome-terminal, wt.exe)"
+                    style={{
+                      width: '100%',
+                      padding: '8px 12px',
+                      borderRadius: '6px',
+                      border: '1px solid var(--border-color)',
+                      background: 'rgba(15, 23, 42, 0.6)',
+                      color: 'var(--text-main)',
+                      fontSize: '0.82rem',
+                    }}
+                  />
+                </div>
+              )}
+            </div>
+
             {/* Whitelisted Commands Sub-Section */}
             <div style={{ marginTop: '16px', paddingTop: '14px', borderTop: '1px solid rgba(255, 255, 255, 0.1)' }}>
               <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-main)', marginBottom: '4px' }}>

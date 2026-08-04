@@ -26,8 +26,12 @@ export interface AgentConfig {
   enableThinking?: boolean;
   supportsThinking?: boolean;
   effectiveThinking?: boolean;
+  supportsNativeTools?: boolean;
+  toolMode?: 'native' | 'prompt_fallback';
   complexityProfile?: ToolComplexityProfile;
   enabledTools?: Record<string, boolean>;
+  terminalGuiMode?: boolean;
+  customTerminalCmd?: string;
 }
 
 export type ToolComplexityProfile = 'simple' | 'medium' | 'advanced';
@@ -42,6 +46,8 @@ export interface ToolSettings {
   supportsThinking?: boolean;
   effectiveThinking?: boolean;
   preventRepeatedCalls?: boolean;
+  terminalGuiMode?: boolean;
+  customTerminalCmd?: string;
   enabledTools: {
     list_directory: boolean;
     read_file: boolean;
@@ -228,6 +234,7 @@ export interface TerminalSessionInfo {
   workingDir: string;
   lineCount: number;
   inputs?: TerminalInputHistoryItem[];
+  guiMode?: boolean;
 }
 
 export interface TerminalSessionOutput {
@@ -238,6 +245,7 @@ export interface TerminalSessionOutput {
   lines: string[];
   lineCount: number;
   inputs?: TerminalInputHistoryItem[];
+  guiMode?: boolean;
 }
 
 export interface BenchmarkSnapshot {

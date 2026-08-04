@@ -42,6 +42,8 @@ interface HeaderProps {
   onRefreshModels: () => void;
   onOpenModelDetails: () => void;
   onOpenModelSettings: () => void;
+  isOllamaConnected?: boolean;
+  connectionError?: string | null;
   systemMetrics?: SystemMetrics | null;
   leftSidebarOpen?: boolean;
   onToggleLeftSidebar?: () => void;
@@ -77,6 +79,8 @@ export const Header: React.FC<HeaderProps> = ({
   onRefreshModels,
   onOpenModelDetails,
   onOpenModelSettings,
+  isOllamaConnected = true,
+  connectionError = null,
   systemMetrics,
   leftSidebarOpen = false,
   onToggleLeftSidebar,
@@ -190,23 +194,67 @@ export const Header: React.FC<HeaderProps> = ({
         </button>
       </div>
 
-      {/* Center Controls: Workdir, Model Selector & VRAM Status */}
-      <button
-        type="button"
-        className="header-model-settings-button"
-        onClick={onOpenModelSettings}
-        title={`Model settings · ${config.model} · ${modelRuntimeLabel}`}
-      >
-        <Cpu size={16} />
-        <span className="header-model-name">{config.model}</span>
-        <span
-          className={`header-model-runtime-dot ${modelRuntimeStatus}`}
-          role="status"
-          aria-label={modelRuntimeLabel}
-          title={modelRuntimeLabel}
-        />
-        <SlidersHorizontal size={14} />
-      </button>
+      {/* Center Controls: Workdir, Model Selector & Connection Status */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <button
+          type="button"
+          className="header-model-settings-button"
+          onClick={onOpenModelSettings}
+          title={`Model settings · ${config.model} · ${modelRuntimeLabel}`}
+        >
+          <Cpu size={16} />
+          <span className="header-model-name">{config.model}</span>
+          <span
+            className={`header-model-runtime-dot ${modelRuntimeStatus}`}
+            role="status"
+            aria-label={modelRuntimeLabel}
+            title={modelRuntimeLabel}
+          />
+          <SlidersHorizontal size={14} />
+        </button>
+
+        {/* Ollama Connection Status Badge */}
+        <button
+          type="button"
+          onClick={onOpenConnectionSettings}
+          title={
+            isOllamaConnected
+              ? `Ollama Connected (${config.ollamaHost})\nClick to configure Ollama connection settings`
+              : `Ollama Not Connected (${config.ollamaHost})\n${connectionError || 'Server unreachable'}\nClick to configure Ollama connection settings`
+          }
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            padding: '6px 12px',
+            borderRadius: '8px',
+            border: isOllamaConnected
+              ? '1px solid rgba(16, 185, 129, 0.35)'
+              : '1px solid rgba(239, 68, 68, 0.6)',
+            background: isOllamaConnected
+              ? 'rgba(16, 185, 129, 0.12)'
+              : 'rgba(239, 68, 68, 0.18)',
+            color: isOllamaConnected ? '#10b981' : '#f87171',
+            fontSize: '0.8rem',
+            fontWeight: 600,
+            cursor: 'pointer',
+            transition: 'all 0.15s ease',
+            whiteSpace: 'nowrap',
+            boxShadow: isOllamaConnected ? 'none' : '0 0 10px rgba(239, 68, 68, 0.3)',
+          }}
+        >
+          <div
+            style={{
+              width: '8px',
+              height: '8px',
+              borderRadius: '50%',
+              background: isOllamaConnected ? '#10b981' : '#f87171',
+              boxShadow: isOllamaConnected ? '0 0 8px #10b981' : '0 0 8px #f87171',
+            }}
+          />
+          <span>{isOllamaConnected ? 'Ollama Connected' : '⚠️ Ollama Not Connected'}</span>
+        </button>
+      </div>
       {onChangeContextWindow && (
         <label
           className="header-context-window-control"
@@ -252,6 +300,8 @@ export const Header: React.FC<HeaderProps> = ({
             {config.workingDir || 'Select folder...'}
           </span>
         </button>
+
+        {/* Active Working Directory Picker */}
 
         {/* Model Selector */}
         <div className="header-model-control" style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'rgba(15, 23, 42, 0.6)', padding: '6px 12px', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
@@ -360,6 +410,52 @@ export const Header: React.FC<HeaderProps> = ({
             >
               <Brain size={15} color={btnColor} />
               <span>{btnText}</span>
+            </button>
+          );
+        })()}
+
+        {/* Tool Calling Capability & Mode Indicator */}
+        {(() => {
+          const supportsNative = config.supportsNativeTools !== false;
+          const toolMode = config.toolMode || (supportsNative ? 'native' : 'prompt_fallback');
+
+          let badgeColor = 'var(--accent-teal)';
+          let badgeBorder = '1px solid rgba(20, 184, 166, 0.4)';
+          let badgeBg = 'rgba(20, 184, 166, 0.12)';
+          let badgeText = 'Tools: Native';
+          let badgeTitle = `Model "${config.model}" natively supports Ollama function/tool calling.`;
+
+          if (!supportsNative || toolMode === 'prompt_fallback') {
+            badgeColor = '#f59e0b';
+            badgeBorder = '1px solid rgba(245, 158, 11, 0.4)';
+            badgeBg = 'rgba(245, 158, 11, 0.12)';
+            badgeText = 'Tools: Prompt Fallback';
+            badgeTitle = `Model "${config.model}" does not natively support Ollama tools. Using System-Prompt Tool Calling Fallback (<tool_call> parsing).`;
+          }
+
+          return (
+            <button
+              className="header-tool-mode-control"
+              type="button"
+              onClick={onOpenToolSettings}
+              title={`${badgeTitle}\nClick to open Tool Settings`}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '6px 12px',
+                borderRadius: '8px',
+                border: badgeBorder,
+                background: badgeBg,
+                color: badgeColor,
+                fontSize: '0.8rem',
+                fontWeight: 600,
+                cursor: 'pointer',
+                transition: 'all 0.15s ease',
+              }}
+            >
+              <Terminal size={15} color={badgeColor} />
+              <span>{badgeText}</span>
             </button>
           );
         })()}

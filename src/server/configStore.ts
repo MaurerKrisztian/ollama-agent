@@ -27,6 +27,8 @@ export interface PersistedConfig {
   systemPrompt?: string;
   showWorkingDirInfo?: boolean;
   pruningConfig?: ContextPruningConfig;
+  terminalGuiMode?: boolean;
+  customTerminalCmd?: string;
 }
 
 export function getInitialPersistedConfig(): PersistedConfig {
@@ -48,25 +50,37 @@ export function getInitialPersistedConfig(): PersistedConfig {
   let systemPrompt: string | undefined = undefined;
   let showWorkingDirInfo: boolean | undefined = undefined;
   let pruningConfig: ContextPruningConfig | undefined = undefined;
+  let terminalGuiMode: boolean | undefined = undefined;
+  let customTerminalCmd: string | undefined = undefined;
+
+  let hasSavedHost = false;
+  let hasSavedToken = false;
+  let hasSavedModel = false;
+  let hasSavedClassifier = false;
 
   try {
     if (fsSync.existsSync(CONFIG_FILE_PATH)) {
       const data = fsSync.readFileSync(CONFIG_FILE_PATH, 'utf8');
-      const parsed = JSON.parse(data);
+      const sanitized = data.replace(/,\s*([\]}])/g, '$1');
+      const parsed = JSON.parse(sanitized);
       if (parsed.workingDir && typeof parsed.workingDir === 'string' && fsSync.existsSync(parsed.workingDir)) {
         workingDir = parsed.workingDir;
       }
       if (parsed.ollamaHost && typeof parsed.ollamaHost === 'string') {
         ollamaHost = parsed.ollamaHost;
+        hasSavedHost = true;
       }
       if (parsed.ollamaToken !== undefined && typeof parsed.ollamaToken === 'string') {
         ollamaToken = parsed.ollamaToken;
+        hasSavedToken = true;
       }
       if (parsed.model && typeof parsed.model === 'string') {
         model = parsed.model;
+        hasSavedModel = true;
       }
       if (parsed.classifierModel && typeof parsed.classifierModel === 'string') {
         classifierModel = parsed.classifierModel;
+        hasSavedClassifier = true;
       }
       if (Array.isArray(parsed.allowedCommands)) {
         allowedCommands = parsed.allowedCommands;
@@ -104,6 +118,12 @@ export function getInitialPersistedConfig(): PersistedConfig {
       if (parsed.pruningConfig && typeof parsed.pruningConfig === 'object' && !Array.isArray(parsed.pruningConfig)) {
         pruningConfig = parsed.pruningConfig;
       }
+      if (typeof parsed.terminalGuiMode === 'boolean') {
+        terminalGuiMode = parsed.terminalGuiMode;
+      }
+      if (typeof parsed.customTerminalCmd === 'string') {
+        customTerminalCmd = parsed.customTerminalCmd;
+      }
       if (parsed.enabledTools && typeof parsed.enabledTools === 'object' && !Array.isArray(parsed.enabledTools)) {
         enabledTools = Object.fromEntries(BUILTIN_TOOLS.map((tool) => [
           tool.name,
@@ -115,21 +135,23 @@ export function getInitialPersistedConfig(): PersistedConfig {
     }
   } catch (_) {}
 
-  // Explicit environment configuration takes precedence over persisted UI settings.
+  // Explicit environment configuration only provides initial defaults if not already saved by user in UI.
   if (process.env.WORKING_DIR && fsSync.existsSync(process.env.WORKING_DIR)) workingDir = process.env.WORKING_DIR;
-  if (process.env.OLLAMA_HOST) ollamaHost = process.env.OLLAMA_HOST;
-  if (process.env.OLLAMA_TOKEN !== undefined) ollamaToken = process.env.OLLAMA_TOKEN;
-  if (process.env.OLLAMA_MODEL) model = process.env.OLLAMA_MODEL;
-  if (process.env.OLLAMA_CLASSIFIER_MODEL) classifierModel = process.env.OLLAMA_CLASSIFIER_MODEL;
+  if (!hasSavedHost && process.env.OLLAMA_HOST) ollamaHost = process.env.OLLAMA_HOST;
+  if (!hasSavedToken && process.env.OLLAMA_TOKEN !== undefined) ollamaToken = process.env.OLLAMA_TOKEN;
+  if (!hasSavedModel && process.env.OLLAMA_MODEL) model = process.env.OLLAMA_MODEL;
+  if (!hasSavedClassifier && process.env.OLLAMA_CLASSIFIER_MODEL) classifierModel = process.env.OLLAMA_CLASSIFIER_MODEL;
 
-  return { workingDir, ollamaHost, ollamaToken, model, classifierModel, allowedCommands, terminalMode, fileEditMode, enableThinking, preventRepeatedCalls, complexityProfile, enabledTools, maxLoops, temperature, contextWindow, systemPrompt, showWorkingDirInfo, pruningConfig };
+  return { workingDir, ollamaHost, ollamaToken, model, classifierModel, allowedCommands, terminalMode, fileEditMode, enableThinking, preventRepeatedCalls, complexityProfile, enabledTools, maxLoops, temperature, contextWindow, systemPrompt, showWorkingDirInfo, pruningConfig, terminalGuiMode, customTerminalCmd };
 }
 
 export function savePersistedConfig(updatedConfig: Record<string, any>): void {
   try {
     let existing: Record<string, any> = {};
     if (fsSync.existsSync(CONFIG_FILE_PATH)) {
-      existing = JSON.parse(fsSync.readFileSync(CONFIG_FILE_PATH, 'utf8'));
+      const raw = fsSync.readFileSync(CONFIG_FILE_PATH, 'utf8');
+      const sanitized = raw.replace(/,\s*([\]}])/g, '$1');
+      existing = JSON.parse(sanitized);
     }
     const merged = { ...existing, ...updatedConfig };
     fsSync.writeFileSync(CONFIG_FILE_PATH, JSON.stringify(merged, null, 2), 'utf8');

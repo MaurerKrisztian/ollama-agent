@@ -128,3 +128,63 @@ test('unloadModel requests an immediate keep-alive expiry', async () => {
     global.fetch = originalFetch;
   }
 });
+
+test('chatStream automatically falls back when model does not support tools', async () => {
+  const originalFetch = global.fetch;
+  const calls: { url: string; body: any }[] = [];
+  
+  global.fetch = async (input, init) => {
+    const body = JSON.parse(String(init?.body));
+    calls.push({ url: String(input), body });
+    
+    // First call (with tools) returns 400 does not support tools error
+    if (body.tools) {
+      return new Response(JSON.stringify({ error: 'registry.ollama.ai/library/deepseek-coder-v2:lite does not support tools' }), { status: 400 });
+    }
+    
+    // Fallback retry (without tools) returns successful streamed text with inline tool call
+    return new Response([
+      JSON.stringify({ message: { role: 'assistant', content: '{"name":"read_file","arguments":{"relative_path":"test.ts"}}' }, done: true }),
+      '',
+    ].join('\n'), { status: 200 });
+  };
+
+  try {
+    const client = new OllamaClient('http://ollama.test');
+    const result = await client.chatStream({
+      host: 'http://ollama.test',
+      model: 'deepseek-coder-v2:lite',
+      messages: [{ role: 'user', content: 'read test.ts' }],
+      tools: [{ name: 'read_file', description: 'Read file', parameters: { type: 'object', properties: {} } }],
+    });
+
+    assert.equal(calls.length, 2);
+    assert.ok(calls[0].body.tools);
+    assert.equal(calls[1].body.tools, undefined);
+    assert.equal(result.tool_calls?.length, 1);
+    assert.equal(result.tool_calls[0].name, 'read_file');
+    
+    const supportsNative = await client.checkModelToolSupport('deepseek-coder-v2:lite');
+    assert.equal(supportsNative, false);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('fallback parser extracts DeepSeek special tool call tokens', () => {
+  const client = new OllamaClient();
+  const text = [
+    '<|tool_calls_begin|><|tool_call_begin|>function<|tool_sep|>read_file',
+    '```json',
+    '{"relative_path": "."}',
+    '```<|tool_call_end|><|tool_calls_end|>',
+    '<|tool_outputs_begin|><|tool_output_begin|>{"status": "success"}',
+  ].join('\n');
+
+  const parsed = (client as any).extractToolCallsFromText(text);
+
+  assert.equal(parsed.calls.length, 1);
+  assert.equal(parsed.calls[0].name, 'read_file');
+  assert.deepEqual(parsed.calls[0].arguments, { relative_path: '.' });
+  assert.equal(parsed.cleanedText, '');
+});

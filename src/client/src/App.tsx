@@ -90,6 +90,7 @@ export const App: React.FC = () => {
   const [rewindConfirm, setRewindConfirm] = useState<{ messageId: string; promptId: string; snapshotPaths: string[] } | null>(null);
   const [systemMetrics, setSystemMetrics] = useState<SystemMetrics | null>(null);
   const [terminalSessions, setTerminalSessions] = useState<TerminalSessionInfo[]>([]);
+  const [selectedTerminalSessionId, setSelectedTerminalSessionId] = useState<string | null>(null);
   const [terminalSessionsModalOpen, setTerminalSessionsModalOpen] = useState(false);
   const [terminalSidebarOpen, setTerminalSidebarOpen] = useState(false);
   const [activeGenerationsCount, setActiveGenerationsCount] = useState<number>(0);
@@ -138,6 +139,8 @@ export const App: React.FC = () => {
           snapshotPaths: eventData.snapshotPaths ?? [],
         },
       ]);
+    } else if (eventType === 'tool_stream') {
+      setActiveToolCall({ name: eventData.name, args: { _streaming: true, _rawText: eventData.argsText } });
     } else if (eventType === 'tool_start') {
       setPendingApprovalCall(null);
       setActiveToolCall({ name: eventData.name, args: eventData.args });
@@ -180,10 +183,22 @@ export const App: React.FC = () => {
   };
 
   const refreshModels = async () => {
-    const response = await fetch('/api/models');
-    const data = await response.json();
-    if (!response.ok || !data.success) throw new Error(data.error || 'Could not refresh installed models.');
-    setModels(data.models || []);
+    try {
+      const response = await fetch('/api/models');
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        setIsOllamaConnected(false);
+        setConnectionError(data.error || 'Could not refresh installed models.');
+        throw new Error(data.error || 'Could not refresh installed models.');
+      }
+      setModels(data.models || []);
+      setIsOllamaConnected(true);
+      setConnectionError(null);
+    } catch (err: any) {
+      setIsOllamaConnected(false);
+      setConnectionError(err.message || 'Could not connect to Ollama.');
+      throw err;
+    }
   };
 
   const unloadModel = async (model: string) => {
@@ -266,6 +281,9 @@ export const App: React.FC = () => {
     };
   }, []);
 
+  const [isOllamaConnected, setIsOllamaConnected] = useState(true);
+  const [connectionError, setConnectionError] = useState<string | null>(null);
+
   useEffect(() => {
     activeSessionIdRef.current = activeSessionId;
   }, [activeSessionId]);
@@ -275,51 +293,12 @@ export const App: React.FC = () => {
       const configRes = await fetch('/api/config');
       if (configRes.ok) {
         const data = await configRes.json();
-        let activeConfig = data.config;
-        let activeContext = data.context;
-
-        const savedWorkingDir = localStorage.getItem('local-model-chat.workingDir');
-        const savedOllamaHost = localStorage.getItem('local-model-chat.ollamaHost');
-        const savedOllamaToken = localStorage.getItem('local-model-chat.ollamaToken');
-
-        const updateBody: Record<string, any> = {};
-        if (savedWorkingDir && savedWorkingDir !== data.config?.workingDir) {
-          updateBody.workingDir = savedWorkingDir;
-        }
-        if (savedOllamaHost && savedOllamaHost !== data.config?.ollamaHost) {
-          updateBody.ollamaHost = savedOllamaHost;
-        }
-        if (savedOllamaToken !== null && savedOllamaToken !== undefined && savedOllamaToken !== data.config?.ollamaToken) {
-          updateBody.ollamaToken = savedOllamaToken;
-        }
-
-        if (Object.keys(updateBody).length > 0) {
-          const savedDirRes = await fetch('/api/config', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(updateBody),
-          });
-          if (savedDirRes.ok) {
-            const savedDirData = await savedDirRes.json();
-            if (savedDirData.success) {
-              activeConfig = savedDirData.config;
-              activeContext = savedDirData.context;
-            }
-          }
-        }
+        const activeConfig = data.config;
+        const activeContext = data.context;
 
         if (activeConfig) {
           setConfig(activeConfig);
           if (activeConfig.contextWindow) setBenchmarkContextWindow(activeConfig.contextWindow);
-          if (activeConfig.workingDir) {
-            localStorage.setItem('local-model-chat.workingDir', activeConfig.workingDir);
-          }
-          if (activeConfig.ollamaHost) {
-            localStorage.setItem('local-model-chat.ollamaHost', activeConfig.ollamaHost);
-          }
-          if (activeConfig.ollamaToken !== undefined) {
-            localStorage.setItem('local-model-chat.ollamaToken', activeConfig.ollamaToken || '');
-          }
           setToolSettings((prev) => ({
             ...prev,
             terminalMode: activeConfig.terminalMode || prev.terminalMode,
@@ -331,6 +310,8 @@ export const App: React.FC = () => {
             maxLoops: activeConfig.maxLoops ?? prev.maxLoops,
             enableThinking: activeConfig.enableThinking ?? prev.enableThinking,
             preventRepeatedCalls: activeConfig.preventRepeatedCalls ?? prev.preventRepeatedCalls,
+            terminalGuiMode: activeConfig.terminalGuiMode ?? prev.terminalGuiMode,
+            customTerminalCmd: activeConfig.customTerminalCmd ?? prev.customTerminalCmd,
             enabledTools: activeConfig.enabledTools
               ? { ...prev.enabledTools, ...activeConfig.enabledTools }
               : prev.enabledTools,
@@ -344,10 +325,21 @@ export const App: React.FC = () => {
       const modelsRes = await fetch('/api/models');
       if (modelsRes.ok) {
         const data = await modelsRes.json();
-        setModels(data.models || []);
-        if (data.activeModel) {
-          setConfig((prev) => ({ ...prev, model: data.activeModel }));
+        if (data.success !== false) {
+          setModels(data.models || []);
+          setIsOllamaConnected(true);
+          setConnectionError(null);
+          if (data.activeModel) {
+            setConfig((prev) => ({ ...prev, model: data.activeModel }));
+          }
+        } else {
+          setIsOllamaConnected(false);
+          setConnectionError(data.error || 'Ollama connection failed.');
         }
+      } else {
+        const data = await modelsRes.json().catch(() => null);
+        setIsOllamaConnected(false);
+        setConnectionError(data?.error || `HTTP ${modelsRes.status} connecting to Ollama.`);
       }
 
       const sessionsRes = await fetch('/api/chat/sessions');
@@ -541,13 +533,13 @@ export const App: React.FC = () => {
     const modelsRes = await fetch('/api/models');
     const modelsData = await parseResponse(modelsRes);
     if (!modelsRes.ok || !modelsData.success) {
+      setIsOllamaConnected(false);
+      setConnectionError(modelsData.error || `Could not connect to Ollama server at ${ollamaHost}`);
       throw new Error(modelsData.error || `Could not connect to Ollama server at ${ollamaHost}`);
     }
 
-    localStorage.setItem('local-model-chat.ollamaHost', ollamaHost);
-    if (ollamaToken !== undefined) {
-      localStorage.setItem('local-model-chat.ollamaToken', ollamaToken);
-    }
+    setIsOllamaConnected(true);
+    setConnectionError(null);
 
     setConfig(configData.config);
     setModels(modelsData.models || []);
@@ -733,7 +725,7 @@ export const App: React.FC = () => {
     if (newSettings.enableThinking !== undefined) {
       setConfig((prev) => ({ ...prev, enableThinking: newSettings.enableThinking }));
     }
-    // Sync approval modes & maxLoops & thinking to server
+    // Sync approval modes & maxLoops & thinking & terminalGuiMode to server
     await fetch('/api/chat/tool-settings', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -745,6 +737,8 @@ export const App: React.FC = () => {
         enableThinking: newSettings.enableThinking,
         complexityProfile: newSettings.complexityProfile,
         enabledTools: newSettings.enabledTools,
+        terminalGuiMode: newSettings.terminalGuiMode,
+        customTerminalCmd: newSettings.customTerminalCmd,
       }),
     });
   };
@@ -994,6 +988,8 @@ export const App: React.FC = () => {
         onOpenModelDetails={() => setModelDetailsModalOpen(true)}
         onOpenModelSettings={() => setModelSettingsModalOpen(true)}
         systemMetrics={systemMetrics}
+        isOllamaConnected={isOllamaConnected}
+        connectionError={connectionError}
         leftSidebarOpen={leftSidebarOpen}
         onToggleLeftSidebar={() => setLeftSidebarOpen((prev) => !prev)}
         activeTerminalCount={terminalSessions.filter((s) => s.status === 'running').length}
@@ -1059,6 +1055,12 @@ export const App: React.FC = () => {
             onOpenToolSettings={() => setToolSettingsModalOpen(true)}
             onOpenModelDetails={() => setModelDetailsModalOpen(true)}
             onCompactContext={handleCompactContext}
+            terminalSessions={terminalSessions}
+            onOpenTerminal={(sessionId) => {
+              if (sessionId) setSelectedTerminalSessionId(sessionId);
+              setTerminalSidebarOpen(true);
+            }}
+            onTerminateTerminalSession={handleTerminateTerminalSession}
           />
         ) : (
           <BenchmarkView
@@ -1086,6 +1088,7 @@ export const App: React.FC = () => {
           isOpen={terminalSidebarOpen}
           onClose={() => setTerminalSidebarOpen(false)}
           sessions={terminalSessions}
+          initialSessionId={selectedTerminalSessionId}
           onRefreshSessions={fetchTerminalSessions}
           onTerminateSession={handleTerminateTerminalSession}
           onOpenModal={() => {

@@ -16,6 +16,7 @@ import type {
 export interface AgentSendMessageOptions {
   onChunk?: (chunk: string) => void;
   onThinkingChunk?: (chunk: string) => void;
+  onToolStream?: (name: string, argsText: string) => void;
   onToolStart?: (name: string, args: Record<string, any>) => void;
   onToolProgress?: (name: string, progress: any) => void;
   onToolEnd?: (name: string, result: any) => void;
@@ -338,9 +339,12 @@ export class AgentEngine {
       complexityProfile: config?.complexityProfile || 'simple',
       enableThinking: config?.enableThinking ?? true,
       enabledTools: config?.enabledTools ? { ...config.enabledTools } : undefined,
+      terminalGuiMode: config?.terminalGuiMode ?? false,
+      customTerminalCmd: config?.customTerminalCmd,
     };
 
     this.toolExecutor = new ToolExecutor(this.config.workingDir);
+    this.toolExecutor.getTerminalManager().setGuiModeDefaults(this.config.terminalGuiMode, this.config.customTerminalCmd);
     this.toolExecutor.setDeepResearchNoteGenerator((request, onChunk, signal) => this.generateDeepResearchNotes(request, onChunk, signal));
     this.toolExecutor.setDeepResearchSemanticClassifier((request, signal) => this.classifyDeepResearchLinks(request, signal));
     this.toolExecutor.setDeepResearchQueryGenerator((query, targetCount, groundingContext, signal) => this.generateDeepResearchQueries(query, targetCount, groundingContext, signal));
@@ -513,6 +517,9 @@ export class AgentEngine {
     if (newConfig.workingDir !== undefined) {
       this.toolExecutor.setWorkingDir(newConfig.workingDir);
     }
+    if (newConfig.terminalGuiMode !== undefined || newConfig.customTerminalCmd !== undefined) {
+      this.toolExecutor.getTerminalManager().setGuiModeDefaults(this.config.terminalGuiMode, this.config.customTerminalCmd);
+    }
     // Keep contextManager in sync so the context inspector always reflects
     // the real tool list (enabledTools / complexityProfile / MCP changes).
     this.contextManager.setTools(this.getActiveTools());
@@ -577,6 +584,11 @@ export class AgentEngine {
   public async checkModelThinkingSupport(name?: string): Promise<boolean> {
     const targetModel = name || this.config.model;
     return this.ollamaClient.checkModelThinkingSupport(targetModel);
+  }
+
+  public async checkModelToolSupport(name?: string): Promise<boolean> {
+    const targetModel = name || this.config.model;
+    return this.ollamaClient.checkModelToolSupport(targetModel);
   }
 
   public async pullModel(
@@ -748,7 +760,9 @@ ${conversationText}`;
       const activeTools = deepResearchCompleted ? [] : this.getActiveTools();
       this.contextManager.setTools(activeTools);
 
-      let effectiveSystemPrompt = this.contextManager.getEffectiveSystemPrompt(true);
+      const supportsNativeTools = await this.ollamaClient.checkModelToolSupport(this.config.model);
+
+      let effectiveSystemPrompt = this.contextManager.getEffectiveSystemPrompt(supportsNativeTools);
       if (this.config.showWorkingDirInfo && !deepResearchCompleted) {
         effectiveSystemPrompt += `\n\n${await this.getWorkingDirectoryPromptContext()}`;
       }
@@ -783,6 +797,28 @@ ${conversationText}`;
       const modelSupportsThinking = await this.ollamaClient.checkModelThinkingSupport(this.config.model);
       const effectiveThinking = (this.config.enableThinking !== false) && modelSupportsThinking;
 
+      let turnStreamedText = '';
+      let turnDetectedTool: string | null = null;
+
+      const handleStreamChunk = (chunk: string) => {
+        callbacks?.onChunk?.(chunk);
+        turnStreamedText += chunk;
+
+        if (!turnDetectedTool && callbacks?.onToolStream) {
+          const toolMatch = turnStreamedText.match(/(?:"name"|<tool_call>|tool_call|function)\s*[:=]?\s*["']?([a-zA-Z0-9_-]{2,40})["']?/i);
+          if (toolMatch && toolMatch[1]) {
+            const candidate = toolMatch[1].toLowerCase();
+            const knownTools = activeTools.map((t) => t.name.toLowerCase());
+            if (knownTools.includes(candidate) || ['write_file', 'replace_file_content', 'multi_replace_file_content', 'run_command', 'read_file', 'web_search'].includes(candidate)) {
+              turnDetectedTool = candidate;
+            }
+          }
+        }
+        if (turnDetectedTool && callbacks?.onToolStream) {
+          callbacks.onToolStream(turnDetectedTool, turnStreamedText);
+        }
+      };
+
       const res = await this.ollamaClient.chatStream({
         host: this.config.ollamaHost,
         model: this.config.model,
@@ -790,11 +826,15 @@ ${conversationText}`;
         contextWindow: this.config.contextWindow,
         enableThinking: effectiveThinking,
         messages: messagesForOllama,
-        tools: activeTools,
-        onChunk: callbacks?.onChunk,
+        tools: supportsNativeTools ? activeTools : undefined,
+        onChunk: handleStreamChunk,
         onThinkingChunk: callbacks?.onThinkingChunk,
+        onToolStreamDelta: (name, deltaText) => {
+          callbacks?.onToolStream?.(name, deltaText);
+        },
         onToolCallChunk: (calls) => {
           for (const call of calls) {
+            callbacks?.onToolStream?.(call.name, typeof call.arguments === 'string' ? call.arguments : JSON.stringify(call.arguments, null, 2));
             callbacks?.onToolStart?.(call.name, call.arguments);
           }
         },
@@ -949,6 +989,7 @@ ${conversationText}`;
                 repeated_web_research: true,
               }
               : (this.config.preventRepeatedCalls !== false &&
+                  call.name !== 'read_terminal_output' &&
                   ((executedCallFingerprintsThisTurn.get(callFingerprint) || 0) + (failedToolCalls.get(callFingerprint) || 0) >= 2))
             ? {
                 error:

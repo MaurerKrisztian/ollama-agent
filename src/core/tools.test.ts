@@ -5,7 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { ToolExecutor, getToolDefinitions } from './tools.js';
 import { categorizeError } from './types.js';
-import { stripAnsiCodes } from './terminalManager.js';
+import { stripAnsiCodes, processCarriageReturns } from './terminalManager.js';
 import { buildPatchFileDiff } from './tools/fileTools.js';
 
 
@@ -230,12 +230,20 @@ test('categorizeError accurately maps error messages to codes and reasons', () =
   assert.equal(cmdFail.reason, 'Command exited with code 1');
 });
 
-test('stripAnsiCodes strips standard ESC codes and orphaned color brackets', () => {
+test('stripAnsiCodes strips standard ESC codes, VT100 (B charset designations, and orphaned color brackets', () => {
   const rawInput = '\u001b[36m- And I fill "currencies-rate" with "380"\u001b[39m # [90mcucumber/click-button.ts:189\u001b[39m';
   assert.equal(stripAnsiCodes(rawInput), '- And I fill "currencies-rate" with "380" # cucumber/click-button.ts:189');
 
   const orphanedInput = ' [36m- And I fill "currencies-rate" with "380"[39m # [90mcucumber/click-button.ts:189[39m';
   assert.equal(stripAnsiCodes(orphanedInput).trim(), '- And I fill "currencies-rate" with "380" # cucumber/click-button.ts:189');
+
+  const vt100Input = '\u001b(B  15566,9 \u001b(Bbuff/cache\u001b(B';
+  assert.equal(stripAnsiCodes(vt100Input).trim(), '15566,9 buff/cache');
+});
+
+test('processCarriageReturns handles progress spinner line overwrites correctly', () => {
+  const spinnerInput = 'Downloading 10%\rDownloading 20%\rDownloading 100%';
+  assert.equal(processCarriageReturns(spinnerInput), 'Downloading 100%');
 });
 
 test('grep_search supports regex mode, case sensitivity, and file pattern filtering', async () => {

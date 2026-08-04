@@ -2,6 +2,9 @@ import React, { useState, useEffect, useRef } from 'react';
 import { X, Terminal as TerminalIcon, Play, Square, RefreshCw, Send, Copy, Check, Trash2, History } from 'lucide-react';
 import { TerminalSessionInfo, TerminalSessionOutput } from '../types';
 
+import { filterTerminalLines } from './RightTerminalSidebar';
+import { renderAnsiLine } from '../utils/ansi';
+
 interface TerminalSessionsModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -25,8 +28,10 @@ export const TerminalSessionsModal: React.FC<TerminalSessionsModalProps> = ({
   const [inputText, setInputText] = useState('');
   const [copied, setCopied] = useState(false);
   const [autoScroll, setAutoScroll] = useState(true);
+  const [compactView, setCompactView] = useState(true);
   const [showInputHistory, setShowInputHistory] = useState(false);
   const [newCommandText, setNewCommandText] = useState('');
+  const [useGuiMode, setUseGuiMode] = useState(false);
   const [startingSession, setStartingSession] = useState(false);
   const logContainerRef = useRef<HTMLDivElement>(null);
 
@@ -108,7 +113,7 @@ export const TerminalSessionsModal: React.FC<TerminalSessionsModalProps> = ({
       const res = await fetch(`${apiHost}/api/terminal/sessions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ command: newCommandText.trim() }),
+        body: JSON.stringify({ command: newCommandText.trim(), guiMode: useGuiMode }),
       });
       const data = await res.json();
       if (data.success && data.session) {
@@ -263,9 +268,20 @@ export const TerminalSessionsModal: React.FC<TerminalSessionsModalProps> = ({
           >
             {/* Start New Manual Terminal Session */}
             <form onSubmit={handleStartNewSession} style={{ padding: '12px', borderBottom: '1px solid var(--border-color)' }}>
-              <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', display: 'block', marginBottom: '6px' }}>
-                Launch New Terminal
-              </span>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+                  Launch New Terminal
+                </span>
+                <label style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '0.72rem', color: 'var(--text-muted)', cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={useGuiMode}
+                    onChange={(e) => setUseGuiMode(e.target.checked)}
+                    style={{ cursor: 'pointer' }}
+                  />
+                  <span>🖥️ GUI Window</span>
+                </label>
+              </div>
               <div style={{ display: 'flex', gap: '6px' }}>
                 <input
                   type="text"
@@ -349,11 +365,12 @@ export const TerminalSessionsModal: React.FC<TerminalSessionsModalProps> = ({
                           </span>
                           {isRunning && (
                             <button
-                              onClick={(e) => {
+                              onClick={async (e) => {
                                 e.stopPropagation();
-                                onTerminateSession(sess.sessionId);
+                                await fetch(`${apiHost}/api/terminal/sessions/${encodeURIComponent(sess.sessionId)}?action=kill`, { method: 'DELETE' });
+                                onRefreshSessions();
                               }}
-                              title="Terminate Process"
+                              title="Kill Process"
                               style={{
                                 background: 'rgba(239, 68, 68, 0.2)',
                                 border: '1px solid rgba(239, 68, 68, 0.4)',
@@ -365,9 +382,28 @@ export const TerminalSessionsModal: React.FC<TerminalSessionsModalProps> = ({
                                 alignItems: 'center',
                               }}
                             >
-                              <Square size={12} fill="#ef4444" />
+                              <Square size={11} fill="#ef4444" />
                             </button>
                           )}
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onTerminateSession(sess.sessionId);
+                            }}
+                            title="Remove Session"
+                            style={{
+                              background: 'rgba(148, 163, 184, 0.15)',
+                              border: '1px solid var(--border-color)',
+                              color: 'var(--text-muted)',
+                              borderRadius: '4px',
+                              padding: '3px 6px',
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                            }}
+                          >
+                            <Trash2 size={11} />
+                          </button>
                         </div>
                       </div>
 
@@ -560,12 +596,12 @@ export const TerminalSessionsModal: React.FC<TerminalSessionsModalProps> = ({
                     background: '#090d16',
                   }}
                 >
-                  {outputData.lines.length === 0 ? (
+                  {filterTerminalLines(outputData.lines, compactView).length === 0 ? (
                     <span style={{ color: 'var(--text-dim)' }}>[Waiting for process output...]</span>
                   ) : (
-                    outputData.lines.map((line: string, idx: number) => (
+                    filterTerminalLines(outputData.lines, compactView).map((line: string, idx: number) => (
                       <div key={idx} style={{ color: line.includes('[Process Error') ? '#ef4444' : '#e2e8f0' }}>
-                        {line}
+                        {renderAnsiLine(line)}
                       </div>
                     ))
                   )}

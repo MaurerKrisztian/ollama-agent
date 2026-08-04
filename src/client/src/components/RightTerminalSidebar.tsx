@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, Terminal as TerminalIcon, Play, Square, RefreshCw, Send, Copy, Check, Maximize2, History } from 'lucide-react';
+import { X, Terminal as TerminalIcon, Play, Square, RefreshCw, Send, Copy, Check, Maximize2, History, Trash2 } from 'lucide-react';
 import { TerminalSessionInfo, TerminalSessionOutput, TerminalInputHistoryItem } from '../types';
+import { renderAnsiLine } from '../utils/ansi';
 
 interface RightTerminalSidebarProps {
   isOpen: boolean;
@@ -10,6 +11,38 @@ interface RightTerminalSidebarProps {
   onTerminateSession: (sessionId: string) => Promise<void>;
   onOpenModal?: () => void;
   apiHost?: string;
+  initialSessionId?: string | null;
+}
+
+export function filterTerminalLines(lines: string[], enableFilter: boolean = true): string[] {
+  if (!enableFilter || !lines || lines.length <= 1) return lines || [];
+  const filtered: string[] = [];
+
+  const isProgressLine = (line: string) => {
+    const trimmed = line.trim();
+    if (!trimmed) return false;
+    return (
+      /^\s*\[[=\-#>.\s]{3,}\]\s*\d+%/i.test(trimmed) ||
+      (/\b\d{1,3}%\b/.test(trimmed) && /download|upload|fetch|pull|pack|extract|install/i.test(trimmed)) ||
+      /^[|/\\-]\s*(?:Downloading|Loading|Processing|Fetching|Installing|Pulling)/i.test(trimmed)
+    );
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    const current = lines[i];
+    const next = lines[i + 1];
+
+    if (next !== undefined && isProgressLine(current) && isProgressLine(next)) {
+      continue;
+    }
+    if (next !== undefined && current.trim() === next.trim() && current.trim().length > 0) {
+      continue;
+    }
+
+    filtered.push(current);
+  }
+
+  return filtered;
 }
 
 export const RightTerminalSidebar: React.FC<RightTerminalSidebarProps> = ({
@@ -20,28 +53,32 @@ export const RightTerminalSidebar: React.FC<RightTerminalSidebarProps> = ({
   onTerminateSession,
   onOpenModal,
   apiHost = '',
+  initialSessionId,
 }) => {
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [outputData, setOutputData] = useState<TerminalSessionOutput | null>(null);
   const [inputText, setInputText] = useState('');
   const [copied, setCopied] = useState(false);
   const [autoScroll, setAutoScroll] = useState(true);
+  const [compactView, setCompactView] = useState(true);
   const [showInputHistory, setShowInputHistory] = useState(false);
   const [newCommandText, setNewCommandText] = useState('');
   const [startingSession, setStartingSession] = useState(false);
   const [showLaunchInput, setShowLaunchInput] = useState(false);
   const logContainerRef = useRef<HTMLDivElement>(null);
 
-  // Auto-select first running or active session
+  // Select initialSessionId or auto-select first running or active session
   useEffect(() => {
-    if (sessions.length > 0 && (!selectedSessionId || !sessions.some((s) => s.sessionId === selectedSessionId))) {
+    if (isOpen && initialSessionId && sessions.some((s) => s.sessionId === initialSessionId)) {
+      setSelectedSessionId(initialSessionId);
+    } else if (sessions.length > 0 && (!selectedSessionId || !sessions.some((s) => s.sessionId === selectedSessionId))) {
       const running = sessions.find((s) => s.status === 'running');
       setSelectedSessionId(running ? running.sessionId : sessions[0].sessionId);
     } else if (sessions.length === 0) {
       setSelectedSessionId(null);
       setOutputData(null);
     }
-  }, [sessions, selectedSessionId]);
+  }, [sessions, selectedSessionId, initialSessionId, isOpen]);
 
   // Fetch log output for selected session
   const fetchOutput = async (sessionId: string) => {
@@ -220,14 +257,14 @@ export const RightTerminalSidebar: React.FC<RightTerminalSidebarProps> = ({
           const isRunning = sess.status === 'running';
 
           return (
-            <button
+            <div
               key={sess.sessionId}
               onClick={() => setSelectedSessionId(sess.sessionId)}
               style={{
                 display: 'flex',
                 alignItems: 'center',
                 gap: '6px',
-                padding: '5px 10px',
+                padding: '5px 8px',
                 borderRadius: '6px',
                 fontSize: '0.775rem',
                 fontFamily: 'var(--font-code)',
@@ -248,7 +285,26 @@ export const RightTerminalSidebar: React.FC<RightTerminalSidebarProps> = ({
                 }}
               />
               <span>{sess.sessionId}</span>
-            </button>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onTerminateSession(sess.sessionId);
+                }}
+                title="Delete Session"
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: 'var(--text-dim)',
+                  cursor: 'pointer',
+                  padding: '2px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  borderRadius: '3px',
+                }}
+              >
+                <Trash2 size={11} />
+              </button>
+            </div>
           );
         })}
 
@@ -323,11 +379,14 @@ export const RightTerminalSidebar: React.FC<RightTerminalSidebarProps> = ({
               $ {currentSession.command}
             </span>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
             <span style={{ color: 'var(--text-muted)' }}>PID: {currentSession.pid ?? 'N/A'}</span>
             {currentSession.status === 'running' && (
               <button
-                onClick={() => onTerminateSession(currentSession.sessionId)}
+                onClick={async () => {
+                  await fetch(`${apiHost}/api/terminal/sessions/${encodeURIComponent(currentSession.sessionId)}?action=kill`, { method: 'DELETE' });
+                  onRefreshSessions();
+                }}
                 title="Kill Process"
                 style={{
                   background: 'rgba(239, 68, 68, 0.2)',
@@ -347,6 +406,26 @@ export const RightTerminalSidebar: React.FC<RightTerminalSidebarProps> = ({
                 <span>Kill</span>
               </button>
             )}
+            <button
+              onClick={() => onTerminateSession(currentSession.sessionId)}
+              title="Remove Session"
+              style={{
+                background: 'rgba(148, 163, 184, 0.15)',
+                border: '1px solid var(--border-color)',
+                color: 'var(--text-muted)',
+                borderRadius: '4px',
+                padding: '2px 6px',
+                cursor: 'pointer',
+                fontSize: '0.7rem',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px',
+                fontWeight: 600,
+              }}
+            >
+              <Trash2 size={10} />
+              <span>Remove</span>
+            </button>
           </div>
         </div>
       )}
@@ -370,6 +449,16 @@ export const RightTerminalSidebar: React.FC<RightTerminalSidebarProps> = ({
               <span style={{ color: 'var(--text-dim)' }}>{outputData.lines.length} lines buffered</span>
 
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '4px', color: 'var(--text-muted)', cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={compactView}
+                    onChange={(e) => setCompactView(e.target.checked)}
+                    style={{ accentColor: 'var(--accent-teal)' }}
+                  />
+                  <span>Compact</span>
+                </label>
+
                 <label style={{ display: 'flex', alignItems: 'center', gap: '4px', color: 'var(--text-muted)', cursor: 'pointer' }}>
                   <input
                     type="checkbox"
@@ -497,12 +586,12 @@ export const RightTerminalSidebar: React.FC<RightTerminalSidebarProps> = ({
                 background: '#090d16',
               }}
             >
-              {outputData.lines.length === 0 ? (
+              {filterTerminalLines(outputData.lines, compactView).length === 0 ? (
                 <span style={{ color: 'var(--text-dim)' }}>[Waiting for process output...]</span>
               ) : (
-                outputData.lines.map((line: string, idx: number) => (
+                filterTerminalLines(outputData.lines, compactView).map((line: string, idx: number) => (
                   <div key={idx} style={{ color: line.includes('[Process Error') ? '#ef4444' : '#e2e8f0' }}>
-                    {line}
+                    {renderAnsiLine(line)}
                   </div>
                 ))
               )}

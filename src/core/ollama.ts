@@ -18,6 +18,7 @@ export interface OllamaChatOptions {
   onChunk?: (chunk: string) => void;
   onThinkingChunk?: (thinkingChunk: string) => void;
   onToolCallChunk?: (toolCalls: Array<{ id: string; name: string; arguments: Record<string, any> }>) => void;
+  onToolStreamDelta?: (toolName: string, deltaText: string) => void;
   signal?: AbortSignal;
 }
 
@@ -42,6 +43,7 @@ export class OllamaClient {
   private host: string;
   private authToken?: string;
   private thinkingSupportCache: Map<string, boolean> = new Map();
+  private toolSupportCache: Map<string, boolean> = new Map();
 
   constructor(host: string = 'http://127.0.0.1:11434', authToken?: string) {
     this.host = host.replace(/\/$/, '');
@@ -51,6 +53,7 @@ export class OllamaClient {
   public setHost(host: string) {
     this.host = host.replace(/\/$/, '');
     this.thinkingSupportCache.clear();
+    this.toolSupportCache.clear();
   }
 
   public getHost(): string {
@@ -192,6 +195,61 @@ export class OllamaClient {
     return isSupported;
   }
 
+  public markModelToolSupport(modelName: string, supported: boolean): void {
+    if (!modelName) return;
+    const cacheKey = `${this.host}::${modelName}`;
+    this.toolSupportCache.set(cacheKey, supported);
+  }
+
+  /**
+   * Check if a model natively supports Ollama function tool calling.
+   */
+  public async checkModelToolSupport(modelName: string): Promise<boolean> {
+    if (!modelName) return true;
+    const cacheKey = `${this.host}::${modelName}`;
+    if (this.toolSupportCache.has(cacheKey)) {
+      return this.toolSupportCache.get(cacheKey)!;
+    }
+
+    let isSupported = true;
+
+    try {
+      const models = await this.getModels();
+      const targetModel = models.find(
+        (m) => ollamaModelNamesMatch(m.name, modelName) || ollamaModelNamesMatch(m.digest, modelName)
+      );
+
+      if (targetModel && Array.isArray(targetModel.capabilities) && targetModel.capabilities.length > 0) {
+        const caps = targetModel.capabilities.map((c) => (c || '').toLowerCase());
+        isSupported = caps.includes('tools');
+      } else {
+        const details = await this.getModelDetails(modelName);
+        if (details) {
+          if (Array.isArray(details.capabilities) && details.capabilities.length > 0) {
+            const caps: string[] = details.capabilities.map((c: string) => (c || '').toLowerCase());
+            isSupported = caps.includes('tools');
+          } else if (details.template || details.modelfile) {
+            const template = (details.template || '').toLowerCase();
+            const modelfile = (details.modelfile || '').toLowerCase();
+            if (
+              template.includes('.tools') ||
+              template.includes('<tools>') ||
+              template.includes('[tools]') ||
+              modelfile.includes('tools')
+            ) {
+              isSupported = true;
+            }
+          }
+        }
+      }
+    } catch (_) {
+      isSupported = true;
+    }
+
+    this.toolSupportCache.set(cacheKey, isSupported);
+    return isSupported;
+  }
+
   /** Download a model and report Ollama's streamed progress events. */
   public async pullModel(
     modelName: string,
@@ -274,10 +332,35 @@ export class OllamaClient {
 
     const calls: Array<{ id: string; name: string; arguments: Record<string, any> }> = [];
     let cleanedText = text;
+    let match: RegExpExecArray | null;
+
+    // 0. Check DeepSeek special token tags: <|tool_call_begin|>function<|tool_sep|>name ... <|tool_call_end|>
+    const deepseekRegex = /<\|tool_call_begin\|>(?:function)?<\|tool_sep\|>([a-zA-Z0-9_-]+)[\s\r\n]*(?:```(?:json)?\s*)?(\{[\s\S]*?\})\s*(?:```)?[\s\r\n]*<\|tool_call_end\|>/gi;
+    while ((match = deepseekRegex.exec(text)) !== null) {
+      try {
+        const name = match[1].trim();
+        const rawArgs = match[2].trim();
+        const parsedArgs = JSON.parse(rawArgs);
+        calls.push({
+          id: `call_${Date.now()}_${calls.length}`,
+          name,
+          arguments: parsedArgs.arguments || parsedArgs.parameters || parsedArgs,
+        });
+      } catch (_) {}
+    }
+
+    if (calls.length > 0) {
+      cleanedText = text
+        .replace(/<\|tool_calls_begin\|>/gi, '')
+        .replace(/<\|tool_calls_end\|>/gi, '')
+        .replace(/<\|tool_call_begin\|>[\s\S]*?<\|tool_call_end\|>/gi, '')
+        .replace(/<\|tool_outputs_begin\|>[\s\S]*/gi, '')
+        .trim();
+      return { calls, cleanedText };
+    }
 
     // 1. Check XML tags: <tool_call>...</tool_call> or <tool>...</tool>
     const xmlRegex = /<(?:tool_call|tool)>([\s\S]*?)<\/(?:tool_call|tool)>/gi;
-    let match: RegExpExecArray | null;
     while ((match = xmlRegex.exec(text)) !== null) {
       try {
         const parsed = JSON.parse(match[1].trim());
@@ -479,6 +562,17 @@ export class OllamaClient {
 
     if (!response.ok) {
       const errorText = await response.text();
+      if (
+        response.status === 400 &&
+        requestBody.tools &&
+        (errorText.includes('does not support tools') || errorText.includes('do not support tools'))
+      ) {
+        this.markModelToolSupport(options.model, false);
+        return this.chatStream({
+          ...options,
+          tools: undefined,
+        });
+      }
       throw new Error(`Ollama Chat Error (${response.status}): ${errorText}`);
     }
 
@@ -544,6 +638,11 @@ export class OllamaClient {
               }));
               if (options.onToolCallChunk && toolCallsResult) {
                 options.onToolCallChunk(toolCallsResult);
+              }
+              if (options.onToolStreamDelta && toolCallsResult && toolCallsResult[0]) {
+                const firstCall = toolCallsResult[0];
+                const rawArgsStr = typeof firstCall.arguments === 'string' ? firstCall.arguments : JSON.stringify(firstCall.arguments, null, 2);
+                options.onToolStreamDelta(firstCall.name, rawArgsStr);
               }
             }
           }

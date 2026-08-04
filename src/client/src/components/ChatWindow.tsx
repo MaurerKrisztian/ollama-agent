@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Send, Square, Wrench, CheckCircle2, XCircle, ShieldAlert, User, Bot, Loader2, FileText, Folder, Terminal, Edit3, Search, PlusCircle, Sparkles, Code2, Eye, ChevronDown, ChevronRight, Brain, X, Globe, ExternalLink, Layers, RotateCcw, Copy, Check, Scissors, Info, Image as ImageIcon, CornerDownRight } from 'lucide-react';
-import { ChatMessage, FileDiffData, ImageAttachment, BatchReviewFile, PendingApprovalCall, TextAttachment } from '../types';
+import { ChatMessage, FileDiffData, ImageAttachment, BatchReviewFile, PendingApprovalCall, TextAttachment, TerminalSessionInfo } from '../types';
 import { BatchReviewCard } from './chat/BatchReviewCard';
 import { getLinkPresentation } from '../linkPresentation';
 import { findActiveSkillMention } from '../skillMention';
@@ -1823,9 +1823,15 @@ const ToolExecutionCard: React.FC<{
   onCancelGeneration,
   defaultExpanded,
 }) => {
-  const [expanded, setExpanded] = useState<boolean>(defaultExpanded ?? false);
+  const [expanded, setExpanded] = useState<boolean>(defaultExpanded ?? Boolean(args?._streaming));
   const [viewMode, setViewMode] = useState<'formatted' | 'raw_input' | 'raw_result'>('formatted');
   const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (args?._streaming) {
+      setExpanded(true);
+    }
+  }, [args?._streaming]);
 
   const fullResultContent = resultMessage?.displayContent || resultMessage?.content || '';
   const isPruned = typeof resultMessage?.content === 'string' && resultMessage.content.startsWith('[Context Pruned:');
@@ -2018,7 +2024,11 @@ const ToolExecutionCard: React.FC<{
           </span>
 
           {/* Status Badge */}
-          {isWorking ? (
+          {args?._streaming ? (
+            <span style={{ background: 'rgba(56, 189, 248, 0.25)', color: '#7dd3fc', border: '1px solid rgba(56, 189, 248, 0.4)', padding: '1px 7px', borderRadius: '4px', fontSize: '0.675rem', fontWeight: 700, textTransform: 'uppercase', flexShrink: 0, display: 'flex', alignItems: 'center', gap: '4px' }}>
+              <Loader2 size={10} className="spin" /> Writing Tool Call...
+            </span>
+          ) : isWorking ? (
             <span style={{ background: 'rgba(99, 102, 241, 0.25)', color: '#c7d2fe', border: '1px solid rgba(99, 102, 241, 0.4)', padding: '1px 7px', borderRadius: '4px', fontSize: '0.675rem', fontWeight: 700, textTransform: 'uppercase', flexShrink: 0 }}>
               Working...
             </span>
@@ -2211,8 +2221,18 @@ const ToolExecutionCard: React.FC<{
 
           {viewMode === 'formatted' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              {/* Invocation Input Parameters */}
-              {args && Object.keys(args).length > 0 && (
+              {/* Tool Streaming Live Preview */}
+              {args?._streaming ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', background: 'rgba(56, 189, 248, 0.08)', padding: '10px 12px', borderRadius: '8px', border: '1px solid rgba(56, 189, 248, 0.25)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.75rem', fontWeight: 600, color: '#38bdf8' }}>
+                    <Loader2 size={14} className="spin" />
+                    <span>Streaming model tool input generation...</span>
+                  </div>
+                  <pre style={{ margin: 0, padding: '10px 12px', background: '#090d16', borderRadius: '8px', border: '1px solid var(--border-color)', fontFamily: 'var(--font-code)', fontSize: '0.8rem', color: '#7dd3fc', whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: '350px', overflowY: 'auto' }}>
+                    {args._rawText || 'Writing tool parameters...'}
+                  </pre>
+                </div>
+              ) : args && Object.keys(args).length > 0 && (
                 <div style={{ background: 'rgba(15, 23, 42, 0.4)', padding: '8px 12px', borderRadius: '8px', border: '1px solid rgba(255, 255, 255, 0.05)' }}>
                   <PrettierInvocationView name={toolName} args={args} />
                 </div>
@@ -2760,6 +2780,9 @@ interface ChatWindowProps {
   onOpenToolSettings?: () => void;
   onOpenModelDetails?: () => void;
   onCompactContext?: () => void;
+  terminalSessions?: TerminalSessionInfo[];
+  onOpenTerminal?: (sessionId?: string) => void;
+  onTerminateTerminalSession?: (sessionId: string) => Promise<void>;
 }
 
 const QUICK_HELPER_PROMPTS = [
@@ -2874,6 +2897,9 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   onOpenToolSettings,
   onOpenModelDetails,
   onCompactContext,
+  terminalSessions = [],
+  onOpenTerminal,
+  onTerminateTerminalSession,
 }) => {
   const [input, setInput] = useState('');
   const [attachments, setAttachments] = useState<TextAttachment[]>([]);
@@ -3491,7 +3517,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                 {streamingThinking && (
                   <ThinkingBlock thinking={streamingThinking} isStreaming={!streamingText} />
                 )}
-                {streamingText && (
+                {streamingText && !activeToolCall?.args?._streaming && (
                   <MarkdownContent content={streamingText} streaming />
                 )}
               </div>
@@ -3811,6 +3837,95 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
 
       {/* Input Prompt Box */}
       <div className="chat-composer" style={{ padding: '14px 24px', background: 'rgba(15, 23, 42, 0.8)', borderTop: '1px solid var(--border-color)', zIndex: 5, display: 'flex', flexDirection: 'column', gap: '10px' }}>
+        {/* Active Terminal Sessions Bar */}
+        {terminalSessions && terminalSessions.length > 0 && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', overflowX: 'auto', paddingBottom: '6px', borderBottom: '1px solid rgba(148, 163, 184, 0.12)' }}>
+            <button
+              onClick={() => onOpenTerminal?.()}
+              title="Open Terminal Sessions View"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '5px',
+                background: 'none',
+                border: 'none',
+                color: 'var(--accent-teal)',
+                fontSize: '0.725rem',
+                fontWeight: 700,
+                cursor: 'pointer',
+                padding: '2px 4px',
+                whiteSpace: 'nowrap',
+                flexShrink: 0,
+              }}
+            >
+              <Terminal size={13} color="var(--accent-teal)" />
+              <span>Terminals ({terminalSessions.filter(s => s.status === 'running').length} running):</span>
+            </button>
+
+            {terminalSessions.map((sess) => {
+              const isRunning = sess.status === 'running';
+              return (
+                <div
+                  key={sess.sessionId}
+                  onClick={() => onOpenTerminal?.(sess.sessionId)}
+                  title={`Click to open terminal session ${sess.sessionId} ($ ${sess.command})`}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    background: isRunning ? 'rgba(16, 185, 129, 0.12)' : 'rgba(30, 41, 59, 0.6)',
+                    border: `1px solid ${isRunning ? 'rgba(16, 185, 129, 0.35)' : 'var(--border-color)'}`,
+                    color: isRunning ? '#10b981' : 'var(--text-muted)',
+                    padding: '3px 9px',
+                    borderRadius: '12px',
+                    fontSize: '0.73rem',
+                    fontFamily: 'var(--font-code)',
+                    fontWeight: 600,
+                    whiteSpace: 'nowrap',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease',
+                    flexShrink: 0,
+                  }}
+                >
+                  <div
+                    style={{
+                      width: '6px',
+                      height: '6px',
+                      borderRadius: '50%',
+                      background: isRunning ? '#10b981' : '#ef4444',
+                      boxShadow: isRunning ? '0 0 6px #10b981' : 'none',
+                    }}
+                  />
+                  <span>{sess.sessionId}</span>
+                  <span style={{ color: 'var(--text-dim)', maxWidth: '140px', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    $ {sess.command}
+                  </span>
+                  {onTerminateTerminalSession && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onTerminateTerminalSession(sess.sessionId);
+                      }}
+                      title="Remove Terminal Session"
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        color: 'var(--text-dim)',
+                        cursor: 'pointer',
+                        padding: '1px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        borderRadius: '3px',
+                      }}
+                    >
+                      <X size={11} />
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
         {/* Quick Helper Chips Bar */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px', overflowX: 'auto', paddingBottom: '2px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.725rem', fontWeight: 600, color: 'var(--accent-primary)', paddingRight: '6px', whiteSpace: 'nowrap' }}>

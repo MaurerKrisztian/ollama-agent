@@ -425,6 +425,10 @@ export const BUILTIN_TOOLS: ToolDefinition[] = [
           type: 'string',
           description: 'The bash shell command string to execute.',
         },
+        gui_mode: {
+          type: 'boolean',
+          description: 'Optional. Set to true to launch the command in a visible desktop GUI terminal window.',
+        },
       },
       required: ['command'],
     },
@@ -546,6 +550,10 @@ export const BUILTIN_TOOLS: ToolDefinition[] = [
         session_id: {
           type: 'string',
           description: 'Optional custom short ID/name for the session (e.g. "dev-server"). Auto-generated if omitted.',
+        },
+        gui_mode: {
+          type: 'boolean',
+          description: 'Optional. Set to true to launch the session in a visible desktop GUI terminal window.',
         },
       },
       required: ['command'],
@@ -1863,9 +1871,10 @@ export class ToolExecutor {
         const cmdStr = args.command;
         if (!cmdStr) return { error: 'Parameter command is required.' };
         const trimmed = cmdStr.trim();
-        if (trimmed.endsWith('&') || trimmed.includes('test:interactive') || trimmed.includes('--profile')) {
+        const guiMode = args.gui_mode !== undefined ? Boolean(args.gui_mode) : undefined;
+        if (guiMode || trimmed.endsWith('&') || trimmed.includes('test:interactive') || trimmed.includes('--profile')) {
           const cleanCmd = trimmed.replace(/\s*&\s*$/, '');
-          return this.terminalManager.startSession(cleanCmd, undefined, this.workingDir);
+          return this.terminalManager.startSession(cleanCmd, undefined, this.workingDir, guiMode !== undefined ? { guiMode } : undefined);
         }
         return await this.executeCommand(cmdStr);
       }
@@ -1916,9 +1925,10 @@ export class ToolExecutor {
       }
 
       case 'start_terminal_session': {
-        const { command, session_id } = args;
+        const { command, session_id, gui_mode } = args;
         if (!command) return { error: 'Parameter command is required.' };
-        return this.terminalManager.startSession(command, session_id, this.workingDir);
+        const guiModeOpt = gui_mode !== undefined ? { guiMode: Boolean(gui_mode) } : undefined;
+        return this.terminalManager.startSession(command, session_id, this.workingDir, guiModeOpt);
       }
 
       case 'send_terminal_input': {
@@ -1930,7 +1940,17 @@ export class ToolExecutor {
       case 'read_terminal_output': {
         const { session_id, tail_lines } = args;
         if (!session_id) return { error: 'Parameter session_id is required.' };
-        return this.terminalManager.readOutput(session_id, tail_lines || 50);
+        const res = this.terminalManager.readOutput(session_id, tail_lines || 50);
+        if (res.success && res.output?.lines) {
+          return {
+            ...res,
+            output: {
+              ...res.output,
+              lines: res.output.lines.map((l) => stripAnsiCodes(l)),
+            },
+          };
+        }
+        return res;
       }
 
       case 'list_terminal_sessions': {

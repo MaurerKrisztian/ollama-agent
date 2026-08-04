@@ -83,6 +83,8 @@ const agent = new AgentEngine({
   systemPrompt: initialConfig.systemPrompt,
   showWorkingDirInfo: initialConfig.showWorkingDirInfo,
   pruningConfig: initialConfig.pruningConfig,
+  terminalGuiMode: initialConfig.terminalGuiMode,
+  customTerminalCmd: initialConfig.customTerminalCmd,
 });
 
 const chatSessions = new ChatSessionStore(CHAT_SESSIONS_FILE_PATH);
@@ -144,10 +146,14 @@ const getPublicConfigAsync = async () => {
   const cfg = agent.getConfig();
   const supportsThinking = await agent.checkModelThinkingSupport(cfg.model);
   const effectiveThinking = (cfg.enableThinking !== false) && supportsThinking;
+  const supportsNativeTools = await agent.checkModelToolSupport(cfg.model);
+  const toolMode = supportsNativeTools ? 'native' : 'prompt_fallback';
   return {
     ...getPublicConfig(),
     supportsThinking,
     effectiveThinking,
+    supportsNativeTools,
+    toolMode,
   };
 };
 
@@ -434,6 +440,7 @@ function startLiveStateUpdates() {
   liveStateInterval = setInterval(() => {
     broadcastSystemMetrics();
     broadcastRunningModels();
+    broadcastTerminalSessions();
   }, 3000);
 }
 
@@ -484,7 +491,8 @@ app.get('/api/models/show', async (req, res) => {
     try {
       const details = await agent.getModelDetails(modelName);
       const supportsThinking = await agent.checkModelThinkingSupport(modelName);
-      return res.json({ success: true, name: modelName, details, supportsThinking });
+      const supportsNativeTools = await agent.checkModelToolSupport(modelName);
+      return res.json({ success: true, name: modelName, details, supportsThinking, supportsNativeTools });
     } catch (err: any) {
       // If Ollama returns 404 (model not pulled or name missing tag), return success: false with error string (200 status)
       return res.json({ success: false, name: modelName, error: err.message });
@@ -784,12 +792,16 @@ app.get('/api/terminal/sessions/:id/output', (req, res) => {
 
 // POST /api/terminal/sessions - Start new terminal session
 app.post('/api/terminal/sessions', (req, res) => {
-  const { command, sessionId } = req.body || {};
+  const { command, sessionId, guiMode } = req.body || {};
   if (!command || typeof command !== 'string') {
     return res.status(400).json({ success: false, error: 'command (string) is required.' });
   }
   const terminalManager = agent.getToolExecutor().getTerminalManager();
-  const result = terminalManager.startSession(command, sessionId, agent.getConfig().workingDir);
+  const config = agent.getConfig();
+  const result = terminalManager.startSession(command, sessionId, config.workingDir, {
+    guiMode: guiMode ?? config.terminalGuiMode,
+    customTerminalCmd: config.customTerminalCmd,
+  });
   if (!result.success) {
     return res.status(400).json({ success: false, error: result.error });
   }
@@ -812,11 +824,14 @@ app.post('/api/terminal/sessions/:id/input', (req, res) => {
   res.json({ success: true });
 });
 
-// DELETE /api/terminal/sessions/:id - Terminate session
+// DELETE /api/terminal/sessions/:id - Terminate and remove terminal session
 app.delete('/api/terminal/sessions/:id', (req, res) => {
   const terminalManager = findTerminalManager(req.params.id);
   if (!terminalManager) return res.status(404).json({ success: false, error: 'Terminal session not found.' });
-  const result = terminalManager.terminateSession(req.params.id);
+  const action = req.query.action;
+  const result = action === 'kill'
+    ? terminalManager.terminateSession(req.params.id)
+    : terminalManager.removeSession(req.params.id);
   if (!result.success) {
     return res.status(404).json({ success: false, error: result.error });
   }
@@ -1163,7 +1178,7 @@ app.post('/api/chat/revert', async (req, res) => {
 
 // POST /api/chat/tool-settings - Update tool approval preferences & max loops & thinking
 app.post('/api/chat/tool-settings', (req, res) => {
-  const { terminalMode, fileEditMode: newFileEditMode, allowedCommands, maxLoops, enableThinking, preventRepeatedCalls, complexityProfile, enabledTools } = req.body;
+  const { terminalMode, fileEditMode: newFileEditMode, allowedCommands, maxLoops, enableThinking, preventRepeatedCalls, complexityProfile, enabledTools, terminalGuiMode, customTerminalCmd } = req.body;
   if (terminalMode === 'confirm' || terminalMode === 'auto') {
     terminalRequireConfirm = terminalMode === 'confirm';
   }
@@ -1185,6 +1200,12 @@ app.post('/api/chat/tool-settings', (req, res) => {
   if (complexityProfile === 'simple' || complexityProfile === 'medium' || complexityProfile === 'advanced') {
     for (const engine of getConfigurableEngines()) engine.updateConfig({ complexityProfile });
   }
+  if (typeof terminalGuiMode === 'boolean') {
+    for (const engine of getConfigurableEngines()) engine.updateConfig({ terminalGuiMode });
+  }
+  if (typeof customTerminalCmd === 'string') {
+    for (const engine of getConfigurableEngines()) engine.updateConfig({ customTerminalCmd });
+  }
   if (enabledTools && typeof enabledTools === 'object' && !Array.isArray(enabledTools)) {
     const sanitizedEnabledTools = Object.fromEntries(BUILTIN_TOOLS.map((tool) => [
       tool.name,
@@ -1204,6 +1225,8 @@ app.post('/api/chat/tool-settings', (req, res) => {
     complexityProfile: agent.getConfig().complexityProfile,
     enabledTools: agent.getConfig().enabledTools,
     maxLoops: agent.getConfig().maxLoops,
+    terminalGuiMode: agent.getConfig().terminalGuiMode,
+    customTerminalCmd: agent.getConfig().customTerminalCmd,
   });
 
   io.emit('config:state', getConfigState());
@@ -1553,6 +1576,10 @@ app.post('/api/chat', async (req, res) => {
         saveChatSession(sessionId, sessionAgent);
         sendEvent('message_updated', msg);
       },
+      onToolStream: (name, argsText) => {
+        activeToolStates.set(sessionId, { name, args: { _streaming: true, _rawText: argsText } });
+        sendEvent('tool_stream', { name, argsText });
+      },
       onToolStart: (name, args) => {
         activeToolStates.set(sessionId, { name, args });
         sendEvent('tool_start', { name, args });
@@ -1565,6 +1592,9 @@ app.post('/api/chat', async (req, res) => {
       onToolEnd: (name, result) => {
         activeToolStates.delete(sessionId);
         sendEvent('tool_end', { name, result });
+        if (name.includes('terminal') || name === 'execute_command') {
+          broadcastTerminalSessions();
+        }
       },
       onModelResponse: (metrics) => {
         sendEvent('model_response', { metrics });

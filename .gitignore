@@ -30,6 +30,7 @@ benchmark_runs/
 Thumbs.db
 
 # Local agent metadata
+.agent/
 .agents/
 .codex/
 

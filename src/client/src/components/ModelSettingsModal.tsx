@@ -1,5 +1,5 @@
 import React, { useMemo, useRef, useState } from 'react';
-import { AlertCircle, Brain, CheckCircle2, Cpu, Download, Info, Loader2, Power, Search, SlidersHorizontal, X } from 'lucide-react';
+import { AlertCircle, Brain, CheckCircle2, Cpu, Download, Info, Loader2, Power, Search, SlidersHorizontal, Terminal, X } from 'lucide-react';
 import { AgentConfig, OllamaModelInfo, OllamaRunningModelInfo, SystemMetrics, ollamaModelNamesMatch } from '../types';
 
 interface ModelSettingsModalProps {
@@ -353,6 +353,26 @@ export const ModelSettingsModal: React.FC<ModelSettingsModalProps> = ({
             >
               <span /> {config.enableThinking !== false ? (config.supportsThinking === false ? 'On (Unsupported)' : 'On') : 'Off'}
             </button>
+          </section>
+
+          <section className="model-settings-section model-tool-setting">
+            <div>
+              <label><Terminal size={17} /> Tool calling capability</label>
+              <p style={{ margin: 0 }}>
+                {config.supportsNativeTools !== false ? (
+                  <span style={{ color: 'var(--accent-teal)', fontWeight: 500 }}>
+                    ✓ Model natively supports Ollama function tool calling.
+                  </span>
+                ) : (
+                  <span style={{ color: '#f59e0b', fontWeight: 500 }}>
+                    ⚠️ Model does not support native Ollama tools. Active mode: System-Prompt Fallback.
+                  </span>
+                )}
+              </p>
+            </div>
+            <span style={{ fontSize: '0.8rem', fontWeight: 600, padding: '4px 10px', borderRadius: '6px', background: config.supportsNativeTools !== false ? 'rgba(20, 184, 166, 0.15)' : 'rgba(245, 158, 11, 0.15)', color: config.supportsNativeTools !== false ? 'var(--accent-teal)' : '#f59e0b' }}>
+              {config.supportsNativeTools !== false ? 'Native' : 'Prompt Fallback'}
+            </span>
           </section>
         </div>
       </div>

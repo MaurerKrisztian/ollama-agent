@@ -133,8 +133,13 @@ export interface AgentConfig {
   complexityProfile?: ToolComplexityProfile;
   pruningConfig?: ContextPruningConfig;
   enableThinking?: boolean;
+  supportsThinking?: boolean;
+  supportsNativeTools?: boolean;
+  toolMode?: 'native' | 'prompt_fallback';
   preventRepeatedCalls?: boolean;
   enabledTools?: Record<string, boolean>;
+  terminalGuiMode?: boolean;
+  customTerminalCmd?: string;
 }
 
 export interface ContextInfo {
@@ -188,6 +193,7 @@ export interface TerminalSessionInfo {
   startedAt: string;
   workingDir: string;
   lineCount: number;
+  guiMode?: boolean;
 }
 
 export interface TerminalSessionOutput {
@@ -197,6 +203,7 @@ export interface TerminalSessionOutput {
   exitCode: number | null;
   lines: string[];
   lineCount: number;
+  guiMode?: boolean;
 }
 export interface CategorizedError {
   code: string;

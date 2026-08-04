@@ -297,6 +297,7 @@ export class ContextManager {
     const isPruned = (content: string) => content.startsWith('[Context Pruned:');
 
     const readFileResponsesByPath = new Map<string, { msgIndex: number; toolCallId?: string }[]>();
+    const readTerminalResponsesBySession = new Map<string, { msgIndex: number; toolCallId?: string }[]>();
     const mutations: { path: string; toolName: string; msgIndex: number }[] = [];
 
     this.messages.forEach((msg, msgIndex) => {
@@ -306,7 +307,7 @@ export class ContextManager {
       const toolName = msg.name || tcInfo?.name || '';
       const toolArgs = tcInfo?.arguments || {};
 
-      // Strategy 1 & 2: Collect file reads & file mutations
+      // Strategy 1 & 2: Collect file reads, terminal reads & file mutations
       if (toolName === 'read_file') {
         const filePath = toolArgs.relative_path || toolArgs.path || toolArgs.file;
         if (filePath) {
@@ -314,6 +315,11 @@ export class ContextManager {
           list.push({ msgIndex, toolCallId: msg.tool_call_id });
           readFileResponsesByPath.set(filePath, list);
         }
+      } else if (toolName === 'read_terminal_output') {
+        const sessionId = toolArgs.session_id || 'default';
+        const list = readTerminalResponsesBySession.get(sessionId) || [];
+        list.push({ msgIndex, toolCallId: msg.tool_call_id });
+        readTerminalResponsesBySession.set(sessionId, list);
       } else if (['edit_file', 'replace_file', 'create_file', 'apply_patch'].includes(toolName)) {
         const filePath = toolArgs.relative_path || toolArgs.path || toolArgs.file;
         if (filePath) {
@@ -339,7 +345,7 @@ export class ContextManager {
       }
     });
 
-    // Strategy 1: Superseded File Read Pruning (Latest-Only)
+    // Strategy 1: Superseded File & Terminal Read Pruning (Latest-Only)
     if (this.pruningConfig.pruneSupersededReads) {
       readFileResponsesByPath.forEach((responses, filePath) => {
         if (responses.length > 1) {
@@ -347,6 +353,17 @@ export class ContextManager {
             const msg = this.messages[responses[i].msgIndex];
             if (!isPruned(msg.content)) {
               msg.content = `[Context Pruned: Content of '${filePath}' superseded by a newer read_file tool response.]`;
+            }
+          }
+        }
+      });
+
+      readTerminalResponsesBySession.forEach((responses, sessionId) => {
+        if (responses.length > 1) {
+          for (let i = 0; i < responses.length - 1; i++) {
+            const msg = this.messages[responses[i].msgIndex];
+            if (!isPruned(msg.content)) {
+              msg.content = `[Context Pruned: Terminal output of session '${sessionId}' superseded by a newer read_terminal_output tool response.]`;
             }
           }
         }
