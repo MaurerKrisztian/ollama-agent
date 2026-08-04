@@ -862,6 +862,7 @@ ${conversationText}`;
       // If Assistant requested tool calls, execute them sequentially
       if (res.tool_calls && res.tool_calls.length > 0) {
         let anyToolFailedThisRound = false;
+        let deferredAutoReadMessage: any = null;
         for (const call of res.tool_calls) {
           callbacks?.signal?.throwIfAborted();
           if (
@@ -1061,6 +1062,28 @@ ${conversationText}`;
             if (call.name === 'replace_file') {
               executedToolCounts.set('edit_file', (executedToolCounts.get('edit_file') || 0) + 1);
             }
+
+            // After a successful file edit, automatically reread the file so the model
+            // sees the current content instead of stale pre-edit text.
+            // Store this to be added AFTER the mutation result message.
+            if (call.name === 'edit_file' || call.name === 'replace_file') {
+              const postEditPath = toolResult?.file_path;
+              if (typeof postEditPath === 'string' && postEditPath) {
+                callbacks?.onToolStart?.('read_file', { relative_path: postEditPath });
+                const postEditRead = await this.toolExecutor.executeTool('read_file', { relative_path: postEditPath });
+                callbacks?.onToolEnd?.('read_file', postEditRead);
+                
+                if (postEditRead && !postEditRead.error) {
+                  const resultStr = JSON.stringify(postEditRead, null, 2);
+                  deferredAutoReadMessage = {
+                    role: 'tool' as const,
+                    name: 'read_file',
+                    tool_call_id: `synthetic-${Date.now()}`,
+                    content: resultStr,
+                  };
+                }
+              }
+            }
           } else if (call.name === 'edit_file' || call.name === 'replace_file') {
             failedToolCalls.set(callFingerprint, (failedToolCalls.get(callFingerprint) || 0) + 1);
             continuationReminder =
@@ -1107,6 +1130,13 @@ ${conversationText}`;
             displayContent: synthesisResult ? fullResultStr : undefined,
           }, callbacks?.onMessageUpdated);
           if (callbacks?.onMessageAdded) callbacks.onMessageAdded(toolMsg);
+
+          // Now add the deferred auto-read message AFTER the mutation result
+          if (deferredAutoReadMessage) {
+            const autoReadMsg = this.contextManager.addMessage(deferredAutoReadMessage);
+            if (callbacks?.onMessageAdded) callbacks.onMessageAdded(autoReadMsg);
+            deferredAutoReadMessage = null;
+          }
         }
 
         const workflowCompletedAfterThisCall =

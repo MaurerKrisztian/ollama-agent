@@ -309,7 +309,17 @@ export class ContextManager {
 
       // Strategy 1 & 2: Collect file reads, terminal reads & file mutations
       if (toolName === 'read_file') {
-        const filePath = toolArgs.relative_path || toolArgs.path || toolArgs.file;
+        let filePath = toolArgs.relative_path || toolArgs.path || toolArgs.file;
+         
+        // Fallback: extract file_path from tool result JSON if not found in tool_call args
+        // (handles synthetic/auto-triggered reads without proper tool_call linkage)
+        if (!filePath && typeof msg.content === 'string') {
+          try {
+            const parsed = JSON.parse(msg.content);
+            filePath = parsed.file_path;
+          } catch (_) {}
+        }
+         
         if (filePath) {
           const list = readFileResponsesByPath.get(filePath) || [];
           list.push({ msgIndex, toolCallId: msg.tool_call_id });
@@ -321,7 +331,16 @@ export class ContextManager {
         list.push({ msgIndex, toolCallId: msg.tool_call_id });
         readTerminalResponsesBySession.set(sessionId, list);
       } else if (['edit_file', 'replace_file', 'create_file', 'apply_patch'].includes(toolName)) {
-        const filePath = toolArgs.relative_path || toolArgs.path || toolArgs.file;
+        let filePath = toolArgs.relative_path || toolArgs.path || toolArgs.file;
+         
+        // Fallback: extract file_path from tool result JSON if not found in tool_call args
+        if (!filePath && typeof msg.content === 'string') {
+          try {
+            const parsed = JSON.parse(msg.content);
+            filePath = parsed.file_path;
+          } catch (_) {}
+        }
+         
         if (filePath) {
           mutations.push({ path: filePath, toolName, msgIndex });
         }
@@ -347,9 +366,26 @@ export class ContextManager {
 
     // Strategy 1: Superseded File & Terminal Read Pruning (Latest-Only)
     if (this.pruningConfig.pruneSupersededReads) {
+      // Build set of reads that will be invalidated by mutations (Strategy 2)
+      // to avoid double-pruning them
+      const readsInvalidatedByMutation = new Set<number>();
+      if (this.pruningConfig.invalidateOnMutation) {
+        mutations.forEach((mut) => {
+          const reads = readFileResponsesByPath.get(mut.path) || [];
+          reads.forEach((readItem) => {
+            if (readItem.msgIndex < mut.msgIndex) {
+              readsInvalidatedByMutation.add(readItem.msgIndex);
+            }
+          });
+        });
+      }
+
       readFileResponsesByPath.forEach((responses, filePath) => {
         if (responses.length > 1) {
           for (let i = 0; i < responses.length - 1; i++) {
+            // Skip if this read will be pruned by Strategy 2
+            if (readsInvalidatedByMutation.has(responses[i].msgIndex)) continue;
+            
             const msg = this.messages[responses[i].msgIndex];
             if (!isPruned(msg.content)) {
               msg.content = `[Context Pruned: Content of '${filePath}' superseded by a newer read_file tool response.]`;
