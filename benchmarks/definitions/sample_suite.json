@@ -1,0 +1,13 @@
+{
+  "id": "sample_suite",
+  "name": "Sample Declarative Suite",
+  "description": "Sample benchmark suite grouping declarative test cases.",
+  "type": "custom",
+  "version": 1,
+  "testIds": [
+    "sample_01_fix_calculator_bug",
+    "sample_02_multi_step_user_feature",
+    "sample_03_rich_response_qa",
+    "sample_04_json_and_directory_check"
+  ]
+}

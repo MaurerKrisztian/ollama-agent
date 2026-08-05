@@ -1,15 +1,9 @@
 import { describeBenchmarkOutcome } from './describeOutcome.js';
-import { DEFAULT_BENCHMARK_CASES } from './suites/default.js';
-import { DRAGONBALL_BENCHMARK_CASES } from './suites/dragonball.js';
-import { FILE_EDIT_BENCHMARK_CASES } from './suites/fileEdit.js';
 import { loadDeclarativeBenchmarkCases } from './loader.js';
 import type { BenchmarkTestCase, BenchmarkTestCaseDefinition } from './types.js';
 
-// Register new suites here. Keeping registration explicit makes test ordering stable.
+// All benchmark cases are loaded dynamically from declarative JSON files in the root `benchmarks/cases/` directory.
 const BENCHMARK_CASE_GROUPS: readonly (readonly BenchmarkTestCaseDefinition[])[] = [
-  DEFAULT_BENCHMARK_CASES,
-  DRAGONBALL_BENCHMARK_CASES,
-  FILE_EDIT_BENCHMARK_CASES,
   loadDeclarativeBenchmarkCases(),
 ];
 

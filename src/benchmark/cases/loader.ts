@@ -11,8 +11,27 @@ const __dirname = path.dirname(__filename);
 const PROJECT_ROOT = path.resolve(__dirname, '../../..');
 const BENCHMARKS_DIR = path.join(PROJECT_ROOT, 'benchmarks');
 
+function collectJsonCaseFiles(dirPath: string): string[] {
+  const jsonFiles: string[] = [];
+  if (!fsSync.existsSync(dirPath)) return jsonFiles;
+
+  const entries = fsSync.readdirSync(dirPath, { withFileTypes: true });
+  for (const entry of entries) {
+    const fullPath = path.join(dirPath, entry.name);
+    if (entry.isDirectory()) {
+      if (['definitions', 'fixtures', 'verifiers', 'node_modules', '.git'].includes(entry.name)) {
+        continue;
+      }
+      jsonFiles.push(...collectJsonCaseFiles(fullPath));
+    } else if (entry.isFile() && entry.name.endsWith('.json')) {
+      jsonFiles.push(fullPath);
+    }
+  }
+  return jsonFiles;
+}
+
 /**
- * Loads declarative benchmark test cases from JSON files in the root `benchmarks/` directory.
+ * Loads declarative benchmark test cases from JSON files in the root `benchmarks/` directory (including `benchmarks/cases/`).
  */
 export function loadDeclarativeBenchmarkCases(): BenchmarkTestCaseDefinition[] {
   const loadedCases: BenchmarkTestCaseDefinition[] = [];
@@ -22,11 +41,9 @@ export function loadDeclarativeBenchmarkCases(): BenchmarkTestCaseDefinition[] {
   }
 
   try {
-    const entries = fsSync.readdirSync(BENCHMARKS_DIR);
+    const jsonFiles = collectJsonCaseFiles(BENCHMARKS_DIR);
 
-    for (const file of entries) {
-      if (!file.endsWith('.json')) continue;
-      const filePath = path.join(BENCHMARKS_DIR, file);
+    for (const filePath of jsonFiles) {
 
       try {
         const rawContent = fsSync.readFileSync(filePath, 'utf8');
@@ -84,9 +101,10 @@ export function loadDeclarativeBenchmarkCases(): BenchmarkTestCaseDefinition[] {
             : undefined;
 
           const prompt = item.prompt || multiStepPrompts?.[0]?.prompt || '';
-          const responseSpec = parseResponseSpec(item);
+          const responseSpec = parseResponseSpec(item) || multiStepPrompts?.[0]?.expectedResponseSpec;
           if (item && item.id && prompt) {
             const testCase: BenchmarkTestCaseDefinition = {
+              ...item,
               id: String(item.id),
               name: String(item.name || item.id),
               category: item.category || (multiStepPrompts && multiStepPrompts.length > 1 ? 'multi_step_workflow' : 'code_editing'),

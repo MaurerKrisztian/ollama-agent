@@ -86,46 +86,50 @@ The default subset shuffle is deterministic for this runner, but it is not Pytho
 `random.Random(0)` ordering used by `simple-evals`. Use the complete 1,266-question
 set when comparing a score directly with published full-dataset results.
 
-The benchmark code is split by responsibility:
+The benchmark repository structure is organized as follows:
 
 ```text
-benchmark/
-├── cases/                   # Scenario definitions and the suite registry
-│   ├── suites/              # One module per benchmark suite
-│   ├── describeOutcome.ts   # Generates user-facing pass criteria
-│   ├── benchmarks.ts        # Quick/comprehensive preset definitions
-│   ├── index.ts             # Registers case groups and builds the catalog
-│   └── types.ts             # Test-case and benchmark-definition schemas
-├── evaluation/              # Outcome verifiers
-├── fixtures/                # Disposable workspace setup
-├── runtime/                 # Docker runner and container entry point
-├── tests/                   # Benchmark framework tests
-└── types.ts                 # Runtime/report types
+benchmarks/                     # Root declarative data directory
+├── cases/                      # Individual scenario test JSON definitions
+├── definitions/                # Grouped benchmark suite manifest JSON files
+├── fixtures/                   # Workspace templates and mock file structures
+└── verifiers/                  # Helper verification scripts
+
+src/benchmark/                  # TypeScript framework and engine source
+├── cases/                      # Scenario definitions and the suite registry
+│   ├── suites/                 # One module per benchmark suite
+│   ├── describeOutcome.ts      # Generates user-facing pass criteria
+│   ├── benchmarks.ts           # Quick/comprehensive preset definitions
+│   ├── index.ts                # Registers case groups and builds the catalog
+│   └── types.ts                # Test-case and benchmark-definition schemas
+├── evaluation/                 # Outcome verifiers
+├── fixtures/                   # Disposable workspace setup
+├── runtime/                    # Docker runner and container entry point
+├── tests/                      # Benchmark framework tests
+└── types.ts                    # Runtime/report types
 ```
 
-## Add a benchmark
+## Add a benchmark test case
 
-1. Add a suite module under `cases/suites/` (or append to an existing suite).
-2. Register a new suite once in `cases/index.ts`.
-3. Add any files the scenario needs to `fixtures/mockEnvironment.ts`.
+1. Create or edit a `.json` file under `benchmarks/cases/` (e.g. `benchmarks/cases/my_feature.json`).
+2. Add your test case definitions to the JSON file (as a single object or an array of objects).
+3. If workspace files are required, add the template folder under `benchmarks/fixtures/<fixture-name>/`.
 4. Run `npm test` and `npm run typecheck`.
 
-Minimal suite module:
+Minimal test case JSON:
 
-```ts
-import { defineBenchmarkCases } from '../types.js';
-
-export const MY_BENCHMARK_CASES = defineBenchmarkCases([
+```json
+[
   {
-    id: 'test_read_service_version',
-    name: 'Read service version',
-    category: 'file_reading',
-    prompt: 'Read package.json and report its version.',
-    expectedResponseSubstrings: ['2.0.0'],
-    description: 'Checks version discovery from a workspace file.',
-    objective: 'Test targeted file reading.',
-  },
-]);
+    "id": "test_read_service_version",
+    "name": "Read service version",
+    "category": "file_reading",
+    "prompt": "Read package.json and report its version.",
+    "expectedResponseSubstrings": ["2.0.0"],
+    "description": "Checks version discovery from a workspace file.",
+    "objective": "Test targeted file reading."
+  }
+]
 ```
 
 Outcome descriptions are generated from the configured verifiers. Every case must
@@ -133,16 +137,25 @@ define at least one observable verifier, such as `expectedResponseSubstrings`,
 `expectedFileState`, `expectedDirectoryEntries`, `expectedToolResults`,
 `expectedFileJson`, or `verificationScript`.
 
-IDs must be unique across all registered suites. The registry checks this at startup.
+IDs must be unique across all registered test cases. The registry checks this at startup.
 
-## Benchmark definitions
+## Benchmark definitions & suites
 
-A benchmark definition is a named, ordered selection of existing test IDs. The Web UI
-ships with two immutable definitions: **Quick Benchmark**, which contains one
-representative case for every category, and **Comprehensive Benchmark**, which contains
-the complete catalog. Custom definitions can be created, edited, and deleted in the
-runner. They are persisted in `benchmark_runs/definitions.json` and are independent of
-saved run reports.
+A benchmark definition is a named, ordered selection of existing test IDs.
+
+1. **Declarative Benchmark Definitions**: Drop a `.json` manifest into `benchmarks/definitions/` (e.g., `benchmarks/definitions/smoke_suite.json`):
+   ```json
+   {
+     "id": "smoke_suite",
+     "name": "Smoke Suite",
+     "description": "Quick smoke test selection.",
+     "type": "custom",
+     "version": 1,
+     "testIds": ["test_read_service_version", "test_create_file"]
+   }
+   ```
+2. **Immutable Built-in Presets**: **Quick Benchmark** (one case per core category) and **Comprehensive Benchmark** (complete catalog).
+3. **UI / API Custom Definitions**: Dynamically created, edited, and deleted in the Web UI or via `POST /api/benchmark/definitions` (persisted in `benchmark_runs/definitions.json`).
 
 Each completed report contains a snapshot of the definition name, version, test IDs,
 and suite hash. Rankings are scoped to a matching suite hash, and the UI prevents

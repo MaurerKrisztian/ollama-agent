@@ -14,7 +14,8 @@ export type BenchmarkCategory =
   | 'project_context'
   | 'web_search'
   | 'real_web_search'
-  | 'ast_lsp_navigation';
+  | 'ast_lsp_navigation'
+  | 'examples';
 
 export interface MultiStepPrompt {
   stepId?: string;

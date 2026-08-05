@@ -39,6 +39,42 @@ function normalizeDescription(value: unknown): string {
   return typeof value === 'string' ? value.trim().slice(0, 500) : '';
 }
 
+async function readDeclarativeDefinitions(): Promise<BenchmarkDefinition[]> {
+  const definitionsDir = path.resolve('benchmarks/definitions');
+  try {
+    const entries = await fs.readdir(definitionsDir);
+    const definitions: BenchmarkDefinition[] = [];
+    for (const entry of entries) {
+      if (!entry.endsWith('.json')) continue;
+      const fullPath = path.join(definitionsDir, entry);
+      try {
+        const content = await fs.readFile(fullPath, 'utf8');
+        const parsed = JSON.parse(content);
+        const items = Array.isArray(parsed) ? parsed : [parsed];
+        for (const item of items) {
+          if (item && typeof item === 'object' && item.id && Array.isArray(item.testIds)) {
+            definitions.push({
+              id: String(item.id),
+              name: normalizeName(item.name || item.id),
+              description: normalizeDescription(item.description),
+              type: item.type || 'custom',
+              version: Number(item.version) || 1,
+              testIds: item.testIds,
+              createdAt: item.createdAt,
+              updatedAt: item.updatedAt,
+            });
+          }
+        }
+      } catch {
+        // ignore invalid files
+      }
+    }
+    return definitions;
+  } catch {
+    return [];
+  }
+}
+
 async function readCustomDefinitions(filePath: string): Promise<BenchmarkDefinition[]> {
   try {
     const parsed = JSON.parse(await fs.readFile(filePath, 'utf8')) as unknown;
@@ -66,7 +102,17 @@ export async function listBenchmarkDefinitions(
   filePath = DEFAULT_BENCHMARK_DEFINITIONS_PATH,
 ): Promise<BenchmarkDefinition[]> {
   const custom = await readCustomDefinitions(filePath);
-  return [...presetDefinitions(), ...custom];
+  const declarative = await readDeclarativeDefinitions();
+  const seenIds = new Set<string>();
+  const combined: BenchmarkDefinition[] = [];
+
+  for (const def of [...presetDefinitions(), ...declarative, ...custom]) {
+    if (!seenIds.has(def.id)) {
+      seenIds.add(def.id);
+      combined.push(def);
+    }
+  }
+  return combined;
 }
 
 export async function createBenchmarkDefinition(

@@ -1,0 +1,87 @@
+[
+  {
+    "id": "sample_01_fix_calculator_bug",
+    "name": "01. Single-Step Bug Fix with Hidden Verifier Script",
+    "category": "examples",
+    "description": "Demonstrates folder fixtures, result-based file checks, and hidden verifier script execution.",
+    "fixture": "sample-node-app",
+    "prompts": [
+      "Fix the division bug in `src/calculator.ts`. It currently returns `a + b` instead of `a / b`."
+    ],
+    "expectedFileState": [
+      {
+        "relativePath": "src/calculator.ts",
+        "mustExist": true,
+        "containsSubstrings": ["a / b"],
+        "excludesSubstrings": ["return a + b"]
+      }
+    ],
+    "verifierScriptPath": "sample-calculator-verify.sh"
+  },
+  {
+    "id": "sample_02_multi_step_user_feature",
+    "name": "02. Multi-Step Interactive Feature Building",
+    "category": "examples",
+    "description": "Demonstrates sequential multi-turn prompts with per-step file state outcome checks.",
+    "fixture": "default",
+    "prompts": [
+      {
+        "stepId": "create_user_model",
+        "prompt": "Create a new file `src/user.ts` exporting a `User` interface with `id: number`, `name: string`, and `email: string`.",
+        "expectedFileState": [
+          {
+            "relativePath": "src/user.ts",
+            "mustExist": true,
+            "containsSubstrings": ["export interface User", "id: number", "email: string"]
+          }
+        ]
+      },
+      {
+        "stepId": "add_email_validator",
+        "prompt": "Now update `src/user.ts` to export a function `isValidEmail(email: string): boolean` that checks if the string contains '@'.",
+        "expectedFileState": [
+          {
+            "relativePath": "src/user.ts",
+            "mustExist": true,
+            "containsSubstrings": ["export function isValidEmail", "@"]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "sample_03_rich_response_qa",
+    "name": "03. Codebase Q&A with Rich Response Verification",
+    "category": "examples",
+    "description": "Demonstrates evaluating the model's text response using include, exclude, and regex pattern matching.",
+    "fixture": "default",
+    "prompts": [
+      {
+        "prompt": "Read `retrieval/short_brief.txt` and tell me what the launch codename is.",
+        "expectedResponse": {
+          "include": ["AURORA-LIME"],
+          "exclude": ["CONFIDENTIAL_ERROR_SECRET"],
+          "regex": "AURORA-[A-Z]+"
+        }
+      }
+    ]
+  },
+  {
+    "id": "sample_04_json_and_directory_check",
+    "name": "04. Config Editing with Expected File JSON Values",
+    "category": "examples",
+    "description": "Demonstrates verifying exact JSON key-value updates in package.json or config files.",
+    "fixture": "default",
+    "prompts": [
+      "Update `package.json` to bump the version to `2.5.0` and change description to `Updated Fixture App`."
+    ],
+    "expectedFileJson": {
+      "relativePath": "package.json",
+      "values": {
+        "name": "fixture-agent-studio",
+        "version": "2.5.0",
+        "description": "Updated Fixture App"
+      }
+    }
+  }
+]

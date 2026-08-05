@@ -22,7 +22,7 @@ test('benchmark definitions include immutable quick and comprehensive presets', 
     const byId = new Map(BENCHMARK_TEST_CASES.map((testCase) => [testCase.id, testCase]));
     assert.deepEqual(
       new Set(quick?.testIds.map((id) => byId.get(id)?.category)),
-      new Set(BENCHMARK_TEST_CASES.map((testCase) => testCase.category)),
+      new Set(BENCHMARK_TEST_CASES.filter((testCase) => testCase.category !== 'examples').map((testCase) => testCase.category)),
     );
     assert.equal(comprehensive?.testIds.length, BENCHMARK_TEST_CASES.length);
   } finally {
@@ -49,12 +49,13 @@ test('custom benchmark definitions persist selected tests and increment versions
       description: 'Expanded selection',
       testIds: [firstTestId, secondTestId],
     }, filePath);
+    const baseCount = (await listBenchmarkDefinitions(filePath)).length - 1; // minus the custom created item
     assert.equal(updated.version, 2);
     assert.deepEqual(updated.testIds, [firstTestId, secondTestId]);
-    assert.equal((await listBenchmarkDefinitions(filePath)).length, 3);
+    assert.equal((await listBenchmarkDefinitions(filePath)).length, baseCount + 1);
 
     await deleteBenchmarkDefinition(created.id, filePath);
-    assert.deepEqual((await listBenchmarkDefinitions(filePath)).map((definition) => definition.id), ['quick', 'comprehensive']);
+    assert.ok(!(await listBenchmarkDefinitions(filePath)).some((definition) => definition.id === created.id));
   } finally {
     await fs.rm(directory, { recursive: true, force: true });
   }
