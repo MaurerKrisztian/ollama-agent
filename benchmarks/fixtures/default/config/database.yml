@@ -1,0 +1,6 @@
+development:
+  adapter: postgresql
+  encoding: unicode
+  pool: 5
+  legacy_ssl: true
+  timeout: 5000

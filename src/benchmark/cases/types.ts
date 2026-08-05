@@ -1,4 +1,4 @@
-import type { DirectoryEntriesSpec, FileStateSpec, ToolResultSpec } from '../types.js';
+import type { DirectoryEntriesSpec, FileStateSpec, ResponseSpec, ToolResultSpec } from '../types.js';
 
 export type BenchmarkCategory =
   | 'directory_reading'
@@ -28,6 +28,7 @@ export interface MultiStepPrompt {
   };
   expectedDirectoryEntries?: DirectoryEntriesSpec[];
   expectedResponseSubstrings?: string[];
+  expectedResponseSpec?: ResponseSpec;
   expectedToolResults?: ToolResultSpec[];
   verificationScript?: string;
 }
@@ -37,12 +38,14 @@ export interface BenchmarkTestCaseDefinition {
   name: string;
   category: BenchmarkCategory;
   prompt: string;
+  prompts?: Array<string | MultiStepPrompt>;
   difficulty?: 'easy' | 'medium' | 'hard';
   multiStepPrompts?: MultiStepPrompt[];
   expectedTool?: string | null;
   expectedToolSequence?: string[];
   expectedArgSubstrings?: Record<string, string>;
   expectedResponseSubstrings?: string[];
+  expectedResponseSpec?: ResponseSpec;
   enableProjectContext?: boolean;
   forbiddenToolCalls?: Array<{
     name: string;
@@ -57,6 +60,8 @@ export interface BenchmarkTestCaseDefinition {
   expectedDirectoryEntries?: DirectoryEntriesSpec[];
   expectedToolResults?: ToolResultSpec[];
   verificationScript?: string;
+  fixture?: string;
+  verifierScriptPath?: string;
   description: string;
   objective: string;
   requiredOutput?: string;

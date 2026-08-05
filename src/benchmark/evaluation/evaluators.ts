@@ -3,9 +3,45 @@ import fs from 'fs/promises';
 import path from 'path';
 import { promisify } from 'util';
 import type { BenchmarkTestCase } from '../cases/index.js';
-import type { DirectoryEntriesSpec, EvaluationResult, FileStateSpec, JsonValueSpec } from '../types.js';
+import type { DirectoryEntriesSpec, EvaluationResult, FileStateSpec, JsonValueSpec, ResponseSpec } from '../types.js';
 
 const execAsync = promisify(exec);
+
+export function evaluateResponseSpec(
+  responseContent: string,
+  spec: ResponseSpec
+): EvaluationResult {
+  const contentLower = responseContent.toLowerCase();
+
+  if (spec.exactMatch !== undefined && responseContent.trim() !== spec.exactMatch.trim()) {
+    return { passed: false, reason: `Final answer did not match exact expected text.` };
+  }
+
+  if (spec.regex) {
+    try {
+      const re = new RegExp(spec.regex, 'i');
+      if (!re.test(responseContent)) {
+        return { passed: false, reason: `Final answer did not match expected regex pattern: /${spec.regex}/i.` };
+      }
+    } catch (err: any) {
+      return { passed: false, reason: `Invalid regex pattern in benchmark specification: ${err.message}` };
+    }
+  }
+
+  for (const sub of spec.containsSubstrings ?? []) {
+    if (!contentLower.includes(sub.toLowerCase())) {
+      return { passed: false, reason: `Final answer was missing expected content: "${sub}".` };
+    }
+  }
+
+  for (const sub of spec.excludesSubstrings ?? []) {
+    if (contentLower.includes(sub.toLowerCase())) {
+      return { passed: false, reason: `Final answer contained forbidden content: "${sub}".` };
+    }
+  }
+
+  return { passed: true, reason: 'Final answer satisfied all response criteria.' };
+}
 
 export async function evaluateScriptVerification(
   workingDir: string,
@@ -136,6 +172,13 @@ export async function evaluateBenchmarkTask(
     });
   }
 
+  if (testCase.verifierScriptPath) {
+    const verifierCmd = testCase.verifierScriptPath.endsWith('.js')
+      ? `node /benchmark-verifiers/${testCase.verifierScriptPath} "${workingDir}"`
+      : `bash /benchmark-verifiers/${testCase.verifierScriptPath} "${workingDir}"`;
+    checks.push({ name: 'verifier_script_path', result: await evaluateScriptVerification(workingDir, verifierCmd) });
+  }
+
   if (testCase.verificationScript) {
     checks.push({ name: 'verification_script', result: await evaluateScriptVerification(workingDir, testCase.verificationScript) });
   }
@@ -151,15 +194,15 @@ export async function evaluateBenchmarkTask(
       result: await evaluateDirectoryEntries(workingDir, testCase.expectedDirectoryEntries, responseContent),
     });
   }
-  if (testCase.expectedResponseSubstrings?.length) {
-    const missing = testCase.expectedResponseSubstrings.filter(
-      (sub) => !responseContent.toLowerCase().includes(sub.toLowerCase())
-    );
+  if (testCase.expectedResponseSpec) {
     checks.push({
       name: 'response_content',
-      result: missing.length === 0
-        ? { passed: true, reason: 'Final answer contained every required fact.' }
-        : { passed: false, reason: `Final answer was missing: ${missing.join(', ')}.` },
+      result: evaluateResponseSpec(responseContent, testCase.expectedResponseSpec),
+    });
+  } else if (testCase.expectedResponseSubstrings?.length) {
+    checks.push({
+      name: 'response_content',
+      result: evaluateResponseSpec(responseContent, { containsSubstrings: testCase.expectedResponseSubstrings }),
     });
   }
   if (testCase.expectedToolResults?.length) {

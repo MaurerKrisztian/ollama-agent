@@ -1,0 +1,31 @@
+{
+  "id": "sample_02_multi_step_user_feature",
+  "name": "02. Multi-Step Interactive Feature Building",
+  "category": "multi_step_workflow",
+  "description": "Demonstrates sequential multi-turn prompts with per-step file state outcome checks.",
+  "fixture": "default",
+  "prompts": [
+    {
+      "stepId": "create_user_model",
+      "prompt": "Create a new file `src/user.ts` exporting a `User` interface with `id: number`, `name: string`, and `email: string`.",
+      "expectedFileState": [
+        {
+          "relativePath": "src/user.ts",
+          "mustExist": true,
+          "containsSubstrings": ["export interface User", "id: number", "email: string"]
+        }
+      ]
+    },
+    {
+      "stepId": "add_email_validator",
+      "prompt": "Now update `src/user.ts` to export a function `isValidEmail(email: string): boolean` that checks if the string contains '@'.",
+      "expectedFileState": [
+        {
+          "relativePath": "src/user.ts",
+          "mustExist": true,
+          "containsSubstrings": ["export function isValidEmail", "@"]
+        }
+      ]
+    }
+  ]
+}

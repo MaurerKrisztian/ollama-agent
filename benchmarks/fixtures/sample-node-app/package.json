@@ -1,0 +1,9 @@
+{
+  "name": "sample-node-app",
+  "version": "1.0.0",
+  "description": "Sample fixture application for benchmark validation",
+  "main": "src/calculator.js",
+  "scripts": {
+    "test": "node -e 'console.log(\"Sample tests passing\")'"
+  }
+}

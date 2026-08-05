@@ -27,6 +27,13 @@ export interface ToolResultSpec {
   containsSubstrings: string[];
 }
 
+export interface ResponseSpec {
+  containsSubstrings?: string[];
+  excludesSubstrings?: string[];
+  exactMatch?: string;
+  regex?: string;
+}
+
 export interface BenchmarkAgentConfig {
   temperature?: number;
   systemPrompt?: string;

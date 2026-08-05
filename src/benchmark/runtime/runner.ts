@@ -26,6 +26,7 @@ let imageBuildPromise: Promise<void> | null = null;
 
 interface ContainerRequest {
   testId: string;
+  testCase?: BenchmarkTestCase;
   modelName: string;
   ollamaHost: string;
   ollamaToken?: string;
@@ -96,6 +97,11 @@ async function runDockerContainer(
     '--mount', `type=bind,src=${workspaceDir},dst=/workspace`,
   ];
 
+  const verifiersDir = path.join(projectRoot, 'benchmarks', 'verifiers');
+  if (fsSync.existsSync(verifiersDir)) {
+    args.push('--mount', `type=bind,src=${verifiersDir},dst=/benchmark-verifiers,readonly`);
+  }
+
   if (request.agentConfig?.mountHostConfig || request.agentConfig?.framework) {
     const fw = request.agentConfig?.framework || 'native';
     if (fw === 'pi' || request.agentConfig?.mountHostConfig) {
@@ -118,6 +124,11 @@ async function runDockerContainer(
       const dir = path.join(os.homedir(), '.openclaw');
       if (fsSync.existsSync(dir)) args.push('--mount', `type=bind,src=${dir},dst=/root/.openclaw,readonly`);
     }
+  }
+
+  const benchmarksDir = path.resolve('benchmarks');
+  if (fsSync.existsSync(benchmarksDir)) {
+    args.push('--mount', `type=bind,src=${benchmarksDir},dst=/app/benchmarks,readonly`);
   }
 
   args.push(BENCHMARK_DOCKER_IMAGE);
@@ -149,7 +160,11 @@ async function runDockerContainer(
       }
     });
     child.stderr.on('data', (chunk: Buffer) => {
-      stderr += chunk.toString();
+      const text = chunk.toString();
+      stderr += text;
+      if (onStep) {
+        onStep({ type: 'docker_stderr', text });
+      }
     });
 
     const abort = () => {
@@ -201,8 +216,10 @@ export async function runSingleBenchmarkTest(
   const hostImageSetupMs = performance.now() - imageSetupStartedAt;
 
   try {
+    const testCase = BENCHMARK_TEST_CASES.find((item) => item.id === testId);
     await runDockerContainer({
       testId,
+      testCase,
       modelName,
       ollamaHost,
       ollamaToken,
@@ -231,7 +248,7 @@ export async function runBenchmarkAttemptInContainer(
   const timing = emptyTiming();
   timing.containerStartupMs = Math.max(0, Date.now() - (Number(process.env.BENCHMARK_CONTAINER_STARTED_AT) || Date.now()));
   const setupStartedAt = performance.now();
-  const workspace = await setupMockEnvironment('/workspace');
+  const workspace = await setupMockEnvironment('/workspace', testCase.fixture);
   timing.imageSetupMs = performance.now() - setupStartedAt;
 
   if (agentConfig?.framework && agentConfig.framework !== 'native') {
@@ -394,6 +411,16 @@ export async function runBenchmarkAttemptInContainer(
       const stepSpec = promptsToRun[stepIndex];
       let liveContentBuffer = '';
       let liveThinkingBuffer = '';
+      if (testCase.multiStepPrompts?.length && testCase.multiStepPrompts.length > 1) {
+        emitStep({
+          type: 'step_start',
+          stepIndex: stepIndex + 1,
+          totalSteps: promptsToRun.length,
+          stepId: stepSpec.stepId,
+          prompt: stepSpec.prompt,
+          timestamp: Date.now(),
+        });
+      }
       emitStep({ type: 'llm_start', model: modelName, timestamp: Date.now(), stepIndex });
 
       const aggregateResponse = await agent.sendMessage(stepSpec.prompt, {
@@ -463,6 +490,17 @@ export async function runBenchmarkAttemptInContainer(
           passed: stepEval.passed,
           reason: stepEval.reason,
           checks: stepEval.details?.checks,
+        });
+
+        emitStep({
+          type: 'step_evaluation',
+          stepIndex: stepIndex + 1,
+          totalSteps: promptsToRun.length,
+          stepId: stepSpec.stepId,
+          prompt: stepSpec.prompt,
+          passed: stepEval.passed,
+          reason: stepEval.reason,
+          timestamp: Date.now(),
         });
 
         if (!stepEval.passed) {

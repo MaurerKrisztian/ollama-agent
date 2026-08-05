@@ -1,14 +1,46 @@
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const PROJECT_ROOT = path.resolve(__dirname, '../../..');
+const FIXTURES_DIR = path.join(PROJECT_ROOT, 'benchmarks', 'fixtures');
+
+async function copyDir(src: string, dest: string) {
+  await fs.mkdir(dest, { recursive: true });
+  const entries = await fs.readdir(src, { withFileTypes: true });
+  for (const entry of entries) {
+    const srcPath = path.join(src, entry.name);
+    const destPath = path.join(dest, entry.name);
+    if (entry.isDirectory()) {
+      await copyDir(srcPath, destPath);
+    } else {
+      await fs.copyFile(srcPath, destPath);
+    }
+  }
+}
 
 export const MOCK_ENV_BASE_DIR = path.join(os.tmpdir(), 'local-model-chat-benchmark-mock');
 
-export async function setupMockEnvironment(workspaceDir?: string): Promise<string> {
+export async function setupMockEnvironment(workspaceDir?: string, fixtureName?: string): Promise<string> {
   const targetDir = workspaceDir
     ? path.resolve(workspaceDir)
     : path.join(MOCK_ENV_BASE_DIR, `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
   await fs.mkdir(targetDir, { recursive: true });
+
+  const selectedFixture = fixtureName || 'default';
+  const customFixturePath = path.join(FIXTURES_DIR, selectedFixture);
+  try {
+    const stat = await fs.stat(customFixturePath);
+    if (stat.isDirectory()) {
+      await copyDir(customFixturePath, targetDir);
+      return targetDir;
+    }
+  } catch (_) {
+    // Fallback to in-memory mock environment if fixture directory not found
+  }
 
   // Create distinct mock files and subdirectories (zero overlap with system prompt examples)
   const makeReport = (lineCount: number, factLine: number, fact: string) =>

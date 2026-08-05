@@ -835,7 +835,6 @@ ${conversationText}`;
         onToolCallChunk: (calls) => {
           for (const call of calls) {
             callbacks?.onToolStream?.(call.name, typeof call.arguments === 'string' ? call.arguments : JSON.stringify(call.arguments, null, 2));
-            callbacks?.onToolStart?.(call.name, call.arguments);
           }
         },
         signal: callbacks?.signal,

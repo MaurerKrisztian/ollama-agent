@@ -482,7 +482,8 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
       setElapsedMs(0);
     }
   }, [isRunning, runningSingleId]);
-  const [runSort, setRunSort] = useState<{ key: 'rank' | 'model' | 'date' | 'elapsed' | 'total' | 'average'; direction: 'asc' | 'desc' }>({ key: 'rank', direction: 'asc' });
+  const [runSort, setRunSort] = useState<{ key: 'rank' | 'model' | 'date' | 'elapsed' | 'total' | 'average'; direction: 'asc' | 'desc' }>({ key: 'date', direction: 'desc' });
+  const [selectedLeaderboardSuite, setSelectedLeaderboardSuite] = useState<string>('all');
 
   const loadSavedRuns = async (directory?: string) => {
     setRunsLoading(true);
@@ -904,7 +905,19 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
   runsBySuite.forEach((runs) => runs
     .sort((a, b) => b.successRatePercentage - a.successRatePercentage || a.comparisonDurationMs - b.comparisonDurationMs || b.runDate.localeCompare(a.runDate))
     .forEach((run, index) => performanceRankById.set(run.runId, index + 1)));
-  const rankedRuns = [...savedRuns].sort((a, b) => {
+  const uniqueSuites = Array.from(
+    new Map(
+      savedRuns.map((run) => [
+        run.benchmark.suiteHash,
+        { hash: run.benchmark.suiteHash, name: run.benchmark.definitionName, testCount: run.benchmark.testIds.length },
+      ])
+    ).values()
+  );
+  const filteredSavedRuns = selectedLeaderboardSuite === 'all'
+    ? savedRuns
+    : savedRuns.filter((run) => run.benchmark.suiteHash === selectedLeaderboardSuite);
+
+  const rankedRuns = [...filteredSavedRuns].sort((a, b) => {
     if (runSort.key === 'model') {
       const comparison = a.model.localeCompare(b.model, undefined, { numeric: true, sensitivity: 'base' });
       return runSort.direction === 'asc' ? comparison : -comparison;
@@ -1011,7 +1024,40 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
           ) : (
             <>
               <div className="glass-panel benchmark-ranking">
-                <div className="benchmark-ranking-header"><Trophy size={19} color="var(--accent-amber)" /><h3>Leaderboard</h3><span>{runSort.key === 'rank' ? 'Success rate first, then comparison time' : `Sorted by ${runSort.key} (${runSort.direction === 'asc' ? 'ascending' : 'descending'})`}</span></div>
+                <div className="benchmark-ranking-header">
+                  <Trophy size={19} color="var(--accent-amber)" />
+                  <h3>Leaderboard</h3>
+                  {uniqueSuites.length > 1 && (
+                    <div style={{ marginLeft: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span style={{ margin: 0, fontSize: '0.78rem', color: 'var(--text-muted)' }}>Benchmark:</span>
+                      <select
+                        value={selectedLeaderboardSuite}
+                        onChange={(e) => setSelectedLeaderboardSuite(e.target.value)}
+                        style={{
+                          padding: '3px 8px',
+                          borderRadius: '6px',
+                          background: 'var(--bg-secondary)',
+                          border: '1px solid var(--border-color)',
+                          color: 'var(--text-main)',
+                          fontSize: '0.78rem',
+                          cursor: 'pointer',
+                          outline: 'none',
+                        }}
+                      >
+                        <option value="all">All Benchmarks ({savedRuns.length} runs)</option>
+                        {uniqueSuites.map((suite) => {
+                          const count = savedRuns.filter((r) => r.benchmark.suiteHash === suite.hash).length;
+                          return (
+                            <option key={suite.hash} value={suite.hash}>
+                              {suite.name} ({count} run{count === 1 ? '' : 's'})
+                            </option>
+                          );
+                        })}
+                      </select>
+                    </div>
+                  )}
+                  <span>{runSort.key === 'rank' ? 'Success rate first, then comparison time' : `Sorted by ${runSort.key} (${runSort.direction === 'asc' ? 'ascending' : 'descending'})`}</span>
+                </div>
                 <div className="benchmark-table-scroll"><table><thead><tr><th>Compare</th><th>Suite rank</th><th>Run label</th><th>Benchmark</th><th><button className={runSort.key === 'model' ? 'benchmark-sort-active' : ''} onClick={() => toggleRunSort('model')}>Model <span>{sortIndicator('model')}</span></button></th><th><button className={runSort.key === 'date' ? 'benchmark-sort-active' : ''} onClick={() => toggleRunSort('date')}>Generated <span>{sortIndicator('date')}</span></button></th><th>Score</th><th>Passed</th><th><button className={runSort.key === 'elapsed' ? 'benchmark-sort-active' : ''} onClick={() => toggleRunSort('elapsed')} title="Actual start-to-finish benchmark duration">Wall time <span>{sortIndicator('elapsed')}</span></button></th><th><button className={runSort.key === 'total' ? 'benchmark-sort-active' : ''} onClick={() => toggleRunSort('total')}>Total compare <span>{sortIndicator('total')}</span></button></th><th><button className={runSort.key === 'average' ? 'benchmark-sort-active' : ''} onClick={() => toggleRunSort('average')}>Avg compare <span>{sortIndicator('average')}</span></button></th><th>Actions</th></tr></thead>
                   <tbody>{rankedRuns.map((run) => {
                     const frameworkName = String((run.modelConfig as any)?.framework || (run.results?.[0]?.agentConfig as any)?.framework || 'native');

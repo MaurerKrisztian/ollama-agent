@@ -1,0 +1,4 @@
+service:
+  name: fixture-api
+  endpoint: https://staging.internal/v1
+  timeout: 30

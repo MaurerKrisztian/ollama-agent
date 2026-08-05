@@ -1,0 +1,19 @@
+{
+  "id": "sample_01_fix_calculator_bug",
+  "name": "01. Single-Step Bug Fix with Hidden Verifier Script",
+  "category": "code_editing",
+  "description": "Demonstrates folder fixtures, result-based file checks, and hidden verifier script execution.",
+  "fixture": "sample-node-app",
+  "prompts": [
+    "Fix the division bug in `src/calculator.ts`. It currently returns `a + b` instead of `a / b`."
+  ],
+  "expectedFileState": [
+    {
+      "relativePath": "src/calculator.ts",
+      "mustExist": true,
+      "containsSubstrings": ["a / b"],
+      "excludesSubstrings": ["return a + b"]
+    }
+  ],
+  "verifierScriptPath": "sample-calculator-verify.sh"
+}

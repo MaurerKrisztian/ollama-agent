@@ -46,6 +46,8 @@ program
   .option('--parallelism <count>', 'Concurrent benchmark attempts (1-10)', '1')
   .option('--framework <name>', 'Benchmark framework engine (native, pi, opencode)', 'native')
   .option('--mount-host-config', 'Mount host config directory into benchmark sandbox', false)
+  .option('-v, --verbose', 'Show live streaming tool calls, thinking steps, and Docker container logs', false)
+  .option('--docker-logs', 'Alias to show live Docker container logs during benchmark runs', false)
   .parse(process.argv);
 
 const options = program.opts();
@@ -244,18 +246,97 @@ async function startCli() {
     let successfulAttempts = 0;
     let totalAttempts = 0;
 
+    const showLogs = Boolean(options.verbose || options.dockerLogs);
+    const stepHandler = showLogs ? (step: any) => {
+      if (step.type === 'step_start') {
+        console.log(`\n  ${chalk.yellow.bold(`📌 [Step ${step.stepIndex}/${step.totalSteps}]`)} ${chalk.bold.yellow(`"${step.prompt}"`)}`);
+      } else if (step.type === 'step_evaluation') {
+        const mark = step.passed ? chalk.green.bold(`  ✅ [Step ${step.stepIndex}/${step.totalSteps} PASSED]`) : chalk.red.bold(`  ❌ [Step ${step.stepIndex}/${step.totalSteps} FAILED]`);
+        console.log(`${mark} ${chalk.dim(step.reason)}`);
+      } else if (step.type === 'tool_start') {
+        const argsStr = step.args ? chalk.gray(JSON.stringify(step.args)) : '';
+        console.log(`  ${chalk.yellow('🛠️  [Tool Start]')} ${chalk.bold.white(step.name)} ${argsStr}`);
+      } else if (step.type === 'tool_end') {
+        console.log(`  ${chalk.green('✓  [Tool Done] ')} ${chalk.dim(step.name)}`);
+      } else if (step.type === 'assistant_message' && step.text?.trim()) {
+        console.log(`  ${chalk.cyan('💬 [Model]     ')} ${chalk.dim(step.text.trim().slice(0, 150))}`);
+      } else if (step.type === 'thinking' && step.text?.trim()) {
+        console.log(`  ${chalk.magenta('🧠 [Thinking]  ')} ${chalk.dim(step.text.trim().slice(0, 120))}...`);
+      } else if (step.type === 'docker_stderr' && step.text?.trim()) {
+        console.log(`  ${chalk.gray('🐳 [Container] ')} ${chalk.gray(step.text.trim())}`);
+      }
+    } : undefined;
+
     for (let i = 0; i < filteredTests.length; i++) {
       const test = filteredTests[i];
-      process.stdout.write(chalk.dim(`[${i + 1}/${filteredTests.length}] ${test.name} ... `));
+      console.log('\n' + chalk.cyan.bold('─'.repeat(70)));
+      console.log(`${chalk.bgCyan.black.bold(` TEST ${i + 1}/${filteredTests.length} `)} ${chalk.bold.white(test.name)} ${chalk.gray(`(${test.id})`)}`);
+      console.log(chalk.cyan.bold('─'.repeat(70)));
+
+      if (test.description && test.description !== test.prompt) {
+        console.log(`  ${chalk.gray('ℹ️  Description:')} ${chalk.dim(test.description)}`);
+      }
+      if (test.prompt) {
+        console.log(`  ${chalk.yellow('📝 Prompt:')}       ${chalk.bold.yellow(`"${test.prompt}"`)}`);
+      }
+      if (test.requiredOutput) {
+        console.log(`  ${chalk.blue('🎯 Target:')}       ${chalk.cyan(test.requiredOutput)}`);
+      }
+      console.log();
+
       try {
-        const result = await runBenchmarkCase(test, options.model, options.host, options.token, undefined, getBenchmarkAgentConfig(), benchmarkAttempts, undefined, benchmarkParallelism);
+        const result = await runBenchmarkCase(test, options.model, options.host, options.token, undefined, getBenchmarkAgentConfig(), benchmarkAttempts, undefined, benchmarkParallelism, stepHandler);
         successfulAttempts += result.successfulAttempts;
         totalAttempts += result.attemptCount;
-        const label = result.successRatePercentage === 100 ? chalk.green('RELIABLE') : chalk.yellow(`${result.successRatePercentage}%`);
-        console.log(label + chalk.dim(` — ${result.successfulAttempts}/${result.attemptCount} attempts, ${Math.round(result.durationMs)}ms average comparison time`));
+
+        const isSuccess = result.successRatePercentage === 100;
+        const statusTag = isSuccess
+          ? chalk.bgGreen.black.bold(' ✅ RELIABLE ')
+          : chalk.bgRed.white.bold(' ❌ FAILED ');
+
+        console.log(`\n  ${statusTag} ${isSuccess ? chalk.bold.green(`${result.successRatePercentage}% Success`) : chalk.bold.red(`${result.successRatePercentage}% Success`)} ${chalk.gray(`(${result.successfulAttempts}/${result.attemptCount} attempts · ${Math.round(result.durationMs)}ms wall time)`)}`);
+
+        const multiStepList = (result.verificationDetails as any)?.details?.multiStepDetails;
+        if (Array.isArray(multiStepList) && multiStepList.length > 0) {
+          console.log(`\n  ${chalk.bold.yellow('📋 Multi-Step Workflow Breakdown:')}`);
+          for (const s of multiStepList) {
+            const icon = s.passed ? chalk.green('  ✅') : chalk.red('  ❌');
+            const label = s.stepId ? `Step ${s.stepIndex} (${s.stepId})` : `Step ${s.stepIndex}`;
+            const statusText = s.passed ? chalk.green.bold('PASSED') : chalk.red.bold('FAILED');
+            console.log(`${icon} ${chalk.bold(label)} [${statusText}]: "${chalk.dim(s.prompt)}"`);
+            console.log(`     ${chalk.gray(`Outcome: ${s.reason}`)}`);
+          }
+        }
+
+        if (result.responseContent?.trim()) {
+          console.log(`\n  ${chalk.bold.cyan('💬 Final Model Answer:')}`);
+          const lines = result.responseContent.trim().split('\n');
+          lines.forEach((line) => console.log(`    ${chalk.cyan(line)}`));
+        }
+
+        if (result.reason) {
+          console.log(`\n  ${chalk.bold(isSuccess ? chalk.green('📋 Overall Verdict:') : chalk.red('📋 Overall Verdict:'))}`);
+          console.log(`    ${isSuccess ? chalk.green(result.reason) : chalk.red(result.reason)}`);
+        }
+
+        if (!isSuccess && Array.isArray(result.executionTrace) && result.executionTrace.length > 0) {
+          console.log(`\n  ${chalk.bold.red('🔍 Execution Trace & Model Thinking:')}`);
+          for (const event of result.executionTrace) {
+            if (event.thinking?.trim()) {
+              console.log(`    ${chalk.magenta('🧠 Thinking:')} ${chalk.dim(event.thinking.trim())}`);
+            }
+            if (event.type === 'tool_start') {
+              console.log(`    ${chalk.yellow('🛠️  Tool Call:')} ${chalk.bold.white(event.name)} ${chalk.gray(JSON.stringify(event.args || {}))}`);
+            }
+            if (event.type === 'tool_end') {
+              const snippet = typeof event.result === 'string' ? event.result.slice(0, 160) : JSON.stringify(event.result || {}).slice(0, 160);
+              console.log(`    ${chalk.gray('    ↳ Result:')} ${chalk.dim(snippet)}`);
+            }
+          }
+        }
       } catch (err: any) {
         totalAttempts += benchmarkAttempts;
-        console.log(chalk.red(`ERROR — ${err.message}`));
+        console.log(`\n  ${chalk.bgRed.white.bold(' 💥 ERROR ')} ${chalk.red(err.message)}`);
       }
     }
 
