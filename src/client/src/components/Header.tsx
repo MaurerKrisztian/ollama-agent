@@ -51,6 +51,7 @@ interface HeaderProps {
   onOpenTerminalSessions?: () => void;
   activeGenerationsCount?: number;
   onCancelAllGenerations?: () => void;
+  isCompacting?: boolean;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -86,6 +87,7 @@ export const Header: React.FC<HeaderProps> = ({
   onToggleLeftSidebar,
   activeTerminalCount = 0,
   onOpenTerminalSessions,
+  isCompacting,
 }) => {
   const headerLoadedModel = runningModels.find((model) =>
     (ollamaModelNamesMatch(model.name, config.model) || ollamaModelNamesMatch(model.model, config.model)) &&
@@ -596,26 +598,43 @@ export const Header: React.FC<HeaderProps> = ({
 
         <button
           onClick={onToggleSidebar}
-          title="Toggle Context Inspector"
+          title={isCompacting ? 'Compacting context into structured state package with Ollama...' : 'Toggle Context Inspector'}
           style={{
             display: 'flex',
             alignItems: 'center',
             gap: '8px',
-            background: sidebarOpen ? 'rgba(99, 102, 241, 0.2)' : 'rgba(15, 23, 42, 0.8)',
-            border: `1px solid ${sidebarOpen ? 'var(--accent-primary)' : 'var(--border-color)'}`,
-            color: 'var(--text-main)',
+            background: isCompacting
+              ? 'rgba(245, 158, 11, 0.15)'
+              : sidebarOpen
+                ? 'rgba(99, 102, 241, 0.2)'
+                : 'rgba(15, 23, 42, 0.8)',
+            border: `1px solid ${isCompacting ? 'rgba(245, 158, 11, 0.4)' : sidebarOpen ? 'var(--accent-primary)' : 'var(--border-color)'}`,
+            color: isCompacting ? 'var(--accent-amber)' : 'var(--text-main)',
             padding: '6px 12px',
             borderRadius: '8px',
             fontSize: '0.825rem',
             fontWeight: 500,
             cursor: 'pointer',
+            transition: 'all 0.15s ease',
           }}
         >
-          <Sidebar size={16} color={sidebarOpen ? 'var(--accent-primary)' : 'var(--text-muted)'} />
-          <span style={{ fontSize: '0.825rem', fontWeight: 600, color: sidebarOpen ? 'var(--accent-primary)' : 'var(--text-main)' }}>Context Inspector</span>
-          <span style={{ fontSize: '0.75rem', fontWeight: 600, background: 'rgba(99, 102, 241, 0.15)', color: 'var(--accent-primary)', padding: '2px 8px', borderRadius: '12px', border: '1px solid rgba(99, 102, 241, 0.3)' }}>
-            {contextInfo ? `${contextInfo.estimatedTokens.toLocaleString()} tokens` : '0 tokens'}
-          </span>
+          {isCompacting ? (
+            <>
+              <Loader2 size={16} className="spin" color="var(--accent-amber)" />
+              <span style={{ fontSize: '0.825rem', fontWeight: 600, color: 'var(--accent-amber)' }}>Compacting…</span>
+              <span style={{ fontSize: '0.75rem', fontWeight: 600, background: 'rgba(245, 158, 11, 0.15)', color: 'var(--accent-amber)', padding: '2px 8px', borderRadius: '12px', border: '1px solid rgba(245, 158, 11, 0.3)' }}>
+                ⚡ Summarizing State
+              </span>
+            </>
+          ) : (
+            <>
+              <Sidebar size={16} color={sidebarOpen ? 'var(--accent-primary)' : 'var(--text-muted)'} />
+              <span style={{ fontSize: '0.825rem', fontWeight: 600, color: sidebarOpen ? 'var(--accent-primary)' : 'var(--text-main)' }}>Context Inspector</span>
+              <span style={{ fontSize: '0.75rem', fontWeight: 600, background: 'rgba(99, 102, 241, 0.15)', color: 'var(--accent-primary)', padding: '2px 8px', borderRadius: '12px', border: '1px solid rgba(99, 102, 241, 0.3)' }}>
+                {contextInfo ? `${contextInfo.estimatedTokens.toLocaleString()} tokens` : '0 tokens'}
+              </span>
+            </>
+          )}
         </button>
       </div>
     </header>

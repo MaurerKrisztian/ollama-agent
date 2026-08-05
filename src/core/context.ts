@@ -6,9 +6,12 @@ export const DEFAULT_PRUNING_CONFIG: ContextPruningConfig = {
   enabled: true,
   pruneSupersededReads: true,
   invalidateOnMutation: true,
-  enableToolTTL: true,
+  enableToolTTL: false,
   terminalOutputTTLTurns: 5,
   webOutputTTLTurns: 5,
+  enableAutoCompaction: true,
+  autoCompactThresholdRatio: 0.85,
+  keepRecentTurnsOnCompact: 2,
 };
 
 export class ContextManager {
@@ -70,16 +73,23 @@ export class ContextManager {
   /**
    * Compact existing message context into a single summary message.
    */
-  public compactWithSummary(summary: string): ChatMessage {
+  /**
+   * Compact existing message context into a structured state message while preserving recent turns.
+   */
+  public compactWithSummary(summary: string, keepRecentCount?: number): ChatMessage {
+    const turnsToKeep = keepRecentCount ?? (this.pruningConfig.keepRecentTurnsOnCompact ?? 2);
+    const recentMessages = turnsToKeep > 0 ? this.messages.slice(-turnsToKeep) : [];
+
     const compactMessage: ChatMessage = {
       id: `msg_compact_${Date.now()}`,
       role: 'system',
-      content: `[COMPACTED CONVERSATION SUMMARY]\n${summary.trim()}`,
-      displayContent: `⚡ **Context Compacted**: All previous conversation history and tool outputs have been summarized to save context space.\n\n**Summary of Prior Context:**\n${summary.trim()}`,
+      content: `[COMPACTED CONVERSATION STATE]\n${summary.trim()}`,
+      displayContent: `⚡ **Context Compacted**: Prior conversation history has been summarized into a structured state package (retaining ${recentMessages.length} recent messages).\n\n${summary.trim()}`,
       timestamp: Date.now(),
     };
 
-    this.messages = [compactMessage];
+    this.messages = [compactMessage, ...recentMessages];
+    this.lastActualPromptTokens = undefined;
     return compactMessage;
   }
 
@@ -245,10 +255,12 @@ export class ContextManager {
 
   public clear(): void {
     this.messages = [];
+    this.lastActualPromptTokens = undefined;
   }
 
   public setMessages(messages: ChatMessage[]): void {
     this.messages = messages;
+    this.lastActualPromptTokens = undefined;
     if (this.pruningConfig.enabled) {
       this.applyPruning();
     }
@@ -488,11 +500,19 @@ export class ContextManager {
     return lines.join('\n');
   }
 
+  private lastActualPromptTokens?: number;
+
+  public setLastActualPromptTokens(tokens: number): void {
+    if (typeof tokens === 'number' && tokens > 0) {
+      this.lastActualPromptTokens = tokens;
+    }
+  }
+
   public getContextInfo(): ContextInfo {
     const converted = this.getConvertedContext();
     const rawJson = this.getRawJson();
     const charCount = converted.length;
-    const estimatedTokens = Math.ceil(charCount / 4);
+    const estimatedTokens = this.lastActualPromptTokens ?? Math.ceil(charCount / 3.3);
 
     return {
       totalMessages: this.messages.length,

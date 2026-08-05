@@ -758,6 +758,9 @@ test('agent applies tool profile and pruning configuration', () => {
       enableToolTTL: false,
       terminalOutputTTLTurns: 2,
       webOutputTTLTurns: 3,
+      enableAutoCompaction: true,
+      autoCompactThresholdRatio: 0.85,
+      keepRecentTurnsOnCompact: 2,
     },
   });
 
@@ -769,6 +772,9 @@ test('agent applies tool profile and pruning configuration', () => {
     enableToolTTL: false,
     terminalOutputTTLTurns: 2,
     webOutputTTLTurns: 3,
+    enableAutoCompaction: true,
+    autoCompactThresholdRatio: 0.85,
+    keepRecentTurnsOnCompact: 2,
   });
 
   agent.updateConfig({
@@ -780,10 +786,14 @@ test('agent applies tool profile and pruning configuration', () => {
       enableToolTTL: true,
       terminalOutputTTLTurns: 7,
       webOutputTTLTurns: 9,
+      enableAutoCompaction: false,
+      autoCompactThresholdRatio: 0.80,
+      keepRecentTurnsOnCompact: 3,
     },
   });
   assert.equal(agent.getConfig().complexityProfile, 'medium');
   assert.equal(agent.getContextManager().getPruningConfig().terminalOutputTTLTurns, 7);
+  assert.equal(agent.getContextManager().getPruningConfig().enableAutoCompaction, false);
 });
 
 test('agent omits disabled built-in tools from the model toolset', () => {

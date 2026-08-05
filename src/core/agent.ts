@@ -655,16 +655,41 @@ export class AgentEngine {
 
   public async compactContext(): Promise<{ success: boolean; summary?: string; reason?: string; context?: any; message?: ChatMessage }> {
     const messages = this.contextManager.getMessages();
-    if (messages.length <= 1) {
-      return { success: false, reason: 'Context is already minimal (1 or fewer messages).' };
+    if (messages.length <= 2) {
+      return { success: false, reason: 'Context is already minimal (2 or fewer messages).' };
     }
 
+    // Aggregate cumulative workspace file operations from history
+    const filesModified = new Set<string>();
+    const filesRead = new Set<string>();
+    for (const msg of messages) {
+      if (msg.tool_calls) {
+        for (const tc of msg.tool_calls) {
+          const path = tc.arguments?.relative_path || tc.arguments?.target_file || tc.arguments?.path;
+          if (path && typeof path === 'string') {
+            if (['edit_file', 'replace_file', 'create_file', 'apply_patch'].includes(tc.name)) {
+              filesModified.add(path);
+            } else if (tc.name === 'read_file') {
+              filesRead.add(path);
+            }
+          }
+        }
+      }
+    }
+
+    const stateHeader = [
+      filesModified.size > 0 ? `Files Modified/Created: ${Array.from(filesModified).join(', ')}` : null,
+      filesRead.size > 0 ? `Files Inspected: ${Array.from(filesRead).join(', ')}` : null,
+    ].filter(Boolean).join('\n');
+
     const conversationText = this.contextManager.getConvertedContext();
-    const prompt = `You are a context summarization assistant. Summarize the conversation history below concisely.
-Structure your output into these bullet points:
+    const prompt = `You are a context compaction assistant. Summarize the conversation state below into a clean, structured package.
+Structure your summary using these bullet points:
 - **User Goal**: What the user requested.
-- **Actions Taken**: Files read/edited, tools run, or web searches performed.
-- **Key Technical Findings & State**: Current code state, error tracebacks, or conclusions.
+- **Cumulative Workspace State**:
+${stateHeader || 'No files modified yet.'}
+- **Technical Decisions & Key Findings**: Code changes made, test results, or diagnostic conclusions.
+- **Unresolved Tasks & Next Steps**: What remains to be completed.
 
 Keep the summary dense and factual under 300 words. Do not use tool calls.
 
@@ -686,7 +711,7 @@ ${conversationText}`;
       });
       summaryText = summaryResult.content || '';
     } catch (err: any) {
-      summaryText = `Compacted ${messages.length} messages. User requested assistance with: ${messages.find((m) => m.role === 'user')?.content.slice(0, 100) || 'workspace tasks'}.`;
+      summaryText = `Compacted ${messages.length} messages.\n**User Goal**: ${messages.find((m) => m.role === 'user')?.content.slice(0, 150) || 'Workspace tasks'}.\n**Cumulative Workspace State**:\n${stateHeader || 'Workspace tools used.'}`;
     }
 
     const compactMsg = this.contextManager.compactWithSummary(summaryText);
@@ -711,6 +736,19 @@ ${conversationText}`;
         imageAttachments: callbacks?.userImageAttachments,
       });
       if (callbacks?.onMessageAdded) callbacks.onMessageAdded(userMsg);
+    }
+
+    // Auto-compaction threshold check before entering execution loop
+    const pruningConfig = this.contextManager.getPruningConfig();
+    if (pruningConfig.enableAutoCompaction !== false) {
+      const ctxInfo = this.contextManager.getContextInfo();
+      const maxCtx = this.config.contextWindow || 8192;
+      const ratio = pruningConfig.autoCompactThresholdRatio || 0.85;
+      if (ctxInfo.estimatedTokens / maxCtx >= ratio && this.contextManager.getMessages().length > 3) {
+        const pctStr = Math.round(ratio * 100);
+        callbacks?.onChunk?.(`⚡ **Auto-Compacting Context**: Threshold reached (${pctStr}%). Distilling conversation history into a structured state package...\n\n`);
+        await this.compactContext();
+      }
     }
 
     const maxLoopsConfig = this.config.maxLoops ?? 25;
@@ -856,7 +894,13 @@ ${conversationText}`;
         },
         signal: callbacks?.signal,
       });
-      if (res.metrics) callbacks?.onModelResponse?.(res.metrics);
+      if (res.metrics) {
+        const totalOllamaTokens = (res.metrics.promptEvalCount || 0) + (res.metrics.evalCount || 0);
+        if (totalOllamaTokens > 0) {
+          this.contextManager.setLastActualPromptTokens(totalOllamaTokens);
+        }
+        callbacks?.onModelResponse?.(res.metrics);
+      }
 
       // Add Assistant response message to Context if it has content, thinking, or tool calls
       const hasContentOrTools = !!(res.content?.trim() || res.thinking?.trim() || (res.tool_calls && res.tool_calls.length > 0));

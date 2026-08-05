@@ -5,6 +5,9 @@ export interface ContextPruningConfig {
   enableToolTTL: boolean;
   terminalOutputTTLTurns?: number;
   webOutputTTLTurns?: number;
+  enableAutoCompaction?: boolean;
+  autoCompactThresholdRatio?: number;
+  keepRecentTurnsOnCompact?: number;
 }
 
 export interface AgentConfig {

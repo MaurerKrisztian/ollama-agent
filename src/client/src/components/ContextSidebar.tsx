@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import { X, Copy, Check, FileJson, AlignLeft, Layers, FolderTree, RefreshCw, Cpu, Sparkles, Scissors, SlidersHorizontal, FolderOpen, Settings, BookOpen } from 'lucide-react';
+import { X, Copy, Check, FileJson, AlignLeft, Layers, FolderTree, RefreshCw, Cpu, Sparkles, Scissors, SlidersHorizontal, FolderOpen, Settings, BookOpen, Loader2 } from 'lucide-react';
 import { AgentConfig, ContextInfo, ContextPruningConfig } from '../types';
 
 interface ContextSidebarProps {
@@ -8,6 +8,7 @@ interface ContextSidebarProps {
   contextInfo: ContextInfo | null;
   activeModel?: string;
   onCompactContext?: () => void;
+  isCompacting?: boolean;
   onContextInfoChange?: (contextInfo: ContextInfo) => void;
   config?: AgentConfig;
   onOpenSystemPrompt?: () => void;
@@ -106,6 +107,7 @@ export const ContextSidebar: React.FC<ContextSidebarProps> = ({
   contextInfo,
   activeModel,
   onCompactContext,
+  isCompacting,
   onContextInfoChange,
   config,
   onOpenSystemPrompt,
@@ -363,6 +365,7 @@ export const ContextSidebar: React.FC<ContextSidebarProps> = ({
                 {onCompactContext && (
                   <button
                     onClick={onCompactContext}
+                    disabled={isCompacting}
                     title="Summarize and compact conversation history to save context space (/compact)"
                     style={{
                       marginTop: '4px',
@@ -373,16 +376,26 @@ export const ContextSidebar: React.FC<ContextSidebarProps> = ({
                       padding: '5px 10px',
                       borderRadius: '6px',
                       border: '1px solid rgba(99, 102, 241, 0.4)',
-                      background: 'rgba(99, 102, 241, 0.15)',
+                      background: isCompacting ? 'rgba(99, 102, 241, 0.3)' : 'rgba(99, 102, 241, 0.15)',
                       color: 'var(--accent-primary)',
                       fontSize: '0.75rem',
                       fontWeight: 600,
-                      cursor: 'pointer',
+                      cursor: isCompacting ? 'wait' : 'pointer',
+                      opacity: isCompacting ? 0.8 : 1,
                       transition: 'all 0.15s ease',
                     }}
                   >
-                    <Sparkles size={13} />
-                    <span>Compact Context (`/compact`)</span>
+                    {isCompacting ? (
+                      <>
+                        <Loader2 size={13} className="spin" />
+                        <span>Compacting Context with Ollama...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles size={13} />
+                        <span>Compact Context (`/compact`)</span>
+                      </>
+                    )}
                   </button>
                 )}
               </>
@@ -698,7 +711,7 @@ export const ContextSidebar: React.FC<ContextSidebarProps> = ({
                     <span style={{ fontWeight: 600, color: 'var(--text-main)', fontSize: '0.825rem' }}>Tool Output TTL Expiration</span>
                     <input
                       type="checkbox"
-                      checked={pruningConfig?.enableToolTTL ?? true}
+                      checked={pruningConfig?.enableToolTTL ?? false}
                       onChange={(e) => handleUpdatePruning({ enableToolTTL: e.target.checked })}
                       style={{ cursor: 'pointer', width: '16px', height: '16px' }}
                     />
@@ -731,6 +744,51 @@ export const ContextSidebar: React.FC<ContextSidebarProps> = ({
                             const value = Number.parseInt(e.target.value, 10);
                             handleUpdatePruning({ webOutputTTLTurns: Number.isNaN(value) ? 5 : Math.max(0, value) });
                           }}
+                          style={{ width: '100%', padding: '4px 8px', borderRadius: '4px', background: 'rgba(15, 23, 42, 0.8)', border: '1px solid var(--border-color)', color: '#fff', fontSize: '0.8rem' }}
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Strategy 4 */}
+                <div style={{ padding: '12px', background: 'rgba(30, 41, 59, 0.5)', border: '1px solid var(--border-color)', borderRadius: '8px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <span style={{ fontWeight: 600, color: 'var(--text-main)', fontSize: '0.825rem' }}>Auto-Compaction & State Summarization</span>
+                    <input
+                      type="checkbox"
+                      checked={pruningConfig?.enableAutoCompaction ?? true}
+                      onChange={(e) => handleUpdatePruning({ enableAutoCompaction: e.target.checked })}
+                      style={{ cursor: 'pointer', width: '16px', height: '16px' }}
+                    />
+                  </div>
+                  <p style={{ fontSize: '0.725rem', color: 'var(--text-muted)', margin: 0 }}>
+                    Automatically distills conversation history into a structured state package before context overflows while preserving recent turns.
+                  </p>
+
+                  {(pruningConfig?.enableAutoCompaction ?? true) && (
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginTop: '6px' }}>
+                      <div>
+                        <label style={{ fontSize: '0.7rem', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>Auto-Compact Threshold</label>
+                        <select
+                          value={pruningConfig?.autoCompactThresholdRatio ?? 0.85}
+                          onChange={(e) => handleUpdatePruning({ autoCompactThresholdRatio: parseFloat(e.target.value) })}
+                          style={{ width: '100%', padding: '4px 8px', borderRadius: '4px', background: 'rgba(15, 23, 42, 0.8)', border: '1px solid var(--border-color)', color: '#fff', fontSize: '0.8rem' }}
+                        >
+                          <option value={0.75}>75% of context</option>
+                          <option value={0.80}>80% of context</option>
+                          <option value={0.85}>85% of context</option>
+                          <option value={0.90}>90% of context</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label style={{ fontSize: '0.7rem', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>Retain Recent Turns</label>
+                        <input
+                          type="number"
+                          min="0"
+                          max="10"
+                          value={pruningConfig?.keepRecentTurnsOnCompact ?? 2}
+                          onChange={(e) => handleUpdatePruning({ keepRecentTurnsOnCompact: parseInt(e.target.value, 10) || 0 })}
                           style={{ width: '100%', padding: '4px 8px', borderRadius: '4px', background: 'rgba(15, 23, 42, 0.8)', border: '1px solid var(--border-color)', color: '#fff', fontSize: '0.8rem' }}
                         />
                       </div>

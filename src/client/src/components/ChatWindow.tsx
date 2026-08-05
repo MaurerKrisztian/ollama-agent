@@ -2848,6 +2848,7 @@ interface ChatWindowProps {
   onOpenTerminal?: (sessionId?: string) => void;
   onTerminateTerminalSession?: (sessionId: string) => Promise<void>;
   streamingMetrics?: { liveTokPerSec: number; tokenCount: number } | null;
+  isCompacting?: boolean;
 }
 
 const QUICK_HELPER_PROMPTS = [
@@ -2966,6 +2967,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   terminalSessions = [],
   onOpenTerminal,
   onTerminateTerminalSession,
+  isCompacting,
 }) => {
   const [input, setInput] = useState('');
   const [attachments, setAttachments] = useState<TextAttachment[]>([]);
@@ -3451,7 +3453,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                       type="button"
                       onClick={() => handleRewind(msg.id, msg.content)}
                       disabled={isGenerating}
-                      title="Rewind context to this prompt (deletes all subsequent context)"
+                      title="Rewind context & file snapshots to this prompt"
                       style={{
                         display: 'inline-flex',
                         alignItems: 'center',
@@ -3459,15 +3461,16 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                         background: 'rgba(30, 41, 59, 0.4)',
                         border: '1px solid var(--border-color)',
                         borderRadius: '6px',
-                        padding: '2px 7px',
+                        padding: '2px 8px',
                         color: 'var(--text-muted)',
                         fontSize: '0.7rem',
+                        fontWeight: 500,
                         cursor: 'pointer',
                         transition: 'all 0.15s ease',
                       }}
                     >
                       <RotateCcw size={11} />
-                      <span>Rewind to this prompt</span>
+                      <span>Rewind</span>
                     </button>
                   </div>
                   <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: 'rgba(255, 255, 255, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
@@ -3519,6 +3522,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                               onOpenFile={openAttachmentViewer}
                               isGenerating={isGenerating}
                               onRegenerateDeepResearch={onRegenerateDeepResearch}
+                              onCancelGeneration={onCancelGeneration}
                             />
                           );
                         })}
@@ -3752,7 +3756,6 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
           </div>
         )}
 
-        {/* Batch File Edit Review Card */}
         {pendingBatchEdits && pendingBatchEdits.length > 0 && onBatchApprove && onBatchToggle && (
           <BatchReviewCard
             files={pendingBatchEdits}
@@ -3760,6 +3763,19 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
             onConfirm={onBatchApprove}
             onToggleRevert={onBatchToggle}
           />
+        )}
+        {isCompacting && (
+          <div className="glass-panel animate-fade-in" style={{ display: 'flex', gap: '12px', alignItems: 'center', marginLeft: '44px', padding: '14px 18px', borderRadius: '12px', border: '1px solid rgba(99, 102, 241, 0.4)', background: 'rgba(99, 102, 241, 0.12)', color: '#a5b4fc', fontSize: '0.875rem', marginBottom: '12px' }}>
+            <Loader2 size={18} className="spin" style={{ flexShrink: 0, color: 'var(--accent-primary)' }} />
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <span style={{ fontWeight: 600, display: 'block', color: '#fff' }}>
+                ⚡ Compacting Conversation Context with Ollama...
+              </span>
+              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                Distilling turn history into a clean, state-preserving package. Recent turns will remain intact.
+              </span>
+            </div>
+          </div>
         )}
 
         <div ref={messagesEndRef} />

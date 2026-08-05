@@ -17,7 +17,7 @@ test('ContextManager initializes default pruning config and allows configuration
   assert.strictEqual(config.enabled, true);
   assert.strictEqual(config.pruneSupersededReads, true);
   assert.strictEqual(config.invalidateOnMutation, true);
-  assert.strictEqual(config.enableToolTTL, true);
+  assert.strictEqual(config.enableToolTTL, false);
 
   cm.setPruningConfig({ enabled: false });
   assert.strictEqual(cm.getPruningConfig().enabled, false);
@@ -99,7 +99,7 @@ test('Strategy 2: Post-Mutation Invalidation (Prune on File Edit)', () => {
 });
 
 test('Strategy 3: Tool Output TTL & Category-Based Pruning', () => {
-  const cm = new ContextManager(undefined, undefined, { terminalOutputTTLTurns: 2 });
+  const cm = new ContextManager(undefined, undefined, { enableToolTTL: true, terminalOutputTTLTurns: 2 });
 
   cm.addMessage({
     role: 'assistant',
@@ -165,4 +165,21 @@ test('Disabling pruning preserves all tool outputs intact', () => {
 
   assert.strictEqual(cm.getMessages().find((m) => m.id === read1.id)!.content, 'v1');
   assert.strictEqual(cm.getMessages().find((m) => m.id === read2.id)!.content, 'v2');
+});
+
+test('compactWithSummary retains recent turns and builds structured state message', () => {
+  const cm = new ContextManager();
+  cm.addMessage({ role: 'user', content: 'Turn 1 User' });
+  cm.addMessage({ role: 'assistant', content: 'Turn 1 Assistant' });
+  cm.addMessage({ role: 'user', content: 'Turn 2 User' });
+  cm.addMessage({ role: 'assistant', content: 'Turn 2 Assistant' });
+
+  const compactMsg = cm.compactWithSummary('Test State Summary', 2);
+  const messages = cm.getMessages();
+
+  assert.equal(messages.length, 3);
+  assert.equal(messages[0].id, compactMsg.id);
+  assert.match(messages[0].content, /COMPACTED CONVERSATION STATE/);
+  assert.equal(messages[1].content, 'Turn 2 User');
+  assert.equal(messages[2].content, 'Turn 2 Assistant');
 });

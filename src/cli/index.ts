@@ -522,6 +522,21 @@ async function startCli() {
           break;
         }
 
+        case '/compact': {
+          console.log(chalk.yellow('⚡ Compacting context into structured state package...'));
+          try {
+            const result = await agent.compactContext();
+            if (result.success) {
+              console.log(chalk.green(`✓ Context Compacted:\n${result.summary}`));
+            } else {
+              console.log(chalk.red(`❌ Compaction skipped: ${result.reason}`));
+            }
+          } catch (err: any) {
+            console.log(chalk.red(`❌ Error compacting context: ${err.message}`));
+          }
+          break;
+        }
+
         case '/pruning': {
           const [setting = '', rawValue = ''] = args.map((value) => value.trim().toLowerCase());
           const current = agent.getContextManager().getPruningConfig();
@@ -537,10 +552,11 @@ async function startCli() {
             break;
           }
 
-          const booleanSettings: Record<string, keyof Pick<ContextPruningConfig, 'pruneSupersededReads' | 'invalidateOnMutation' | 'enableToolTTL'>> = {
+          const booleanSettings: Record<string, keyof Pick<ContextPruningConfig, 'pruneSupersededReads' | 'invalidateOnMutation' | 'enableToolTTL' | 'enableAutoCompaction'>> = {
             superseded: 'pruneSupersededReads',
             mutation: 'invalidateOnMutation',
             ttl: 'enableToolTTL',
+            autocompact: 'enableAutoCompaction',
           };
           const booleanKey = booleanSettings[setting];
           if (booleanKey && (rawValue === 'on' || rawValue === 'off')) {
@@ -561,7 +577,7 @@ async function startCli() {
             break;
           }
 
-          console.log(chalk.red('Usage: /pruning [on|off|superseded on|off|mutation on|off|ttl on|off|terminal-ttl N|web-ttl N]'));
+          console.log(chalk.red('Usage: /pruning [on|off|superseded on|off|mutation on|off|ttl on|off|autocompact on|off|terminal-ttl N|web-ttl N]'));
           break;
         }
 

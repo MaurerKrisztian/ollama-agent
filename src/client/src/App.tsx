@@ -65,6 +65,7 @@ export const App: React.FC = () => {
   const [activeSessionId, setActiveSessionId] = useState('');
   const [contextInfo, setContextInfo] = useState<ContextInfo | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [isCompacting, setIsCompacting] = useState(false);
   const [leftSidebarOpen, setLeftSidebarOpen] = useState(false);
   const [systemPromptModalOpen, setSystemPromptModalOpen] = useState(false);
   const [toolSettingsModalOpen, setToolSettingsModalOpen] = useState(false);
@@ -768,6 +769,7 @@ export const App: React.FC = () => {
   };
 
   const handleCompactContext = async () => {
+    setIsCompacting(true);
     try {
       const res = await fetch('/api/chat/compact', {
         method: 'POST',
@@ -785,7 +787,10 @@ export const App: React.FC = () => {
           }
         }
       }
-    } catch (_) {}
+    } catch (_) {
+    } finally {
+      setIsCompacting(false);
+    }
   };
 
   const handleUpdateToolSettings = async (newSettings: ToolSettings) => {
@@ -1062,6 +1067,7 @@ export const App: React.FC = () => {
         onToggleLeftSidebar={() => setLeftSidebarOpen((prev) => !prev)}
         activeTerminalCount={terminalSessions.filter((s) => s.status === 'running').length}
         onOpenTerminalSessions={() => setTerminalSidebarOpen((prev) => !prev)}
+        isCompacting={isCompacting}
       />
 
       <div className="app-content" style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
@@ -1124,6 +1130,7 @@ export const App: React.FC = () => {
             onOpenToolSettings={() => setToolSettingsModalOpen(true)}
             onOpenModelDetails={() => setModelDetailsModalOpen(true)}
             onCompactContext={handleCompactContext}
+            isCompacting={isCompacting}
             terminalSessions={terminalSessions}
             onOpenTerminal={(sessionId) => {
               if (sessionId) setSelectedTerminalSessionId(sessionId);
@@ -1146,6 +1153,7 @@ export const App: React.FC = () => {
           contextInfo={contextInfo}
           activeModel={config.model}
           onCompactContext={handleCompactContext}
+          isCompacting={isCompacting}
           onContextInfoChange={setContextInfo}
           config={config}
           onOpenSystemPrompt={() => setSystemPromptModalOpen(true)}
@@ -1256,7 +1264,7 @@ export const App: React.FC = () => {
             onClick={(e) => e.stopPropagation()}
           >
             <h3 style={{ margin: '0 0 8px', fontSize: '16px', fontWeight: 600, color: 'var(--text-primary, #cdd6f4)' }}>
-              ⏪ Rewind to this prompt?
+              ⏪ Rewind Prompt?
             </h3>
             <p style={{ margin: '0 0 16px', fontSize: '13px', color: 'var(--text-secondary, #a6adc8)' }}>
               The conversation context will be rewound. All messages after this point will be removed.
