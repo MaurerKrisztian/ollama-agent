@@ -425,6 +425,19 @@ export const App: React.FC = () => {
     }
   };
 
+  const handleUpdateConfig = async (update: Record<string, any>) => {
+    setConfig((prev) => ({ ...prev, ...update }));
+    const res = await fetch('/api/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(update),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.config) setConfig(data.config);
+    }
+  };
+
   const handleChangeTemperature = async (newTemp: number) => {
     setConfig((prev) => ({ ...prev, temperature: newTemp }));
     await fetch('/api/config', {
@@ -1119,6 +1132,7 @@ export const App: React.FC = () => {
         onToggleThinking={handleToggleThinking}
         onModelsChanged={refreshModels}
         onUnloadModel={unloadModel}
+        onUpdateConfig={handleUpdateConfig}
         onOpenModelDetails={() => {
           setModelSettingsModalOpen(false);
           setModelDetailsModalOpen(true);

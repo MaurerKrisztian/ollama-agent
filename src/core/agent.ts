@@ -549,6 +549,10 @@ export class AgentEngine {
     return this.toolExecutor;
   }
 
+  public getOllamaClient(): OllamaClient {
+    return this.ollamaClient;
+  }
+
   public getActiveTools() {
     const builtin = getToolDefinitions(this.config.complexityProfile || 'simple')
       .filter((tool) => this.config.enabledTools?.[tool.name] !== false);
@@ -825,6 +829,19 @@ ${conversationText}`;
         temperature: isContinuationAttempt ? 0 : this.config.temperature,
         contextWindow: this.config.contextWindow,
         enableThinking: effectiveThinking,
+        topP: this.config.topP,
+        topK: this.config.topK,
+        minP: this.config.minP,
+        repeatPenalty: this.config.repeatPenalty,
+        presencePenalty: this.config.presencePenalty,
+        frequencyPenalty: this.config.frequencyPenalty,
+        seed: this.config.seed,
+        numPredict: this.config.numPredict,
+        stop: this.config.stop,
+        keepAlive: this.config.keepAlive,
+        numGpu: this.config.numGpu,
+        numThread: this.config.numThread,
+        format: this.config.format,
         messages: messagesForOllama,
         tools: supportsNativeTools ? activeTools : undefined,
         onChunk: handleStreamChunk,

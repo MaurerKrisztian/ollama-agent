@@ -32,6 +32,29 @@ export interface AgentConfig {
   enabledTools?: Record<string, boolean>;
   terminalGuiMode?: boolean;
   customTerminalCmd?: string;
+  topP?: number;
+  topK?: number;
+  minP?: number;
+  repeatPenalty?: number;
+  presencePenalty?: number;
+  frequencyPenalty?: number;
+  seed?: number;
+  numPredict?: number;
+  stop?: string[];
+  keepAlive?: string | number;
+  numGpu?: number;
+  numThread?: number;
+  ollamaNumParallel?: number;
+  ollamaFlashAttention?: boolean;
+  ollamaMaxLoadedModels?: number;
+  ollamaModelsPath?: string;
+  lowVram?: boolean;
+  f16Kv?: boolean;
+  mirostat?: number;
+  mirostatEta?: number;
+  mirostatTau?: number;
+  ollamaOrigins?: string;
+  ollamaLoadTimeout?: string;
 }
 
 export type ToolComplexityProfile = 'simple' | 'medium' | 'advanced';

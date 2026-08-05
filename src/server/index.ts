@@ -59,6 +59,8 @@ import {
   CHAT_SESSIONS_FILE_PATH,
   getInitialPersistedConfig,
   savePersistedConfig,
+  BUILTIN_PROFILES,
+  detectLiveOllamaDaemonEnv,
 } from './configStore.js';
 
 app.use(cors());
@@ -177,13 +179,17 @@ type CheckpointEntry = {
 };
 const sessionCheckpoints = new Map<string, CheckpointEntry[]>(); // sessionId -> entries
 
-const getPublicConfig = () => ({
-  ...agent.getConfig(),
-  ollamaTokenConfigured: agent.hasOllamaToken(),
-  terminalMode: terminalRequireConfirm ? 'confirm' : 'auto',
-  fileEditMode,
-  allowedCommands: allowedCommandsState,
-});
+const getPublicConfig = () => {
+  const liveEnv = detectLiveOllamaDaemonEnv();
+  return {
+    ...agent.getConfig(),
+    ...liveEnv,
+    ollamaTokenConfigured: agent.hasOllamaToken(),
+    terminalMode: terminalRequireConfirm ? 'confirm' : 'auto',
+    fileEditMode,
+    allowedCommands: allowedCommandsState,
+  };
+};
 
 const getPublicConfigAsync = async () => {
   const cfg = agent.getConfig();
@@ -292,14 +298,163 @@ app.post('/api/models/unload', async (req, res) => {
   }
 });
 
-// GET /api/models/running - Fetch currently loaded models in VRAM
-app.get('/api/models/running', async (req, res) => {
-  try {
-    const runningModels = await agent.getRunningModels();
-    res.json({ success: true, runningModels });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message, runningModels: [] });
+// POST /api/models/restart-server - Execute restart of local Ollama server process with configured env variables
+app.post('/api/models/restart-server', async (req, res) => {
+  const currentConfig = agent.getConfig();
+  const host = currentConfig.ollamaHost;
+
+  const isLocalHost = host.includes('127.0.0.1') || host.includes('localhost') || host.includes('0.0.0.0');
+  if (!isLocalHost) {
+    return res.status(400).json({
+      success: false,
+      error: 'Cannot restart remote Ollama server over network API. Please execute environment variable restart on the remote host machine directly.',
+    });
   }
+
+  const numParallel = req.body?.ollamaNumParallel ?? currentConfig.ollamaNumParallel ?? 4;
+  const flashAttention = req.body?.ollamaFlashAttention ?? currentConfig.ollamaFlashAttention ?? true;
+  const maxLoadedModels = req.body?.ollamaMaxLoadedModels ?? currentConfig.ollamaMaxLoadedModels ?? 1;
+  const modelsPath = req.body?.ollamaModelsPath ?? currentConfig.ollamaModelsPath ?? '';
+  const origins = req.body?.ollamaOrigins ?? currentConfig.ollamaOrigins ?? '';
+  const loadTimeout = req.body?.ollamaLoadTimeout ?? currentConfig.ollamaLoadTimeout ?? '';
+
+  const configUpdate = {
+    ollamaNumParallel: numParallel,
+    ollamaFlashAttention: flashAttention,
+    ollamaMaxLoadedModels: maxLoadedModels,
+    ollamaModelsPath: modelsPath,
+    ollamaOrigins: origins,
+    ollamaLoadTimeout: loadTimeout,
+  };
+  for (const engine of getConfigurableEngines()) engine.updateConfig(configUpdate);
+  savePersistedConfig({
+    ...currentConfig,
+    ...configUpdate,
+  });
+
+  const envVars = {
+    ...process.env,
+    OLLAMA_NUM_PARALLEL: String(numParallel),
+    OLLAMA_FLASH_ATTENTION: flashAttention ? '1' : '0',
+    OLLAMA_MAX_LOADED_MODELS: String(maxLoadedModels),
+    ...(modelsPath ? { OLLAMA_MODELS: modelsPath } : {}),
+    ...(origins ? { OLLAMA_ORIGINS: origins } : {}),
+    ...(loadTimeout ? { OLLAMA_LOAD_TIMEOUT: loadTimeout } : {}),
+  };
+
+  const isWin = process.platform === 'win32';
+  const killCmd = isWin ? 'taskkill /F /IM ollama.exe 2>nul' : 'pkill -f "ollama serve" || true';
+  const launchCmd = 'ollama serve';
+
+  try {
+    const { exec, spawn } = await import('child_process');
+    if (process.platform === 'linux') {
+      const systemdCmd = `sudo -n sed -i 's/OLLAMA_NUM_PARALLEL=[0-9]*/OLLAMA_NUM_PARALLEL=${numParallel}/g' /etc/systemd/system/ollama.service /lib/systemd/system/ollama.service 2>/dev/null; sudo -n systemctl daemon-reload && sudo -n systemctl restart ollama`;
+      exec(systemdCmd, { timeout: 2000 }, (sysErr) => {
+        if (!sysErr) {
+          return res.json({
+            success: true,
+            message: `Systemd service file updated and Ollama restarted with OLLAMA_NUM_PARALLEL=${numParallel}.`,
+          });
+        }
+        exec(killCmd, { timeout: 2000 }, () => {
+          setTimeout(() => {
+            try {
+              const child = spawn('ollama', ['serve'], { env: envVars, detached: true, stdio: 'ignore' });
+              child.unref();
+            } catch (_) {}
+            res.json({
+              success: true,
+              message: `Local Ollama server restarted with OLLAMA_NUM_PARALLEL=${numParallel}. (Copy Systemd command below if Systemd requires sudo).`,
+            });
+          }, 500);
+        });
+      });
+    } else {
+      exec(killCmd, { timeout: 2000 }, () => {
+        setTimeout(() => {
+          try {
+            const child = spawn(isWin ? 'ollama.exe' : 'ollama', ['serve'], { env: envVars, detached: true, stdio: 'ignore' });
+            child.unref();
+          } catch (_) {}
+          res.json({
+            success: true,
+            message: `Local Ollama server restarted with OLLAMA_NUM_PARALLEL=${numParallel}.`,
+          });
+        }, 500);
+      });
+    }
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/models/create - Create a custom model alias from a Modelfile
+app.post('/api/models/create', async (req, res) => {
+  const { name, modelfile } = req.body || {};
+  if (typeof name !== 'string' || !name.trim()) {
+    return res.status(400).json({ success: false, error: 'Model name is required.' });
+  }
+  if (typeof modelfile !== 'string' || !modelfile.trim()) {
+    return res.status(400).json({ success: false, error: 'Modelfile content is required.' });
+  }
+  try {
+    await agent.getOllamaClient().createModel(name.trim(), modelfile.trim());
+    res.json({ success: true, name: name.trim() });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/models/copy - Copy / clone a model tag
+app.post('/api/models/copy', async (req, res) => {
+  const { source, destination } = req.body || {};
+  if (typeof source !== 'string' || !source.trim() || typeof destination !== 'string' || !destination.trim()) {
+    return res.status(400).json({ success: false, error: 'Both source and destination model names are required.' });
+  }
+  try {
+    await agent.getOllamaClient().copyModel(source.trim(), destination.trim());
+    res.json({ success: true, source: source.trim(), destination: destination.trim() });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// DELETE /api/models/delete - Delete a local model tag
+app.delete('/api/models/delete', async (req, res) => {
+  const model = typeof req.body?.name === 'string' ? req.body.name.trim() : (typeof req.query?.name === 'string' ? req.query.name.trim() : '');
+  if (!model) return res.status(400).json({ success: false, error: 'A model name is required.' });
+  try {
+    await agent.getOllamaClient().deleteModel(model);
+    res.json({ success: true, model });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/profiles - Fetch model profile templates
+app.get('/api/profiles', (_req, res) => {
+  const persisted = getInitialPersistedConfig();
+  const custom = persisted.customProfiles || [];
+  res.json({
+    success: true,
+    builtinProfiles: BUILTIN_PROFILES,
+    customProfiles: custom,
+    activeProfileId: persisted.activeProfileId || null,
+  });
+});
+
+// POST /api/profiles - Save custom profile templates
+app.post('/api/profiles', (req, res) => {
+  const { customProfiles, activeProfileId } = req.body || {};
+  if (customProfiles !== undefined && !Array.isArray(customProfiles)) {
+    return res.status(400).json({ success: false, error: 'customProfiles must be an array.' });
+  }
+  const update: Record<string, any> = {};
+  if (customProfiles !== undefined) update.customProfiles = customProfiles;
+  if (activeProfileId !== undefined) update.activeProfileId = activeProfileId;
+  savePersistedConfig(update);
+  res.json({ success: true, customProfiles, activeProfileId });
 });
 
 const execAsync = promisify(exec);
@@ -583,7 +738,41 @@ app.get('/api/directories', async (req, res) => {
 
 // POST /api/config - Update configuration
 app.post('/api/config', async (req, res) => {
-  const { model, classifierModel, systemPrompt, workingDir, showWorkingDirInfo, ollamaHost, ollamaToken, temperature, contextWindow, maxLoops } = req.body;
+  const {
+    model,
+    classifierModel,
+    systemPrompt,
+    workingDir,
+    showWorkingDirInfo,
+    ollamaHost,
+    ollamaToken,
+    temperature,
+    contextWindow,
+    maxLoops,
+    topP,
+    topK,
+    minP,
+    repeatPenalty,
+    presencePenalty,
+    frequencyPenalty,
+    seed,
+    numPredict,
+    stop,
+    keepAlive,
+    numGpu,
+    numThread,
+    ollamaNumParallel,
+    ollamaFlashAttention,
+    ollamaMaxLoadedModels,
+    ollamaModelsPath,
+    lowVram,
+    f16Kv,
+    mirostat,
+    mirostatEta,
+    mirostatTau,
+    ollamaOrigins,
+    ollamaLoadTimeout,
+  } = req.body;
 
   if (ollamaHost !== undefined) {
     try {
@@ -601,7 +790,41 @@ app.post('/api/config', async (req, res) => {
     }
   }
 
-  const configUpdate = { model, classifierModel, systemPrompt, workingDir, showWorkingDirInfo, ollamaHost, ollamaToken, temperature, contextWindow, maxLoops };
+  const configUpdate = {
+    model,
+    classifierModel,
+    systemPrompt,
+    workingDir,
+    showWorkingDirInfo,
+    ollamaHost,
+    ollamaToken,
+    temperature,
+    contextWindow,
+    maxLoops,
+    topP,
+    topK,
+    minP,
+    repeatPenalty,
+    presencePenalty,
+    frequencyPenalty,
+    seed,
+    numPredict,
+    stop,
+    keepAlive,
+    numGpu,
+    numThread,
+    ollamaNumParallel,
+    ollamaFlashAttention,
+    ollamaMaxLoadedModels,
+    ollamaModelsPath,
+    lowVram,
+    f16Kv,
+    mirostat,
+    mirostatEta,
+    mirostatTau,
+    ollamaOrigins,
+    ollamaLoadTimeout,
+  };
   for (const engine of getConfigurableEngines()) engine.updateConfig(configUpdate);
 
   const currentConfig = agent.getConfig();
@@ -619,6 +842,29 @@ app.post('/api/config', async (req, res) => {
     maxLoops: currentConfig.maxLoops,
     complexityProfile: currentConfig.complexityProfile,
     preventRepeatedCalls: currentConfig.preventRepeatedCalls,
+    topP: currentConfig.topP,
+    topK: currentConfig.topK,
+    minP: currentConfig.minP,
+    repeatPenalty: currentConfig.repeatPenalty,
+    presencePenalty: currentConfig.presencePenalty,
+    frequencyPenalty: currentConfig.frequencyPenalty,
+    seed: currentConfig.seed,
+    numPredict: currentConfig.numPredict,
+    stop: currentConfig.stop,
+    keepAlive: currentConfig.keepAlive,
+    numGpu: currentConfig.numGpu,
+    numThread: currentConfig.numThread,
+    ollamaNumParallel: req.body.ollamaNumParallel ?? currentConfig.ollamaNumParallel,
+    ollamaFlashAttention: req.body.ollamaFlashAttention ?? currentConfig.ollamaFlashAttention,
+    ollamaMaxLoadedModels: req.body.ollamaMaxLoadedModels ?? currentConfig.ollamaMaxLoadedModels,
+    ollamaModelsPath: req.body.ollamaModelsPath ?? currentConfig.ollamaModelsPath,
+    lowVram: req.body.lowVram ?? currentConfig.lowVram,
+    f16Kv: req.body.f16Kv ?? currentConfig.f16Kv,
+    mirostat: req.body.mirostat ?? currentConfig.mirostat,
+    mirostatEta: req.body.mirostatEta ?? currentConfig.mirostatEta,
+    mirostatTau: req.body.mirostatTau ?? currentConfig.mirostatTau,
+    ollamaOrigins: req.body.ollamaOrigins ?? currentConfig.ollamaOrigins,
+    ollamaLoadTimeout: req.body.ollamaLoadTimeout ?? currentConfig.ollamaLoadTimeout,
     enabledTools: currentConfig.enabledTools,
     allowedCommands: allowedCommandsState,
     terminalMode: terminalRequireConfirm ? 'confirm' : 'auto',

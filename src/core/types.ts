@@ -120,6 +120,32 @@ export interface ContextPruningConfig {
 
 export type ToolComplexityProfile = 'simple' | 'medium' | 'advanced';
 
+export interface ModelProfileTemplate {
+  id: string;
+  name: string;
+  description: string;
+  icon?: string;
+  isBuiltin?: boolean;
+  settings: {
+    temperature?: number;
+    contextWindow?: number;
+    enableThinking?: boolean;
+    topP?: number;
+    topK?: number;
+    minP?: number;
+    repeatPenalty?: number;
+    presencePenalty?: number;
+    frequencyPenalty?: number;
+    seed?: number;
+    numPredict?: number;
+    stop?: string[];
+    keepAlive?: string | number;
+    numGpu?: number;
+    numThread?: number;
+    systemPrompt?: string;
+  };
+}
+
 export interface AgentConfig {
   ollamaHost: string;
   model: string;
@@ -140,6 +166,30 @@ export interface AgentConfig {
   enabledTools?: Record<string, boolean>;
   terminalGuiMode?: boolean;
   customTerminalCmd?: string;
+  topP?: number;
+  topK?: number;
+  minP?: number;
+  repeatPenalty?: number;
+  presencePenalty?: number;
+  frequencyPenalty?: number;
+  seed?: number;
+  numPredict?: number;
+  stop?: string[];
+  keepAlive?: string | number;
+  numGpu?: number;
+  numThread?: number;
+  format?: string | object;
+  ollamaNumParallel?: number;
+  ollamaFlashAttention?: boolean;
+  ollamaMaxLoadedModels?: number;
+  ollamaModelsPath?: string;
+  lowVram?: boolean;
+  f16Kv?: boolean;
+  mirostat?: number;
+  mirostatEta?: number;
+  mirostatTau?: number;
+  ollamaOrigins?: string;
+  ollamaLoadTimeout?: string;
 }
 
 export interface ContextInfo {

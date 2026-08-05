@@ -6,6 +6,24 @@ export interface OllamaChatOptions {
   temperature?: number;
   contextWindow?: number;
   enableThinking?: boolean;
+  topP?: number;
+  topK?: number;
+  minP?: number;
+  repeatPenalty?: number;
+  presencePenalty?: number;
+  frequencyPenalty?: number;
+  seed?: number;
+  numPredict?: number;
+  stop?: string[];
+  keepAlive?: string | number;
+  numGpu?: number;
+  numThread?: number;
+  format?: string | object;
+  lowVram?: boolean;
+  f16Kv?: boolean;
+  mirostat?: number;
+  mirostatEta?: number;
+  mirostatTau?: number;
   messages: Array<{
     role: string;
     content: string;
@@ -321,6 +339,70 @@ export class OllamaClient {
     }
   }
 
+  /** Create a new model alias from a Modelfile string or base model via POST /api/create */
+  public async createModel(name: string, modelfile: string): Promise<void> {
+    try {
+      const res = await fetch(`${this.host}/api/create`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...this.getHeaders(),
+        },
+        body: JSON.stringify({ name, modelfile, stream: false }),
+      });
+      if (!res.ok) {
+        const message = await res.text();
+        throw new Error(`Ollama server returned HTTP ${res.status}${message ? `: ${message}` : ''}`);
+      }
+      this.thinkingSupportCache.clear();
+      this.toolSupportCache.clear();
+    } catch (err: any) {
+      throw new Error(`Failed to create model "${name}": ${err.message}`);
+    }
+  }
+
+  /** Copy / clone an existing model tag to a new tag via POST /api/copy */
+  public async copyModel(source: string, destination: string): Promise<void> {
+    try {
+      const res = await fetch(`${this.host}/api/copy`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...this.getHeaders(),
+        },
+        body: JSON.stringify({ source, destination }),
+      });
+      if (!res.ok) {
+        const message = await res.text();
+        throw new Error(`Ollama server returned HTTP ${res.status}${message ? `: ${message}` : ''}`);
+      }
+    } catch (err: any) {
+      throw new Error(`Failed to copy model "${source}" to "${destination}": ${err.message}`);
+    }
+  }
+
+  /** Delete a local model tag via DELETE /api/delete */
+  public async deleteModel(modelName: string): Promise<void> {
+    try {
+      const res = await fetch(`${this.host}/api/delete`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          ...this.getHeaders(),
+        },
+        body: JSON.stringify({ name: modelName }),
+      });
+      if (!res.ok) {
+        const message = await res.text();
+        throw new Error(`Ollama server returned HTTP ${res.status}${message ? `: ${message}` : ''}`);
+      }
+      this.thinkingSupportCache.clear();
+      this.toolSupportCache.clear();
+    } catch (err: any) {
+      throw new Error(`Failed to delete model "${modelName}": ${err.message}`);
+    }
+  }
+
   /**
    * Helper method to parse tool calls from model output text
    * Supports XML tags, Markdown JSON codeblocks, and raw JSON objects
@@ -533,10 +615,32 @@ export class OllamaClient {
     if (options.enableThinking !== undefined) {
       requestBody.think = options.enableThinking;
     }
+    if (options.keepAlive !== undefined) {
+      requestBody.keep_alive = options.keepAlive;
+    }
+    if (options.format !== undefined) {
+      requestBody.format = options.format;
+    }
 
     requestBody.options = {
       ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
       num_ctx: options.contextWindow ?? 16384,
+      ...(options.topP !== undefined ? { top_p: options.topP } : {}),
+      ...(options.topK !== undefined ? { top_k: options.topK } : {}),
+      ...(options.minP !== undefined ? { min_p: options.minP } : {}),
+      ...(options.repeatPenalty !== undefined ? { repeat_penalty: options.repeatPenalty } : {}),
+      ...(options.presencePenalty !== undefined ? { presence_penalty: options.presencePenalty } : {}),
+      ...(options.frequencyPenalty !== undefined ? { frequency_penalty: options.frequencyPenalty } : {}),
+      ...(options.seed !== undefined ? { seed: options.seed } : {}),
+      ...(options.numPredict !== undefined ? { num_predict: options.numPredict } : {}),
+      ...(options.stop !== undefined && options.stop.length > 0 ? { stop: options.stop } : {}),
+      ...(options.numGpu !== undefined ? { num_gpu: options.numGpu } : {}),
+      ...(options.numThread !== undefined ? { num_thread: options.numThread } : {}),
+      ...(options.lowVram !== undefined ? { low_vram: options.lowVram } : {}),
+      ...(options.f16Kv !== undefined ? { f16_kv: options.f16Kv } : {}),
+      ...(options.mirostat !== undefined ? { mirostat: options.mirostat } : {}),
+      ...(options.mirostatEta !== undefined ? { mirostat_eta: options.mirostatEta } : {}),
+      ...(options.mirostatTau !== undefined ? { mirostat_tau: options.mirostatTau } : {}),
     };
     if (options.enableThinking !== undefined) {
       requestBody.options.think = options.enableThinking;
