@@ -15,6 +15,8 @@ import { evaluateBenchmarkTask } from '../evaluation/evaluators.js';
 import { setupMockEnvironment } from '../fixtures/mockEnvironment.js';
 import type { BenchmarkAgentConfig, BenchmarkReport, BenchmarkSnapshot, BenchmarkTiming, TestResultTrace } from '../types.js';
 
+import { getFrameworkAdapter } from './frameworkAdapter.js';
+
 export type { BenchmarkReport, TestResultTrace };
 
 export const BENCHMARK_DOCKER_IMAGE = 'local-model-chat-benchmark:node20';
@@ -92,8 +94,33 @@ async function runDockerContainer(
     '--network', 'host',
     '--mount', `type=bind,src=${ioDir},dst=/benchmark-io`,
     '--mount', `type=bind,src=${workspaceDir},dst=/workspace`,
-    BENCHMARK_DOCKER_IMAGE,
   ];
+
+  if (request.agentConfig?.mountHostConfig || request.agentConfig?.framework) {
+    const fw = request.agentConfig?.framework || 'native';
+    if (fw === 'pi' || request.agentConfig?.mountHostConfig) {
+      const dir = path.join(os.homedir(), '.pi');
+      if (fsSync.existsSync(dir)) args.push('--mount', `type=bind,src=${dir},dst=/root/.pi,readonly`);
+    }
+    if (fw === 'opencode' || request.agentConfig?.mountHostConfig) {
+      const dir = path.join(os.homedir(), '.config', 'opencode');
+      if (fsSync.existsSync(dir)) args.push('--mount', `type=bind,src=${dir},dst=/root/.config/opencode,readonly`);
+    }
+    if (fw === 'claude-code' || fw === 'claude' || request.agentConfig?.mountHostConfig) {
+      const dir = path.join(os.homedir(), '.claude');
+      if (fsSync.existsSync(dir)) args.push('--mount', `type=bind,src=${dir},dst=/root/.claude,readonly`);
+    }
+    if (fw === 'hermes' || request.agentConfig?.mountHostConfig) {
+      const dir = path.join(os.homedir(), '.hermes');
+      if (fsSync.existsSync(dir)) args.push('--mount', `type=bind,src=${dir},dst=/root/.hermes,readonly`);
+    }
+    if (fw === 'openclaw' || request.agentConfig?.mountHostConfig) {
+      const dir = path.join(os.homedir(), '.openclaw');
+      if (fsSync.existsSync(dir)) args.push('--mount', `type=bind,src=${dir},dst=/root/.openclaw,readonly`);
+    }
+  }
+
+  args.push(BENCHMARK_DOCKER_IMAGE);
 
   request.containerStartedAt = Date.now();
   await fs.writeFile(path.join(ioDir, 'request.json'), JSON.stringify(request), { mode: 0o600 });
@@ -206,6 +233,68 @@ export async function runBenchmarkAttemptInContainer(
   const setupStartedAt = performance.now();
   const workspace = await setupMockEnvironment('/workspace');
   timing.imageSetupMs = performance.now() - setupStartedAt;
+
+  if (agentConfig?.framework && agentConfig.framework !== 'native') {
+    const adapter = getFrameworkAdapter(agentConfig.framework);
+    const adapterResult = await adapter.execute({
+      testCase,
+      modelName,
+      ollamaHost,
+      ollamaToken,
+      agentConfig,
+      workspaceDir: workspace,
+    });
+
+    if (adapterResult.timing) {
+      if (adapterResult.timing.generationMs) timing.generationMs += adapterResult.timing.generationMs;
+      if (adapterResult.timing.modelLoadMs) timing.modelLoadMs += adapterResult.timing.modelLoadMs;
+      if (adapterResult.timing.promptEvaluationMs) timing.promptEvaluationMs += adapterResult.timing.promptEvaluationMs;
+      if (adapterResult.timing.toolExecutionMs) timing.toolExecutionMs += adapterResult.timing.toolExecutionMs;
+    }
+
+    const verificationStartedAt = performance.now();
+    const evaluation = await evaluateBenchmarkTask(testCase, workspace, adapterResult.actualToolsCalled, adapterResult.responseContent, adapterResult.toolResults);
+    timing.verificationMs = performance.now() - verificationStartedAt;
+
+    timing.comparisonMs = timing.promptEvaluationMs + timing.generationMs + timing.toolExecutionMs;
+
+    return {
+      testId: testCase.id,
+      testName: testCase.name,
+      category: testCase.category,
+      prompt: testCase.prompt,
+      expectedTool: testCase.expectedTool ?? null,
+      expectedToolSequence: testCase.expectedToolSequence,
+      actualToolsCalled: adapterResult.actualToolsCalled,
+      toolResults: adapterResult.toolResults,
+      executionTrace: adapterResult.executionTrace,
+      passed: evaluation.passed,
+      reason: evaluation.reason,
+      durationMs: timing.comparisonMs,
+      timing,
+      attemptNumber: 1,
+      attemptCount: 1,
+      successfulAttempts: evaluation.passed ? 1 : 0,
+      failedAttempts: evaluation.passed ? 0 : 1,
+      successRatePercentage: evaluation.passed ? 100 : 0,
+      responseContent: adapterResult.responseContent,
+      objective: testCase.objective,
+      requiredOutput: testCase.requiredOutput || '',
+      evaluationCriteria: describeStepOutcome(testCase),
+      verificationDetails: evaluation,
+      container: {
+        image: BENCHMARK_DOCKER_IMAGE,
+        isolated: true,
+        workspace,
+      },
+      agentConfig: {
+        ...agentConfig,
+        model: modelName,
+        ollamaHost,
+      },
+    };
+  }
+
   const agent = new AgentEngine({
     model: modelName,
     ollamaHost,

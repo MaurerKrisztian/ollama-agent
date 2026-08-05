@@ -41,7 +41,12 @@ export const BenchmarkRunsTable: React.FC<BenchmarkRunsTableProps> = ({ runs, on
                   </div>
                 </td>
                 <td style={{ padding: '10px 12px', color: 'var(--text-secondary, #cbd5e1)' }}>
-                  {run.agentConfig?.model || 'Default Model'}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span style={{ padding: '2px 6px', borderRadius: '4px', fontSize: '0.65rem', fontWeight: 700, textTransform: 'uppercase', background: ((run.agentConfig as any)?.framework || 'native') === 'pi' ? 'rgba(236, 72, 153, 0.2)' : 'rgba(56, 189, 248, 0.2)', color: ((run.agentConfig as any)?.framework || 'native') === 'pi' ? '#ec4899' : '#38bdf8' }}>
+                      {(run.agentConfig as any)?.framework || 'native'}
+                    </span>
+                    <span>{run.agentConfig?.model || 'Default Model'}</span>
+                  </div>
                 </td>
                 <td style={{ padding: '10px 12px' }}>
                   <span

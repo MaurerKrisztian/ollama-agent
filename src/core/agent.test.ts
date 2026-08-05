@@ -75,7 +75,7 @@ test('automatic grounding is traced before an ungrounded edit', async () => {
         onToolStart: (name) => calls.push(name),
       });
 
-      assert.deepEqual(calls, ['read_file', 'edit_file', 'edit_file']);
+      assert.deepEqual(calls, ['read_file', 'edit_file', 'edit_file', 'read_file']);
       assert.match(await fs.readFile(path.join(workspace, 'package.json'), 'utf-8'), /2\.0\.1/);
     }
   );
@@ -235,7 +235,7 @@ test('multi-field edits do not require a post-mutation re-read if already read',
         { onToolStart: (name) => calls.push(name) }
       );
 
-      assert.deepEqual(calls, ['read_file', 'edit_file']);
+      assert.deepEqual(calls, ['read_file', 'edit_file', 'read_file']);
     }
   );
 });

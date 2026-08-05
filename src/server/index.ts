@@ -1714,6 +1714,34 @@ app.get('/api/benchmark/testcases', (req, res) => {
   res.json({ testCases: BENCHMARK_TEST_CASES });
 });
 
+// GET /api/benchmark/frameworks - Check host config status for framework adapters
+app.get('/api/benchmark/frameworks', (_req, res) => {
+  const home = os.homedir();
+  const hostConfigs: Record<string, { exists: boolean; path: string }> = {
+    pi: {
+      exists: fsSync.existsSync(path.join(home, '.pi')),
+      path: '~/.pi',
+    },
+    opencode: {
+      exists: fsSync.existsSync(path.join(home, '.config', 'opencode')),
+      path: '~/.config/opencode',
+    },
+    'claude-code': {
+      exists: fsSync.existsSync(path.join(home, '.claude')),
+      path: '~/.claude',
+    },
+    hermes: {
+      exists: fsSync.existsSync(path.join(home, '.hermes')),
+      path: '~/.hermes',
+    },
+    openclaw: {
+      exists: fsSync.existsSync(path.join(home, '.openclaw')),
+      path: '~/.openclaw',
+    },
+  };
+  res.json({ success: true, hostConfigs });
+});
+
 app.get('/api/benchmark/definitions', async (_req, res) => {
   try {
     res.json({ success: true, definitions: await listBenchmarkDefinitions() });
@@ -1856,6 +1884,9 @@ const parseBenchmarkAgentConfig = (value: unknown): BenchmarkAgentConfig => {
         .map(([k, v]) => [k, v as boolean])
     );
   }
+  if (typeof input.framework === 'string' && input.framework.trim()) config.framework = input.framework.trim();
+  if (typeof input.mountHostConfig === 'boolean') config.mountHostConfig = input.mountHostConfig;
+  if (typeof input.frameworkConfigPath === 'string' && input.frameworkConfigPath.trim()) config.frameworkConfigPath = input.frameworkConfigPath.trim();
   return config;
 };
 

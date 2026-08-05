@@ -44,6 +44,8 @@ program
   .option('--test <id-or-number>', 'Run one benchmark scenario by test ID or 1-based number')
   .option('--attempts <count>', 'Reliability attempts per benchmark case (1-10)', '3')
   .option('--parallelism <count>', 'Concurrent benchmark attempts (1-10)', '1')
+  .option('--framework <name>', 'Benchmark framework engine (native, pi, opencode)', 'native')
+  .option('--mount-host-config', 'Mount host config directory into benchmark sandbox', false)
   .parse(process.argv);
 
 const options = program.opts();
@@ -99,6 +101,8 @@ async function startCli() {
       enableThinking: config.enableThinking,
       complexityProfile: config.complexityProfile,
       pruningConfig: agent.getContextManager().getPruningConfig(),
+      framework: options.framework,
+      mountHostConfig: options.mountHostConfig === true,
     };
   };
 

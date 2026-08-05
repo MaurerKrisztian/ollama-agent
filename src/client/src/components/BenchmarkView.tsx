@@ -213,9 +213,9 @@ interface BenchmarkFormConfig {
   systemPrompt: string;
   pruningConfig: Required<ContextPruningConfig>;
   enabledTools: Record<string, boolean>;
+  framework: string;
+  mountHostConfig: boolean;
 }
-
-
 
 const getBenchmarkDefaults = (config: AgentConfig, toolSettings: ToolSettings): BenchmarkFormConfig => ({
   model: config.model,
@@ -235,7 +235,9 @@ const getBenchmarkDefaults = (config: AgentConfig, toolSettings: ToolSettings): 
     terminalOutputTTLTurns: config.pruningConfig?.terminalOutputTTLTurns ?? 5,
     webOutputTTLTurns: config.pruningConfig?.webOutputTTLTurns ?? 5,
   },
-  enabledTools: { ...(toolSettings.enabledTools as Record<string, boolean>) },
+  enabledTools: toolSettings.enabledTools ?? {},
+  framework: 'native',
+  mountHostConfig: true,
 });
 
 const formatRunDate = (runDate: string) => new Intl.DateTimeFormat(undefined, {
@@ -284,6 +286,7 @@ const sumTimings = (results: TestResultTrace[]): BenchmarkTiming => results.redu
 });
 
 const CONFIG_FIELD_ORDER = [
+  'framework',
   'model',
   'ollamaHost',
   'temperature',
@@ -555,6 +558,8 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
       systemPrompt: benchmarkConfig.systemPrompt,
       pruningConfig: benchmarkConfig.pruningConfig,
       enabledTools: benchmarkConfig.enabledTools,
+      framework: benchmarkConfig.framework,
+      mountHostConfig: benchmarkConfig.mountHostConfig,
     },
   });
 
@@ -579,6 +584,7 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
 
   // Modal State for Test Info
   const [selectedInfoTest, setSelectedInfoTest] = useState<BenchmarkTestCaseInfo | TestResultTrace | null>(null);
+  const [hostFrameworkConfigs, setHostFrameworkConfigs] = useState<Record<string, { exists: boolean; path: string }>>({});
 
   useEffect(() => {
     void Promise.all([
@@ -587,6 +593,9 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
       }),
       fetch('/api/benchmark/definitions').then((res) => res.json()).then((data) => {
         if (data.definitions) setBenchmarkDefinitions(data.definitions);
+      }),
+      fetch('/api/benchmark/frameworks').then((res) => res.json()).then((data) => {
+        if (data.hostConfigs) setHostFrameworkConfigs(data.hostConfigs);
       }),
       loadSavedRuns(),
     ]).catch((err) => console.error('Error initializing benchmark view:', err));
@@ -1004,13 +1013,16 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
               <div className="glass-panel benchmark-ranking">
                 <div className="benchmark-ranking-header"><Trophy size={19} color="var(--accent-amber)" /><h3>Leaderboard</h3><span>{runSort.key === 'rank' ? 'Success rate first, then comparison time' : `Sorted by ${runSort.key} (${runSort.direction === 'asc' ? 'ascending' : 'descending'})`}</span></div>
                 <div className="benchmark-table-scroll"><table><thead><tr><th>Compare</th><th>Suite rank</th><th>Run label</th><th>Benchmark</th><th><button className={runSort.key === 'model' ? 'benchmark-sort-active' : ''} onClick={() => toggleRunSort('model')}>Model <span>{sortIndicator('model')}</span></button></th><th><button className={runSort.key === 'date' ? 'benchmark-sort-active' : ''} onClick={() => toggleRunSort('date')}>Generated <span>{sortIndicator('date')}</span></button></th><th>Score</th><th>Passed</th><th><button className={runSort.key === 'elapsed' ? 'benchmark-sort-active' : ''} onClick={() => toggleRunSort('elapsed')} title="Actual start-to-finish benchmark duration">Wall time <span>{sortIndicator('elapsed')}</span></button></th><th><button className={runSort.key === 'total' ? 'benchmark-sort-active' : ''} onClick={() => toggleRunSort('total')}>Total compare <span>{sortIndicator('total')}</span></button></th><th><button className={runSort.key === 'average' ? 'benchmark-sort-active' : ''} onClick={() => toggleRunSort('average')}>Avg compare <span>{sortIndicator('average')}</span></button></th><th>Actions</th></tr></thead>
-                  <tbody>{rankedRuns.map((run) => <tr key={run.runId}>
+                  <tbody>{rankedRuns.map((run) => {
+                    const frameworkName = String((run.modelConfig as any)?.framework || (run.results?.[0]?.agentConfig as any)?.framework || 'native');
+                    return <tr key={run.runId}>
                     <td><input type="checkbox" checked={selectedRunIds.includes(run.runId)} onChange={() => toggleComparedRun(run.runId)} /></td>
-                    <td className="benchmark-rank">#{performanceRankById.get(run.runId)}</td><td><strong>{run.runName || 'Unlabeled'}</strong></td><td><strong>{run.benchmark.definitionName}</strong><small>{run.benchmark.testIds.length} tests · {run.attemptsPerCase} attempts · parallelism {run.parallelism ?? 1} · v{run.benchmark.definitionVersion}</small></td><td><strong>{run.model}</strong><small>{run.runId}</small></td>
+                    <td className="benchmark-rank">#{performanceRankById.get(run.runId)}</td><td><strong>{run.runName || 'Unlabeled'}</strong></td><td><strong>{run.benchmark.definitionName}</strong><small>{run.benchmark.testIds.length} tests · {run.attemptsPerCase} attempts · parallelism {run.parallelism ?? 1} · v{run.benchmark.definitionVersion}</small></td><td><div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><span style={{ padding: '2px 6px', borderRadius: '4px', fontSize: '0.7rem', fontWeight: 700, textTransform: 'uppercase', background: frameworkName === 'pi' ? 'rgba(236, 72, 153, 0.2)' : 'rgba(56, 189, 248, 0.2)', color: frameworkName === 'pi' ? '#ec4899' : '#38bdf8' }}>{frameworkName}</span><strong>{run.model}</strong></div><small>{run.runId}</small></td>
                     <td>{formatRunDate(run.runDate)}</td><td><strong className={run.successRatePercentage === 100 ? 'benchmark-pass' : ''}>{run.successRatePercentage}%</strong></td>
                     <td>{run.successfulAttempts}/{run.totalAttempts}</td><td>{formatMs(run.totalDurationMs)}</td><td>{formatMs(run.timing.comparisonMs)}</td><td>{formatMs(run.comparisonDurationMs)}</td>
                     <td><div className="benchmark-run-actions"><a href={`/api/benchmark/report?directory=${encodeURIComponent(run.outputDirectory)}&runId=${encodeURIComponent(run.runId)}`} target="_blank" rel="noreferrer">Open HTML</a><button onClick={() => void handleDeleteRun(run)} disabled={deletingRunId === run.runId} title="Delete this saved benchmark">{deletingRunId === run.runId ? <Loader2 size={13} className="spin" /> : <Trash2 size={13} />} Delete</button></div></td>
-                  </tr>)}</tbody></table></div>
+                  </tr>;
+                  })}</tbody></table></div>
               </div>
 
               {comparedRuns.length > 0 && <div className="glass-panel benchmark-matrix">
@@ -1116,6 +1128,18 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
           </label>
 
           <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', color: 'var(--text-muted)', fontSize: '0.78rem' }}>
+            Framework Engine
+            <select value={benchmarkConfig.framework || 'native'} disabled={configLocked} onChange={(event) => updateBenchmarkConfig('framework', event.target.value)} style={{ padding: '10px', borderRadius: '8px', border: '1px solid var(--border-color)', background: '#111827', color: 'var(--text-main)' }}>
+              <option value="native">Native (local-model-chat)</option>
+              <option value="pi">Pi Agent</option>
+              <option value="opencode">OpenCode Interpreter</option>
+              <option value="claude-code">Claude Code CLI</option>
+              <option value="hermes">Hermes Agent</option>
+              <option value="openclaw">OpenClaw Agent</option>
+            </select>
+          </label>
+
+          <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', color: 'var(--text-muted)', fontSize: '0.78rem' }}>
             Benchmark
             <select value={selectedBenchmarkId} disabled={configLocked || editingBenchmarkId !== null} onChange={(event) => { setSelectedBenchmarkId(event.target.value); setShowSelectedBenchmarkTests(false); }} style={{ padding: '10px', borderRadius: '8px', border: '1px solid var(--border-color)', background: '#111827', color: 'var(--text-main)' }}>
               {benchmarkDefinitions.map((definition) => <option key={definition.id} value={definition.id}>{definition.name} ({definition.testIds.length} tests)</option>)}
@@ -1132,6 +1156,29 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
             <input type="number" min="1" max="10" value={parallelism} disabled={configLocked} onChange={(event) => setParallelism(Number(event.target.value))} title="1 runs attempts sequentially; higher values start this many isolated containers at once." style={{ padding: '10px', borderRadius: '8px', border: '1px solid var(--border-color)', background: '#111827', color: 'var(--text-main)' }} />
           </label>
         </div>
+
+        {benchmarkConfig.framework !== 'native' && (() => {
+          const fwKey = benchmarkConfig.framework || 'pi';
+          const configInfo = hostFrameworkConfigs[fwKey];
+          const defaultPath = fwKey === 'pi' ? '~/.pi' : fwKey === 'opencode' ? '~/.config/opencode' : fwKey === 'hermes' ? '~/.hermes' : fwKey === 'openclaw' ? '~/.openclaw' : '~/.claude';
+          const configPath = configInfo?.path || defaultPath;
+          const exists = configInfo?.exists ?? false;
+
+          return (
+            <div style={{ marginTop: '12px', padding: '10px 14px', borderRadius: '8px', border: `1px solid ${exists ? 'rgba(56, 189, 248, 0.35)' : 'rgba(245, 158, 11, 0.45)'}`, background: exists ? 'rgba(56, 189, 248, 0.06)' : 'rgba(245, 158, 11, 0.06)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', color: 'var(--text-main)', fontSize: '0.8rem' }}>
+                <input type="checkbox" checked={benchmarkConfig.mountHostConfig} disabled={configLocked} onChange={(event) => updateBenchmarkConfig('mountHostConfig', event.target.checked)} />
+                <span>
+                  Mount host configuration (<code>{configPath}</code>) into sandbox container
+                </span>
+              </label>
+              <span style={{ fontSize: '0.78rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px', color: exists ? '#34d399' : '#fbbf24' }}>
+                {exists ? <CheckCircle2 size={14} color="#34d399" /> : <Info size={14} color="#fbbf24" />}
+                {exists ? `Config found (${configPath})` : `No config found on host (${configPath})`}
+              </span>
+            </div>
+          );
+        })()}
 
         {attemptsPerCase === 10 && (
           <div role="alert" style={{ marginTop: '12px', padding: '10px 12px', borderRadius: '8px', border: '1px solid rgba(245, 158, 11, 0.55)', background: 'rgba(245, 158, 11, 0.1)', color: '#fbbf24', fontSize: '0.82rem' }}>
@@ -1214,6 +1261,12 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
         </button>
 
         {showAdvancedSettings && <div style={{ padding: '16px 20px 20px', borderTop: '1px solid var(--border-color)' }}>
+          {benchmarkConfig.framework !== 'native' && (
+            <div style={{ padding: '10px 14px', borderRadius: '8px', border: '1px solid rgba(236, 72, 153, 0.3)', background: 'rgba(236, 72, 153, 0.08)', color: '#ec4899', fontSize: '0.8rem', marginBottom: '14px' }}>
+              <strong>Framework Notice:</strong> Native settings (Tool Schema Profile, System Prompt, Context Pruning) apply only to the Native engine. Framework <code>{benchmarkConfig.framework}</code> uses its own internal system prompt and tools (or host config <code>~/.pi</code>).
+            </div>
+          )}
+
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '14px', paddingTop: '4px' }}>
           <button
             onClick={resetBenchmarkConfig}
@@ -1230,88 +1283,91 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
             <input value={benchmarkConfig.ollamaHost} disabled={configLocked} onChange={(event) => updateBenchmarkConfig('ollamaHost', event.target.value)} style={{ padding: '9px 10px', borderRadius: '7px', border: '1px solid var(--border-color)', background: '#111827', color: 'var(--text-main)' }} />
           </label>
 
-          <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', color: 'var(--text-muted)', fontSize: '0.78rem' }}>
-            Temperature (0–1)
-            <input type="number" min="0" max="1" step="0.05" value={benchmarkConfig.temperature} disabled={configLocked} onChange={(event) => updateBenchmarkConfig('temperature', Number(event.target.value))} style={{ padding: '9px 10px', borderRadius: '7px', border: '1px solid var(--border-color)', background: '#111827', color: 'var(--text-main)' }} />
-          </label>
+          {benchmarkConfig.framework === 'native' && <>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', color: 'var(--text-muted)', fontSize: '0.78rem' }}>
+              Temperature (0–1)
+              <input type="number" min="0" max="1" step="0.05" value={benchmarkConfig.temperature} disabled={configLocked} onChange={(event) => updateBenchmarkConfig('temperature', Number(event.target.value))} style={{ padding: '9px 10px', borderRadius: '7px', border: '1px solid var(--border-color)', background: '#111827', color: 'var(--text-main)' }} />
+            </label>
 
-          <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', color: 'var(--text-muted)', fontSize: '0.78rem' }}>
-            Context window
-            <input type="number" min="1024" step="1024" value={benchmarkConfig.contextWindow} disabled={configLocked} onChange={(event) => updateBenchmarkConfig('contextWindow', Number(event.target.value))} style={{ padding: '9px 10px', borderRadius: '7px', border: '1px solid var(--border-color)', background: '#111827', color: 'var(--text-main)' }} />
-          </label>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', color: 'var(--text-muted)', fontSize: '0.78rem' }}>
+              Context window
+              <input type="number" min="1024" step="1024" value={benchmarkConfig.contextWindow} disabled={configLocked} onChange={(event) => updateBenchmarkConfig('contextWindow', Number(event.target.value))} style={{ padding: '9px 10px', borderRadius: '7px', border: '1px solid var(--border-color)', background: '#111827', color: 'var(--text-main)' }} />
+            </label>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', color: 'var(--text-muted)', fontSize: '0.78rem' }}>
+              Maximum tool loops (0 = unlimited)
+              <input type="number" min="0" max="50" value={benchmarkConfig.maxLoops} disabled={configLocked} onChange={(event) => updateBenchmarkConfig('maxLoops', Number(event.target.value))} style={{ padding: '9px 10px', borderRadius: '7px', border: '1px solid var(--border-color)', background: '#111827', color: 'var(--text-main)' }} />
+            </label>
 
-          <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', color: 'var(--text-muted)', fontSize: '0.78rem' }}>
-            Maximum tool loops (0 = unlimited)
-            <input type="number" min="0" max="50" value={benchmarkConfig.maxLoops} disabled={configLocked} onChange={(event) => updateBenchmarkConfig('maxLoops', Number(event.target.value))} style={{ padding: '9px 10px', borderRadius: '7px', border: '1px solid var(--border-color)', background: '#111827', color: 'var(--text-main)' }} />
-          </label>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', color: 'var(--text-muted)', fontSize: '0.78rem' }}>
+              Tool schema profile
+              <select value={benchmarkConfig.complexityProfile} disabled={configLocked} onChange={(event) => updateBenchmarkConfig('complexityProfile', event.target.value as ToolComplexityProfile)} style={{ padding: '9px 10px', borderRadius: '7px', border: '1px solid var(--border-color)', background: '#111827', color: 'var(--text-main)' }}>
+                <option value="simple">Simple</option>
+                <option value="medium">Medium</option>
+                <option value="advanced">Advanced</option>
+              </select>
+            </label>
 
-          <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', color: 'var(--text-muted)', fontSize: '0.78rem' }}>
-            Tool schema profile
-            <select value={benchmarkConfig.complexityProfile} disabled={configLocked} onChange={(event) => updateBenchmarkConfig('complexityProfile', event.target.value as ToolComplexityProfile)} style={{ padding: '9px 10px', borderRadius: '7px', border: '1px solid var(--border-color)', background: '#111827', color: 'var(--text-main)' }}>
-              <option value="simple">Simple</option>
-              <option value="medium">Medium</option>
-              <option value="advanced">Advanced</option>
-            </select>
-          </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-main)', fontSize: '0.82rem', alignSelf: 'end', minHeight: '38px' }}>
+              <input type="checkbox" checked={benchmarkConfig.enableThinking} disabled={configLocked} onChange={(event) => updateBenchmarkConfig('enableThinking', event.target.checked)} />
+              Enable model thinking
+            </label>
 
-          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-main)', fontSize: '0.82rem', alignSelf: 'end', minHeight: '38px' }}>
-            <input type="checkbox" checked={benchmarkConfig.enableThinking} disabled={configLocked} onChange={(event) => updateBenchmarkConfig('enableThinking', event.target.checked)} />
-            Enable model thinking
-          </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-main)', fontSize: '0.82rem', alignSelf: 'end', minHeight: '38px' }}>
+              <input type="checkbox" checked={benchmarkConfig.showWorkingDirInfo} disabled={configLocked} onChange={(event) => updateBenchmarkConfig('showWorkingDirInfo', event.target.checked)} />
+              Include project context
+            </label>
 
-          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-main)', fontSize: '0.82rem', alignSelf: 'end', minHeight: '38px' }}>
-            <input type="checkbox" checked={benchmarkConfig.showWorkingDirInfo} disabled={configLocked} onChange={(event) => updateBenchmarkConfig('showWorkingDirInfo', event.target.checked)} />
-            Include project context
-          </label>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', color: 'var(--text-muted)', fontSize: '0.78rem', gridColumn: '1 / -1' }}>
+              System prompt
+              <textarea value={benchmarkConfig.systemPrompt} disabled={configLocked} rows={4} onChange={(event) => updateBenchmarkConfig('systemPrompt', event.target.value)} style={{ padding: '10px', borderRadius: '7px', border: '1px solid var(--border-color)', background: '#111827', color: 'var(--text-main)', resize: 'vertical', lineHeight: 1.45 }} />
+            </label>
 
-          <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', color: 'var(--text-muted)', fontSize: '0.78rem', gridColumn: '1 / -1' }}>
-            System prompt
-            <textarea value={benchmarkConfig.systemPrompt} disabled={configLocked} rows={4} onChange={(event) => updateBenchmarkConfig('systemPrompt', event.target.value)} style={{ padding: '10px', borderRadius: '7px', border: '1px solid var(--border-color)', background: '#111827', color: 'var(--text-main)', resize: 'vertical', lineHeight: 1.45 }} />
-          </label>
-
-          <div style={{ gridColumn: '1 / -1', borderTop: '1px solid var(--border-color)', paddingTop: '14px' }}>
-            <div style={{ color: 'var(--text-main)', fontSize: '0.85rem', fontWeight: 600, marginBottom: '10px' }}>Context Pruning</div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: '12px' }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-main)', fontSize: '0.8rem' }}>
-                <input type="checkbox" checked={benchmarkConfig.pruningConfig.enabled} disabled={configLocked} onChange={(event) => updatePruningConfig('enabled', event.target.checked)} />
-                Enable context pruning
-              </label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-main)', fontSize: '0.8rem' }}>
-                <input type="checkbox" checked={benchmarkConfig.pruningConfig.pruneSupersededReads} disabled={configLocked || !benchmarkConfig.pruningConfig.enabled} onChange={(event) => updatePruningConfig('pruneSupersededReads', event.target.checked)} />
-                Prune superseded reads
-              </label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-main)', fontSize: '0.8rem' }}>
-                <input type="checkbox" checked={benchmarkConfig.pruningConfig.invalidateOnMutation} disabled={configLocked || !benchmarkConfig.pruningConfig.enabled} onChange={(event) => updatePruningConfig('invalidateOnMutation', event.target.checked)} />
-                Invalidate reads after mutation
-              </label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-main)', fontSize: '0.8rem' }}>
-                <input type="checkbox" checked={benchmarkConfig.pruningConfig.enableToolTTL} disabled={configLocked || !benchmarkConfig.pruningConfig.enabled} onChange={(event) => updatePruningConfig('enableToolTTL', event.target.checked)} />
-                Enable tool-output TTL
-              </label>
-              <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', color: 'var(--text-muted)', fontSize: '0.78rem' }}>
-                Terminal output TTL (turns)
-                <input type="number" min="0" value={benchmarkConfig.pruningConfig.terminalOutputTTLTurns} disabled={configLocked || !benchmarkConfig.pruningConfig.enabled || !benchmarkConfig.pruningConfig.enableToolTTL} onChange={(event) => updatePruningConfig('terminalOutputTTLTurns', Number(event.target.value))} style={{ padding: '9px 10px', borderRadius: '7px', border: '1px solid var(--border-color)', background: '#111827', color: 'var(--text-main)' }} />
-              </label>
-              <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', color: 'var(--text-muted)', fontSize: '0.78rem' }}>
-                Web output TTL (turns)
-                <input type="number" min="0" value={benchmarkConfig.pruningConfig.webOutputTTLTurns} disabled={configLocked || !benchmarkConfig.pruningConfig.enabled || !benchmarkConfig.pruningConfig.enableToolTTL} onChange={(event) => updatePruningConfig('webOutputTTLTurns', Number(event.target.value))} style={{ padding: '9px 10px', borderRadius: '7px', border: '1px solid var(--border-color)', background: '#111827', color: 'var(--text-main)' }} />
-              </label>
+            <div style={{ gridColumn: '1 / -1', borderTop: '1px solid var(--border-color)', paddingTop: '14px' }}>
+              <div style={{ color: 'var(--text-main)', fontSize: '0.85rem', fontWeight: 600, marginBottom: '10px' }}>Context Pruning</div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: '12px' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-main)', fontSize: '0.8rem' }}>
+                  <input type="checkbox" checked={benchmarkConfig.pruningConfig.enabled} disabled={configLocked} onChange={(event) => updatePruningConfig('enabled', event.target.checked)} />
+                  Enable context pruning
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-main)', fontSize: '0.8rem' }}>
+                  <input type="checkbox" checked={benchmarkConfig.pruningConfig.pruneSupersededReads} disabled={configLocked || !benchmarkConfig.pruningConfig.enabled} onChange={(event) => updatePruningConfig('pruneSupersededReads', event.target.checked)} />
+                  Prune superseded reads
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-main)', fontSize: '0.8rem' }}>
+                  <input type="checkbox" checked={benchmarkConfig.pruningConfig.invalidateOnMutation} disabled={configLocked || !benchmarkConfig.pruningConfig.enabled} onChange={(event) => updatePruningConfig('invalidateOnMutation', event.target.checked)} />
+                  Invalidate reads after mutation
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-main)', fontSize: '0.8rem' }}>
+                  <input type="checkbox" checked={benchmarkConfig.pruningConfig.enableToolTTL} disabled={configLocked || !benchmarkConfig.pruningConfig.enabled} onChange={(event) => updatePruningConfig('enableToolTTL', event.target.checked)} />
+                  Enable tool-output TTL
+                </label>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', color: 'var(--text-muted)', fontSize: '0.78rem' }}>
+                  Terminal output TTL (turns)
+                  <input type="number" min="0" value={benchmarkConfig.pruningConfig.terminalOutputTTLTurns} disabled={configLocked || !benchmarkConfig.pruningConfig.enabled || !benchmarkConfig.pruningConfig.enableToolTTL} onChange={(event) => updatePruningConfig('terminalOutputTTLTurns', Number(event.target.value))} style={{ padding: '9px 10px', borderRadius: '7px', border: '1px solid var(--border-color)', background: '#111827', color: 'var(--text-main)' }} />
+                </label>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', color: 'var(--text-muted)', fontSize: '0.78rem' }}>
+                  Web output TTL (turns)
+                  <input type="number" min="0" value={benchmarkConfig.pruningConfig.webOutputTTLTurns} disabled={configLocked || !benchmarkConfig.pruningConfig.enabled || !benchmarkConfig.pruningConfig.enableToolTTL} onChange={(event) => updatePruningConfig('webOutputTTLTurns', Number(event.target.value))} style={{ padding: '9px 10px', borderRadius: '7px', border: '1px solid var(--border-color)', background: '#111827', color: 'var(--text-main)' }} />
+                </label>
+              </div>
             </div>
-          </div>
+          </>}
 
           {/* ── Tool Access ── */}
-          <div style={{ gridColumn: '1 / -1', borderTop: '1px solid var(--border-color)', paddingTop: '14px' }}>
-            <div style={{ marginBottom: '10px' }}>
-              <div style={{ color: 'var(--text-main)', fontSize: '0.85rem', fontWeight: 600 }}>Tool Access</div>
-              <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem', marginTop: '2px' }}>Choose which tools the agent may call during this benchmark run. Disabling tools here does not affect the chat agent.</div>
+          {benchmarkConfig.framework === 'native' && (
+            <div style={{ gridColumn: '1 / -1', borderTop: '1px solid var(--border-color)', paddingTop: '14px' }}>
+              <div style={{ marginBottom: '10px' }}>
+                <div style={{ color: 'var(--text-main)', fontSize: '0.85rem', fontWeight: 600 }}>Tool Access</div>
+                <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem', marginTop: '2px' }}>Choose which tools the agent may call during this benchmark run. Disabling tools here does not affect the chat agent.</div>
+              </div>
+              <ToolTogglePanel
+                enabledTools={benchmarkConfig.enabledTools}
+                onChange={(updated) => { setConfigDirty(true); setBenchmarkConfig((prev) => ({ ...prev, enabledTools: updated })); }}
+                variant="compact"
+                disabled={configLocked}
+              />
             </div>
-            <ToolTogglePanel
-              enabledTools={benchmarkConfig.enabledTools}
-              onChange={(updated) => { setConfigDirty(true); setBenchmarkConfig((prev) => ({ ...prev, enabledTools: updated })); }}
-              variant="compact"
-              disabled={configLocked}
-            />
-          </div>
+          )}
         </div>
         </div>}
       </div>

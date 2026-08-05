@@ -38,6 +38,12 @@ export interface BenchmarkAgentConfig {
   pruningConfig?: ContextPruningConfig;
   /** Override which tools are available to the agent during this benchmark run. */
   enabledTools?: Record<string, boolean>;
+  /** Selected framework engine: 'native' | 'pi' | 'opencode' | string. Defaults to 'native'. */
+  framework?: string;
+  /** Whether to mount host configuration directories (e.g. ~/.pi) into the container sandbox. */
+  mountHostConfig?: boolean;
+  /** Optional custom framework configuration file or profile path. */
+  frameworkConfigPath?: string;
 }
 
 export interface JsonValueSpec {
