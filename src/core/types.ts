@@ -13,6 +13,15 @@ export interface ImageAttachment {
   size: number;
 }
 
+export interface OllamaResponseMetrics {
+  totalDurationNs?: number;
+  loadDurationNs?: number;
+  promptEvalCount?: number;
+  promptEvalDurationNs?: number;
+  evalCount?: number;
+  evalDurationNs?: number;
+}
+
 export interface ChatMessage {
   id: string;
   role: Role;
@@ -27,6 +36,7 @@ export interface ChatMessage {
   imageAttachments?: ImageAttachment[];
   thinking?: string;
   thinkingTokens?: number;
+  metrics?: OllamaResponseMetrics;
 }
 
 export interface TextAttachment {

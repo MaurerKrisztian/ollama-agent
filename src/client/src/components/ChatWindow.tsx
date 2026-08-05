@@ -2,8 +2,8 @@ import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Send, Square, Wrench, CheckCircle2, XCircle, ShieldAlert, User, Bot, Loader2, FileText, Folder, Terminal, Edit3, Search, PlusCircle, Sparkles, Code2, Eye, ChevronDown, ChevronRight, Brain, X, Globe, ExternalLink, Layers, RotateCcw, Copy, Check, Scissors, Info, Image as ImageIcon, CornerDownRight } from 'lucide-react';
-import { ChatMessage, FileDiffData, ImageAttachment, BatchReviewFile, PendingApprovalCall, TextAttachment, TerminalSessionInfo } from '../types';
+import { Send, Square, Wrench, CheckCircle2, XCircle, ShieldAlert, User, Bot, Loader2, FileText, Folder, Terminal, Edit3, Search, PlusCircle, Sparkles, Code2, Eye, ChevronDown, ChevronRight, Brain, X, Globe, ExternalLink, Layers, RotateCcw, Copy, Check, Scissors, Info, Image as ImageIcon, CornerDownRight, Zap } from 'lucide-react';
+import { ChatMessage, FileDiffData, ImageAttachment, BatchReviewFile, PendingApprovalCall, TextAttachment, TerminalSessionInfo, OllamaResponseMetrics } from '../types';
 import { BatchReviewCard } from './chat/BatchReviewCard';
 import { getLinkPresentation } from '../linkPresentation';
 import { findActiveSkillMention } from '../skillMention';
@@ -1811,6 +1811,7 @@ const ToolExecutionCard: React.FC<{
   onRegenerateDeepResearch?: (toolMessageId: string) => void;
   onCancelGeneration?: () => void;
   defaultExpanded?: boolean;
+  streamingMetrics?: { liveTokPerSec: number; tokenCount: number } | null;
 }> = ({
   toolName,
   args,
@@ -1822,6 +1823,7 @@ const ToolExecutionCard: React.FC<{
   onRegenerateDeepResearch,
   onCancelGeneration,
   defaultExpanded,
+  streamingMetrics,
 }) => {
   const [expanded, setExpanded] = useState<boolean>(defaultExpanded ?? Boolean(args?._streaming));
   const [viewMode, setViewMode] = useState<'formatted' | 'raw_input' | 'raw_result'>('formatted');
@@ -2026,11 +2028,11 @@ const ToolExecutionCard: React.FC<{
           {/* Status Badge */}
           {args?._streaming ? (
             <span style={{ background: 'rgba(56, 189, 248, 0.25)', color: '#7dd3fc', border: '1px solid rgba(56, 189, 248, 0.4)', padding: '1px 7px', borderRadius: '4px', fontSize: '0.675rem', fontWeight: 700, textTransform: 'uppercase', flexShrink: 0, display: 'flex', alignItems: 'center', gap: '4px' }}>
-              <Loader2 size={10} className="spin" /> Writing Tool Call...
+              <Loader2 size={10} className="spin" /> Writing Tool Call… {streamingMetrics && (streamingMetrics.liveTokPerSec > 0 || streamingMetrics.tokenCount > 0) ? `⚡ ${streamingMetrics.liveTokPerSec > 0 ? `${streamingMetrics.liveTokPerSec} tok/s` : 'streaming'} (${streamingMetrics.tokenCount} tok)` : ''}
             </span>
           ) : isWorking ? (
-            <span style={{ background: 'rgba(99, 102, 241, 0.25)', color: '#c7d2fe', border: '1px solid rgba(99, 102, 241, 0.4)', padding: '1px 7px', borderRadius: '4px', fontSize: '0.675rem', fontWeight: 700, textTransform: 'uppercase', flexShrink: 0 }}>
-              Working...
+            <span style={{ background: 'rgba(99, 102, 241, 0.25)', color: '#a5b4fc', border: '1px solid rgba(99, 102, 241, 0.4)', padding: '1px 7px', borderRadius: '4px', fontSize: '0.675rem', fontWeight: 700, textTransform: 'uppercase', flexShrink: 0, display: 'flex', alignItems: 'center', gap: '4px' }}>
+              <Loader2 size={10} className="spin" /> Executing… {streamingMetrics && streamingMetrics.liveTokPerSec > 0 ? `⚡ ${streamingMetrics.liveTokPerSec} tok/s` : ''}
             </span>
           ) : isPruned ? (
             <span style={{ background: 'rgba(168, 85, 247, 0.2)', color: '#e9d5ff', border: '1px solid rgba(168, 85, 247, 0.4)', padding: '1px 7px', borderRadius: '4px', fontSize: '0.675rem', fontWeight: 700, textTransform: 'uppercase', flexShrink: 0 }}>
@@ -2663,10 +2665,71 @@ const ThinkingBlock: React.FC<{ thinking: string; thinkingTokens?: number; isStr
   );
 };
 
-const AssistantResponse: React.FC<{ content: string; thinking?: string; thinkingTokens?: number }> = ({
+const MetricBadge: React.FC<{ metrics?: OllamaResponseMetrics }> = ({ metrics }) => {
+  if (!metrics || (!metrics.evalCount && !metrics.promptEvalCount)) return null;
+
+  const evalTokPerSec = metrics.evalCount && metrics.evalDurationNs && metrics.evalDurationNs > 0
+    ? (metrics.evalCount / (metrics.evalDurationNs / 1e9)).toFixed(1)
+    : null;
+
+  const promptTokPerSec = metrics.promptEvalCount && metrics.promptEvalDurationNs && metrics.promptEvalDurationNs > 0
+    ? (metrics.promptEvalCount / (metrics.promptEvalDurationNs / 1e9)).toFixed(1)
+    : null;
+
+  const totalDurationSec = metrics.totalDurationNs
+    ? (metrics.totalDurationNs / 1e9).toFixed(1)
+    : null;
+
+  return (
+    <div
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: '6px',
+        marginTop: '10px',
+        padding: '3px 8px',
+        borderRadius: '6px',
+        background: 'rgba(15, 23, 42, 0.45)',
+        border: '1px solid rgba(148, 163, 184, 0.2)',
+        fontSize: '0.72rem',
+        color: 'var(--text-muted)',
+        fontFamily: 'var(--font-code, monospace)',
+      }}
+      title={
+        [
+          evalTokPerSec ? `Generation Speed: ${evalTokPerSec} tok/s` : null,
+          metrics.evalCount !== undefined ? `Generated: ${metrics.evalCount} tokens` : null,
+          metrics.promptEvalCount !== undefined ? `Prompt: ${metrics.promptEvalCount} tokens${promptTokPerSec ? ` (${promptTokPerSec} tok/s)` : ''}` : null,
+          totalDurationSec ? `Total Duration: ${totalDurationSec}s` : null,
+        ]
+          .filter(Boolean)
+          .join('\n')
+      }
+    >
+      <Zap size={12} style={{ color: 'var(--accent-primary)', flexShrink: 0 }} />
+      {evalTokPerSec && (
+        <span style={{ color: 'var(--accent-primary)', fontWeight: 600 }}>
+          ⚡ {evalTokPerSec} tok/s
+        </span>
+      )}
+      {metrics.evalCount !== undefined && (
+        <span>· {metrics.evalCount} gen tokens</span>
+      )}
+      {metrics.promptEvalCount !== undefined && (
+        <span>· {metrics.promptEvalCount} prompt tokens</span>
+      )}
+      {totalDurationSec && (
+        <span>· {totalDurationSec}s</span>
+      )}
+    </div>
+  );
+};
+
+const AssistantResponse: React.FC<{ content: string; thinking?: string; thinkingTokens?: number; metrics?: OllamaResponseMetrics }> = ({
   content,
   thinking,
   thinkingTokens,
+  metrics,
 }) => {
   const [showRaw, setShowRaw] = useState(false);
   const isMaxLoops = content?.includes('Max tool call iterations limit reached');
@@ -2714,6 +2777,7 @@ const AssistantResponse: React.FC<{ content: string; thinking?: string; thinking
           )}
         </>
       )}
+      <MetricBadge metrics={metrics} />
     </div>
   );
 };
@@ -2783,6 +2847,7 @@ interface ChatWindowProps {
   terminalSessions?: TerminalSessionInfo[];
   onOpenTerminal?: (sessionId?: string) => void;
   onTerminateTerminalSession?: (sessionId: string) => Promise<void>;
+  streamingMetrics?: { liveTokPerSec: number; tokenCount: number } | null;
 }
 
 const QUICK_HELPER_PROMPTS = [
@@ -2873,6 +2938,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   messages,
   streamingText,
   streamingThinking = '',
+  streamingMetrics = null,
   isGenerating,
   isModelLoaded,
   modelLoadElapsed,
@@ -3429,7 +3495,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                   )}
                   <div className="message-content" style={{ maxWidth: '80%', display: 'flex', flexDirection: 'column', gap: '8px' }}>
                     {(msg.content || msg.thinking) && (
-                      <AssistantResponse content={msg.content} thinking={msg.thinking} thinkingTokens={msg.thinkingTokens} />
+                      <AssistantResponse content={msg.content} thinking={msg.thinking} thinkingTokens={msg.thinkingTokens} metrics={msg.metrics} />
                     )}
 
                     {toolCalls.length > 0 && (
@@ -3453,11 +3519,14 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                               onOpenFile={openAttachmentViewer}
                               isGenerating={isGenerating}
                               onRegenerateDeepResearch={onRegenerateDeepResearch}
-                              onCancelGeneration={onCancelGeneration}
                             />
                           );
                         })}
                       </div>
+                    )}
+
+                    {!(msg.content || msg.thinking) && msg.metrics && (
+                      <MetricBadge metrics={msg.metrics} />
                     )}
                   </div>
                 </div>
@@ -3520,6 +3589,15 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                 {streamingText && !activeToolCall?.args?._streaming && (
                   <MarkdownContent content={streamingText} streaming />
                 )}
+                {streamingMetrics && (streamingMetrics.liveTokPerSec > 0 || streamingMetrics.tokenCount > 0) && (
+                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', marginTop: '10px', padding: '3px 8px', borderRadius: '6px', background: 'rgba(99, 102, 241, 0.12)', border: '1px solid rgba(99, 102, 241, 0.25)', fontSize: '0.72rem', color: 'var(--accent-primary)', fontFamily: 'var(--font-code, monospace)' }}>
+                    <Zap size={12} className="spin" style={{ flexShrink: 0 }} />
+                    <span style={{ fontWeight: 600 }}>
+                      ⚡ {streamingMetrics.liveTokPerSec > 0 ? `${streamingMetrics.liveTokPerSec} tok/s` : 'Streaming…'}
+                    </span>
+                    <span>· {streamingMetrics.tokenCount} tokens</span>
+                  </div>
+                )}
               </div>
             </div>
           );
@@ -3534,6 +3612,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
               isWorking={true}
               progress={activeToolCall.progress}
               onCancelGeneration={onCancelGeneration}
+              streamingMetrics={streamingMetrics}
             />
           </div>
         )}

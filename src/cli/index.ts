@@ -361,6 +361,19 @@ async function startCli() {
           const resStr = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
           console.log(chalk.green(`✓ Tool Output (${name}):\n${resStr.length > 500 ? resStr.substring(0, 500) + '...' : resStr}`));
         },
+        onModelResponse: (metrics) => {
+          if (!metrics) return;
+          const speed = metrics.evalCount && metrics.evalDurationNs && metrics.evalDurationNs > 0
+            ? `${(metrics.evalCount / (metrics.evalDurationNs / 1e9)).toFixed(1)} tok/s`
+            : null;
+          const genTokens = metrics.evalCount !== undefined ? `${metrics.evalCount} gen tokens` : null;
+          const promptTokens = metrics.promptEvalCount !== undefined ? `${metrics.promptEvalCount} prompt tokens` : null;
+          const duration = metrics.totalDurationNs ? `${(metrics.totalDurationNs / 1e9).toFixed(1)}s` : null;
+          const parts = [speed, genTokens, promptTokens, duration].filter(Boolean);
+          if (parts.length > 0) {
+            console.log(chalk.dim(`\n⚡ [Metrics] ${parts.join(' · ')}`));
+          }
+        },
       });
       console.log(chalk.bold.green('\n✓ Agent Execution Complete.\n'));
     } catch (err: any) {
@@ -653,6 +666,19 @@ async function startCli() {
         },
         onMaxLoopsReached: (limit) => {
           console.log(chalk.bold.yellow(`\n⚠️  [Max Loops Reached] Reached maximum limit of ${limit} tool call iterations. You can increase maxLoops in config or set it to 0 for unlimited.`));
+        },
+        onModelResponse: (metrics) => {
+          if (!metrics) return;
+          const speed = metrics.evalCount && metrics.evalDurationNs && metrics.evalDurationNs > 0
+            ? `${(metrics.evalCount / (metrics.evalDurationNs / 1e9)).toFixed(1)} tok/s`
+            : null;
+          const genTokens = metrics.evalCount !== undefined ? `${metrics.evalCount} gen tokens` : null;
+          const promptTokens = metrics.promptEvalCount !== undefined ? `${metrics.promptEvalCount} prompt tokens` : null;
+          const duration = metrics.totalDurationNs ? `${(metrics.totalDurationNs / 1e9).toFixed(1)}s` : null;
+          const parts = [speed, genTokens, promptTokens, duration].filter(Boolean);
+          if (parts.length > 0) {
+            console.log(chalk.dim(`\n⚡ [Metrics] ${parts.join(' · ')}`));
+          }
         },
       });
       console.log('\n');

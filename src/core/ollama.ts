@@ -1,4 +1,5 @@
-import { ChatMessage, OllamaModelInfo, OllamaRunningModelInfo, ToolDefinition, ollamaModelNamesMatch } from './types.js';
+import { ChatMessage, OllamaModelInfo, OllamaResponseMetrics, OllamaRunningModelInfo, ToolDefinition, ollamaModelNamesMatch } from './types.js';
+export type { OllamaResponseMetrics };
 
 export interface OllamaChatOptions {
   host: string;
@@ -40,14 +41,7 @@ export interface OllamaChatOptions {
   signal?: AbortSignal;
 }
 
-export interface OllamaResponseMetrics {
-  totalDurationNs?: number;
-  loadDurationNs?: number;
-  promptEvalCount?: number;
-  promptEvalDurationNs?: number;
-  evalCount?: number;
-  evalDurationNs?: number;
-}
+
 
 export interface OllamaPullProgress {
   status: string;

@@ -867,6 +867,7 @@ ${conversationText}`;
           thinking: res.thinking,
           thinkingTokens: res.thinkingTokens,
           tool_calls: res.tool_calls,
+          metrics: res.metrics,
         });
         if (callbacks?.onMessageAdded) callbacks.onMessageAdded(assistantMsg);
       }

@@ -218,6 +218,7 @@ export class ContextManager {
     imageAttachments?: ChatMessage['imageAttachments'];
     thinking?: string;
     thinkingTokens?: number;
+    metrics?: ChatMessage['metrics'];
   }, onMessageUpdated?: (msg: ChatMessage) => void): ChatMessage {
     const newMessage: ChatMessage = {
       id: `msg_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
@@ -233,6 +234,7 @@ export class ContextManager {
       imageAttachments: msg.imageAttachments,
       thinking: msg.thinking,
       thinkingTokens: msg.thinkingTokens,
+      metrics: msg.metrics,
     };
     this.messages.push(newMessage);
     if (this.pruningConfig.enabled) {

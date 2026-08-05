@@ -98,6 +98,36 @@ export const App: React.FC = () => {
   const activeSessionIdRef = useRef('');
   const chatStreamAbortControllerRef = useRef<AbortController | null>(null);
 
+  const streamingStartTimeRef = useRef<number | null>(null);
+  const streamingTokenCountRef = useRef<number>(0);
+  const [streamingMetrics, setStreamingMetrics] = useState<{ liveTokPerSec: number; tokenCount: number } | null>(null);
+
+  const updateStreamingMetrics = (chunk: string) => {
+    const now = Date.now();
+    if (!streamingStartTimeRef.current) {
+      streamingStartTimeRef.current = now;
+      streamingTokenCountRef.current = 0;
+    }
+    const est = Math.max(1, Math.ceil(chunk.length / 3.8));
+    streamingTokenCountRef.current += est;
+
+    const elapsedSec = (now - streamingStartTimeRef.current) / 1000;
+    const liveTokPerSec = elapsedSec > 0.2
+      ? Math.round((streamingTokenCountRef.current / elapsedSec) * 10) / 10
+      : 0;
+
+    setStreamingMetrics({
+      liveTokPerSec,
+      tokenCount: streamingTokenCountRef.current,
+    });
+  };
+
+  const resetStreamingMetrics = () => {
+    streamingStartTimeRef.current = null;
+    streamingTokenCountRef.current = 0;
+    setStreamingMetrics(null);
+  };
+
   const applyChatStreamEvent = (eventType: string, eventData: any) => {
     if (eventType === 'message_added') {
       setMessages((prev) => {
@@ -107,17 +137,37 @@ export const App: React.FC = () => {
       if (eventData.role === 'assistant') {
         setStreamingText('');
         setStreamingThinking('');
+        resetStreamingMetrics();
       }
     } else if (eventType === 'message_updated') {
       setMessages((prev) => prev.map((message) => message.id === eventData.id ? eventData : message));
       if (eventData.role === 'assistant') {
         setStreamingText('');
         setStreamingThinking('');
+        resetStreamingMetrics();
       }
     } else if (eventType === 'chunk') {
       setStreamingText((prev) => prev + eventData.chunk);
+      updateStreamingMetrics(eventData.chunk);
     } else if (eventType === 'thinking_chunk') {
       setStreamingThinking((prev) => prev + eventData.chunk);
+      updateStreamingMetrics(eventData.chunk);
+    } else if (eventType === 'model_response') {
+      if (eventData?.metrics) {
+        setMessages((prev) => {
+          let lastIdx = -1;
+          for (let i = prev.length - 1; i >= 0; i--) {
+            if (prev[i].role === 'assistant') {
+              lastIdx = i;
+              break;
+            }
+          }
+          if (lastIdx === -1) return prev;
+          const updated = [...prev];
+          updated[lastIdx] = { ...updated[lastIdx], metrics: eventData.metrics };
+          return updated;
+        });
+      }
     } else if (eventType === 'context_update') {
       setContextInfo(eventData);
     } else if (eventType === 'tool_approval_required') {
@@ -141,11 +191,13 @@ export const App: React.FC = () => {
       ]);
     } else if (eventType === 'tool_stream') {
       setActiveToolCall({ name: eventData.name, args: { _streaming: true, _rawText: eventData.argsText } });
+      updateStreamingMetrics(eventData.argsText || '');
     } else if (eventType === 'tool_start') {
       setPendingApprovalCall(null);
       setActiveToolCall({ name: eventData.name, args: eventData.args });
       setStreamingText('');
       setStreamingThinking('');
+      resetStreamingMetrics();
     } else if (eventType === 'tool_progress') {
       setActiveToolCall((current) => current?.name === eventData.name
         ? { ...current, progress: eventData.progress }
@@ -158,6 +210,7 @@ export const App: React.FC = () => {
       setPendingApprovalCall(null);
       setStreamingText('');
       setStreamingThinking('');
+      resetStreamingMetrics();
       setGenerationStatus('idle');
       setIsGenerating(false);
     } else if (eventType === 'cancelled') {
@@ -165,6 +218,7 @@ export const App: React.FC = () => {
       setPendingApprovalCall(null);
       setStreamingText('');
       setStreamingThinking('');
+      resetStreamingMetrics();
       setGenerationStatus('cancelled');
       setIsGenerating(false);
     } else if (eventType === 'error') {
@@ -172,6 +226,7 @@ export const App: React.FC = () => {
       setPendingApprovalCall(null);
       setStreamingText('');
       setStreamingThinking('');
+      resetStreamingMetrics();
       setGenerationStatus('error');
       setIsGenerating(false);
       alert(`Error: ${eventData.error}`);
@@ -1044,6 +1099,7 @@ export const App: React.FC = () => {
             messages={messages}
             streamingText={streamingText}
             streamingThinking={streamingThinking}
+            streamingMetrics={streamingMetrics}
             isGenerating={isGenerating}
             isModelLoaded={isActiveModelLoaded}
             modelLoadElapsed={modelLoadElapsed}
