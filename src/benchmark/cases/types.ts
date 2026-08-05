@@ -34,6 +34,14 @@ export interface MultiStepPrompt {
   verificationScript?: string;
 }
 
+export interface BenchmarkRepositorySpec {
+  url: string;
+  commit?: string;
+  tag?: string;
+  branch?: string;
+  installCommand?: string;
+}
+
 export interface BenchmarkTestCaseDefinition {
   id: string;
   name: string;
@@ -42,6 +50,7 @@ export interface BenchmarkTestCaseDefinition {
   prompts?: Array<string | MultiStepPrompt>;
   difficulty?: 'easy' | 'medium' | 'hard';
   multiStepPrompts?: MultiStepPrompt[];
+  repository?: BenchmarkRepositorySpec;
   expectedTool?: string | null;
   expectedToolSequence?: string[];
   expectedArgSubstrings?: Record<string, string>;

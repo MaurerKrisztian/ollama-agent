@@ -83,5 +83,26 @@
         "description": "Updated Fixture App"
       }
     }
+  },
+  {
+    "id": "sample_05_real_git_repository_test",
+    "name": "05. Real Git Repository Benchmark with Snapshot Caching",
+    "category": "examples",
+    "description": "Demonstrates cloning a target Git repository at a specific tag/commit with host snapshot caching.",
+    "repository": {
+      "url": "https://github.com/expressjs/express.git",
+      "tag": "4.18.2"
+    },
+    "prompts": [
+      "Read `package.json` in the express repository and report the exact package version."
+    ],
+    "expectedResponseSubstrings": ["4.18.2"],
+    "expectedFileJson": {
+      "relativePath": "package.json",
+      "values": {
+        "name": "express",
+        "version": "4.18.2"
+      }
+    }
   }
 ]

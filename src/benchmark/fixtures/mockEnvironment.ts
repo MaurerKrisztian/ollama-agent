@@ -24,11 +24,27 @@ async function copyDir(src: string, dest: string) {
 
 export const MOCK_ENV_BASE_DIR = path.join(os.tmpdir(), 'local-model-chat-benchmark-mock');
 
-export async function setupMockEnvironment(workspaceDir?: string, fixtureName?: string): Promise<string> {
+export async function setupMockEnvironment(
+  workspaceDir?: string,
+  fixtureName?: string,
+  sourceDir?: string,
+): Promise<string> {
   const targetDir = workspaceDir
     ? path.resolve(workspaceDir)
     : path.join(MOCK_ENV_BASE_DIR, `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
   await fs.mkdir(targetDir, { recursive: true });
+
+  if (sourceDir) {
+    try {
+      const stat = await fs.stat(sourceDir);
+      if (stat.isDirectory()) {
+        await copyDir(sourceDir, targetDir);
+        return targetDir;
+      }
+    } catch (_) {
+      // fallback
+    }
+  }
 
   const selectedFixture = fixtureName || 'default';
   const customFixturePath = path.join(FIXTURES_DIR, selectedFixture);

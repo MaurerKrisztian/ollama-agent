@@ -16,6 +16,7 @@ import { setupMockEnvironment } from '../fixtures/mockEnvironment.js';
 import type { BenchmarkAgentConfig, BenchmarkReport, BenchmarkSnapshot, BenchmarkTiming, TestResultTrace } from '../types.js';
 
 import { getFrameworkAdapter } from './frameworkAdapter.js';
+import { prepareRepositoryCache } from './repositoryCache.js';
 
 export type { BenchmarkReport, TestResultTrace };
 
@@ -248,7 +249,8 @@ export async function runBenchmarkAttemptInContainer(
   const timing = emptyTiming();
   timing.containerStartupMs = Math.max(0, Date.now() - (Number(process.env.BENCHMARK_CONTAINER_STARTED_AT) || Date.now()));
   const setupStartedAt = performance.now();
-  const workspace = await setupMockEnvironment('/workspace', testCase.fixture);
+  const repoCacheDir = testCase.repository ? await prepareRepositoryCache(testCase.repository) : undefined;
+  const workspace = await setupMockEnvironment('/workspace', testCase.fixture, repoCacheDir);
   timing.imageSetupMs = performance.now() - setupStartedAt;
 
   if (agentConfig?.framework && agentConfig.framework !== 'native') {
