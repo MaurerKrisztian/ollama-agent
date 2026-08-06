@@ -1554,8 +1554,8 @@ export class ToolExecutor {
           let endLine: number;
           if (typeof args.end_line === 'number' && args.end_line >= startLine) {
             endLine = Math.floor(args.end_line);
-          } else if (typeof args.start_line !== 'number' && totalLines > 500) {
-            endLine = 500;
+          } else if (typeof args.start_line !== 'number' && totalLines > 200) {
+            endLine = 200;
             autoTruncated = true;
           } else {
             endLine = totalLines;
@@ -1571,7 +1571,7 @@ export class ToolExecutor {
 
           let headerNote = `Showing lines ${startLine} to ${endLine} of ${totalLines} in ${actualRelativePath}. Please note that any changes targeting original code should remove the line number, colon, and leading space.`;
           if (autoTruncated) {
-            headerNote += `\n[NOTE: File exceeds 500 lines. Showing lines 1–500. Specify start_line and end_line parameters to inspect subsequent line ranges.]`;
+            headerNote += `\n[NOTE: File exceeds 200 lines. Showing lines 1–200. Specify start_line and end_line parameters to inspect subsequent line ranges.]`;
           }
 
           return {
@@ -1798,7 +1798,21 @@ export class ToolExecutor {
         const searchDir = relative_path ? path.resolve(this.workingDir, relative_path) : this.workingDir;
         
         try {
-          if (is_regex) {
+          let effectiveIsRegex = is_regex;
+          let fallbackNote: string | undefined = undefined;
+
+          // Auto-detect regex if is_regex is omitted and query contains regex operators
+          if (effectiveIsRegex === undefined || effectiveIsRegex === null) {
+            const hasRegexOps = /[|^\$]|\\[bBwWsSdD]|\(\?|\[.+\]/.test(query);
+            if (hasRegexOps) {
+              try {
+                new RegExp(query, case_sensitive ? '' : 'i');
+                effectiveIsRegex = true;
+              } catch (_) {}
+            }
+          }
+
+          if (effectiveIsRegex) {
             try {
               new RegExp(query, case_sensitive ? '' : 'i');
             } catch (err: any) {
@@ -1808,8 +1822,8 @@ export class ToolExecutor {
 
           const maxLimit = Math.min(200, Math.max(1, Number(max_results) || 50));
           const currentOffset = Math.max(0, Number(offset) || 0);
-          const results: Array<{ file: string; line: number; content: string; spans?: Array<{ start: number; end: number }>; context?: string[] }> = [];
-          const stats = {
+          let results: Array<{ file: string; line: number; content: string; spans?: Array<{ start: number; end: number }>; context?: string[] }> = [];
+          let stats = {
             files_scanned: 0,
             total_matches: 0,
             files_with_matches: new Set<string>(),
@@ -1822,7 +1836,7 @@ export class ToolExecutor {
           }
 
           const grepOptions = {
-            is_regex,
+            is_regex: effectiveIsRegex,
             case_sensitive,
             whole_word,
             file_pattern,
@@ -1842,6 +1856,31 @@ export class ToolExecutor {
             await this.grepFile(searchDir, relPath, query, results, grepOptions);
           } else {
             await this.grepDirectory(searchDir, query, results, 0, grepOptions);
+          }
+
+          // Zero-match fallback: if initial search was not regex and returned 0 matches,
+          // check if query works as a regex or unescaped query (e.g. LLM passed "render|startGame" or "Game\.")
+          if (stats.total_matches === 0 && !effectiveIsRegex) {
+            try {
+              new RegExp(query, case_sensitive ? '' : 'i');
+              const fallbackResults: typeof results = [];
+              const fallbackStats = { files_scanned: 0, total_matches: 0, files_with_matches: new Set<string>() };
+              const fallbackOptions = { ...grepOptions, is_regex: true, stats: fallbackStats };
+
+              if (stat.isFile()) {
+                const relPath = path.relative(this.workingDir, searchDir);
+                await this.grepFile(searchDir, relPath, query, fallbackResults, fallbackOptions);
+              } else {
+                await this.grepDirectory(searchDir, query, fallbackResults, 0, fallbackOptions);
+              }
+
+              if (fallbackStats.total_matches > 0) {
+                results = fallbackResults;
+                stats = fallbackStats;
+                effectiveIsRegex = true;
+                fallbackNote = 'Auto-fallback applied: Initial literal search returned 0 matches, but matching succeeded using regular expression mode.';
+              }
+            } catch (_) {}
           }
 
           const executionTimeMs = Date.now() - startTime;
@@ -1864,7 +1903,7 @@ export class ToolExecutor {
 
             return {
               query,
-              is_regex: !!is_regex,
+              is_regex: !!effectiveIsRegex,
               case_sensitive: !!case_sensitive,
               whole_word: !!whole_word,
               file_pattern: file_pattern || null,
@@ -1882,12 +1921,13 @@ export class ToolExecutor {
               is_truncated: isTruncated,
               execution_time_ms: executionTimeMs,
               grouped_matches: groupedMatches,
+              note: fallbackNote,
             };
           }
 
           return {
             query,
-            is_regex: !!is_regex,
+            is_regex: !!effectiveIsRegex,
             case_sensitive: !!case_sensitive,
             whole_word: !!whole_word,
             file_pattern: file_pattern || null,
@@ -1905,6 +1945,7 @@ export class ToolExecutor {
             is_truncated: isTruncated,
             execution_time_ms: executionTimeMs,
             matches: results,
+            note: fallbackNote,
           };
         } catch (err: any) {
           return { error: `Search failed: ${err.message}` };

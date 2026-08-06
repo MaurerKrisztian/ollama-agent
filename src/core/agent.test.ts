@@ -829,3 +829,45 @@ test('agent configures preventRepeatedCalls preference correctly', () => {
   assert.equal(agent.getConfig().preventRepeatedCalls, true);
 });
 
+test('edit_file in a later turn uses previous turn read_file from session history without forcing an automatic pre-read', async () => {
+  await withAgent(
+    [
+      {
+        content: '',
+        tool_calls: [{
+          id: 'turn1-read',
+          name: 'read_file',
+          arguments: { relative_path: 'app.js' },
+        }],
+      },
+      { content: 'I see app.js.', tool_calls: [] },
+      {
+        content: '',
+        tool_calls: [{
+          id: 'turn2-edit',
+          name: 'edit_file',
+          arguments: {
+            relative_path: 'app.js',
+            target_text: 'const x = 1;',
+            replacement_text: 'const x = 2;',
+          },
+        }],
+      },
+      { content: 'Post edit check.', tool_calls: [] },
+      { content: 'Done editing.', tool_calls: [] },
+    ],
+    async (agent, workspace) => {
+      await fs.writeFile(path.join(workspace, 'app.js'), 'const x = 1;\n');
+      const calls: string[] = [];
+      await agent.sendMessage('Read app.js');
+      await agent.sendMessage('Now edit app.js to update x to 2', {
+        onToolStart: (name) => calls.push(name),
+      });
+
+      // Second turn should execute edit_file directly without pre-pending another read_file
+      assert.deepEqual(calls, ['edit_file', 'read_file']);
+      assert.match(await fs.readFile(path.join(workspace, 'app.js'), 'utf-8'), /const x = 2;/);
+    }
+  );
+});
+

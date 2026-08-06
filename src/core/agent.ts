@@ -51,6 +51,15 @@ function estimateTokensFromCharacters(value: string): number {
   return Math.ceil(value.length / 4);
 }
 
+export function sanitizeToolResultForContext(toolName: string, toolResult: any): any {
+  if (!toolResult || typeof toolResult !== 'object') return toolResult;
+  if (toolName === 'read_file' && 'raw_content' in toolResult) {
+    const { raw_content, ...cleaned } = toolResult;
+    return cleaned;
+  }
+  return toolResult;
+}
+
 export function buildDeepResearchSynthesisContext(
   result: any,
   contextWindow = 16384,
@@ -944,14 +953,41 @@ ${conversationText}`;
               ? String(call.arguments.relative_path || '')
               : '';
           const normalizedMutationPath = mutationPath.replaceAll('\\', '/').replace(/^\.\//, '');
+          const isPathMatch = (a: string, b: string) => {
+            if (!a || !b) return false;
+            const normA = a.replaceAll('\\', '/').replace(/^\.\//, '');
+            const normB = b.replaceAll('\\', '/').replace(/^\.\//, '');
+            return normA === normB || normA.endsWith(`/${normB}`) || normB.endsWith(`/${normA}`);
+          };
+
+          const fileWasReadInHistory = (path: string): boolean => {
+            if (!path) return false;
+            if (filesReadThisTurn.has(path) || [...filesReadThisTurn].some((p) => isPathMatch(p, path))) {
+              return true;
+            }
+            const messages = this.contextManager.getMessages();
+            for (let i = messages.length - 1; i >= 0; i--) {
+              const msg = messages[i];
+              if (msg.role === 'assistant' && msg.tool_calls) {
+                for (const tc of msg.tool_calls) {
+                  if (['read_file', 'edit_file', 'replace_file', 'create_file'].includes(tc.name)) {
+                    const filePath = String(tc.arguments?.relative_path || tc.arguments?.path || '');
+                    if (filePath && isPathMatch(filePath, path)) {
+                      const resultMsg = messages.find((m) => m.role === 'tool' && m.tool_call_id === tc.id);
+                      if (resultMsg && !resultMsg.content.includes('"error":')) {
+                        return true;
+                      }
+                    }
+                  }
+                }
+              }
+            }
+            return false;
+          };
+
           const hasReadMutationTarget =
             normalizedMutationPath !== '' &&
-            (filesReadThisTurn.has(normalizedMutationPath) ||
-              [...filesReadThisTurn].some(
-                (readPath) =>
-                  readPath.endsWith(`/${normalizedMutationPath}`) ||
-                  normalizedMutationPath.endsWith(`/${readPath}`)
-              ));
+            (call.name === 'replace_file' || fileWasReadInHistory(normalizedMutationPath));
           let automaticallyReadPath: string | null = null;
           let automaticReadResult: any = null;
           if (mutationPath && !hasReadMutationTarget) {
@@ -1139,7 +1175,8 @@ ${conversationText}`;
                 callbacks?.onToolEnd?.('read_file', postEditRead);
                 
                 if (postEditRead && !postEditRead.error) {
-                  const resultStr = JSON.stringify(postEditRead, null, 2);
+                  const sanitizedPostEdit = sanitizeToolResultForContext('read_file', postEditRead);
+                  const resultStr = JSON.stringify(sanitizedPostEdit, null, 2);
                   deferredAutoReadMessage = {
                     role: 'tool' as const,
                     name: 'read_file',
@@ -1180,7 +1217,8 @@ ${conversationText}`;
             callbacks.onToolEnd(call.name, toolResult);
           }
 
-          const fullResultStr = typeof toolResult === 'string' ? toolResult : JSON.stringify(toolResult, null, 2);
+          const sanitizedResult = sanitizeToolResultForContext(call.name, toolResult);
+          const fullResultStr = typeof sanitizedResult === 'string' ? sanitizedResult : JSON.stringify(sanitizedResult, null, 2);
           const synthesisResult = call.name === 'deep_research'
             ? buildDeepResearchSynthesisContext(toolResult, this.config.contextWindow)
             : null;
