@@ -170,7 +170,17 @@ export const App: React.FC = () => {
         });
       }
     } else if (eventType === 'context_update') {
-      setContextInfo(eventData);
+      setContextInfo(eventData ? { ...eventData, _baseTokens: eventData.estimatedTokens } as any : null);
+    } else if (eventType === 'eval_count_update') {
+      setContextInfo((prev) => {
+        if (!prev) return prev;
+        const baseTokens = (prev as any)._baseTokens ?? prev.estimatedTokens;
+        return {
+          ...prev,
+          _baseTokens: baseTokens,
+          estimatedTokens: baseTokens + (eventData.evalCount || 0),
+        } as any;
+      });
     } else if (eventType === 'tool_approval_required') {
       setPendingApprovalCall({ name: eventData.name, args: eventData.args, diff: eventData.diff });
     } else if (eventType === 'batch_review_ready') {

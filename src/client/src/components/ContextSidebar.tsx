@@ -320,10 +320,11 @@ export const ContextSidebar: React.FC<ContextSidebarProps> = ({
       {contextInfo && (
         <div style={{ padding: '12px 20px', background: 'rgba(15, 23, 42, 0.5)', borderBottom: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '8px' }}>
           {(() => {
+            const effectiveMaxTokens = config?.contextWindow || maxContextTokens;
             const tokensUsed = contextInfo.estimatedTokens;
-            const tokensLeft = maxContextTokens ? Math.max(0, maxContextTokens - tokensUsed) : 0;
-            const pctUsed = maxContextTokens ? Math.min(100, Number(((tokensUsed / maxContextTokens) * 100).toFixed(1))) : 0;
-            const pctRemaining = maxContextTokens ? Math.max(0, Number((100 - pctUsed).toFixed(1))) : 0;
+            const tokensLeft = effectiveMaxTokens ? Math.max(0, effectiveMaxTokens - tokensUsed) : 0;
+            const pctUsed = effectiveMaxTokens ? Math.min(100, Number(((tokensUsed / effectiveMaxTokens) * 100).toFixed(1))) : 0;
+            const pctRemaining = effectiveMaxTokens ? Math.max(0, Number((100 - pctUsed).toFixed(1))) : 0;
 
             return (
               <>
@@ -332,14 +333,14 @@ export const ContextSidebar: React.FC<ContextSidebarProps> = ({
                     <Cpu size={14} color="var(--accent-primary)" />
                     <span>Token Context Usage</span>
                   </span>
-                  <span style={{ fontFamily: 'var(--font-code)', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                    {maxContextTokens
-                      ? `${tokensUsed.toLocaleString()} / ${maxContextTokens.toLocaleString()} tokens`
+                  <span style={{ fontFamily: 'var(--font-code, monospace)', fontSize: '0.75rem', color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums' }}>
+                    {effectiveMaxTokens
+                      ? `${tokensUsed.toLocaleString()} / ${effectiveMaxTokens.toLocaleString()} tokens`
                       : `~${tokensUsed.toLocaleString()} tokens`}
                   </span>
                 </div>
 
-                {maxContextTokens && (
+                {effectiveMaxTokens && (
                   <div style={{ width: '100%', height: '8px', borderRadius: '4px', background: 'rgba(30, 41, 59, 0.8)', overflow: 'hidden', border: '1px solid var(--border-color)', position: 'relative' }}>
                     <div
                       style={{
@@ -353,12 +354,12 @@ export const ContextSidebar: React.FC<ContextSidebarProps> = ({
                   </div>
                 )}
 
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '0.725rem', color: 'var(--text-muted)' }}>
-                  <span>Used: <strong style={{ color: '#fff' }}>~{tokensUsed.toLocaleString()}</strong> {maxContextTokens ? `(${pctUsed}%)` : ''}</span>
-                  {maxContextTokens ? (
-                    <span>Remaining: <strong style={{ color: pctRemaining < 15 ? '#ef4444' : '#4ade80' }}>{tokensLeft.toLocaleString()}</strong> ({pctRemaining}%)</span>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '0.725rem', color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums' }}>
+                  <span>Used: <strong style={{ color: '#fff', fontFamily: 'var(--font-code, monospace)' }}>~{tokensUsed.toLocaleString()}</strong> {effectiveMaxTokens ? `(${pctUsed}%)` : ''}</span>
+                  {effectiveMaxTokens ? (
+                    <span>Remaining: <strong style={{ color: pctRemaining < 15 ? '#ef4444' : '#4ade80', fontFamily: 'var(--font-code, monospace)' }}>{tokensLeft.toLocaleString()}</strong> ({pctRemaining}%)</span>
                   ) : (
-                    <span>Messages: <strong style={{ color: '#fff' }}>{contextInfo.totalMessages}</strong></span>
+                    <span>Messages: <strong style={{ color: '#fff', fontFamily: 'var(--font-code, monospace)' }}>{contextInfo.totalMessages}</strong></span>
                   )}
                 </div>
 
@@ -409,15 +410,15 @@ export const ContextSidebar: React.FC<ContextSidebarProps> = ({
         <div style={{ padding: '10px 20px', display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px', background: 'rgba(15, 23, 42, 0.4)', borderBottom: '1px solid var(--border-color)' }}>
           <div style={{ background: 'rgba(99, 102, 241, 0.1)', border: '1px solid rgba(99, 102, 241, 0.2)', padding: '6px 8px', borderRadius: '6px', textAlign: 'center' }}>
             <span style={{ fontSize: '0.675rem', color: 'var(--accent-primary)', display: 'block', textTransform: 'uppercase', fontWeight: 600 }}>Tokens</span>
-            <span style={{ fontSize: '0.9rem', fontWeight: 700, color: '#fff' }}>~{contextInfo.estimatedTokens.toLocaleString()}</span>
+            <span style={{ fontSize: '0.9rem', fontWeight: 700, color: '#fff', fontVariantNumeric: 'tabular-nums', fontFamily: 'var(--font-code, monospace)' }}>~{contextInfo.estimatedTokens.toLocaleString()}</span>
           </div>
           <div style={{ background: 'rgba(20, 184, 166, 0.1)', border: '1px solid rgba(20, 184, 166, 0.2)', padding: '6px 8px', borderRadius: '6px', textAlign: 'center' }}>
             <span style={{ fontSize: '0.675rem', color: 'var(--accent-teal)', display: 'block', textTransform: 'uppercase', fontWeight: 600 }}>Chars</span>
-            <span style={{ fontSize: '0.9rem', fontWeight: 700, color: '#fff' }}>{contextInfo.charCount.toLocaleString()}</span>
+            <span style={{ fontSize: '0.9rem', fontWeight: 700, color: '#fff', fontVariantNumeric: 'tabular-nums', fontFamily: 'var(--font-code, monospace)' }}>{contextInfo.charCount.toLocaleString()}</span>
           </div>
           <div style={{ background: 'rgba(245, 158, 11, 0.1)', border: '1px solid rgba(245, 158, 11, 0.2)', padding: '6px 8px', borderRadius: '6px', textAlign: 'center' }}>
             <span style={{ fontSize: '0.675rem', color: 'var(--accent-amber)', display: 'block', textTransform: 'uppercase', fontWeight: 600 }}>Messages</span>
-            <span style={{ fontSize: '0.9rem', fontWeight: 700, color: '#fff' }}>{contextInfo.totalMessages}</span>
+            <span style={{ fontSize: '0.9rem', fontWeight: 700, color: '#fff', fontVariantNumeric: 'tabular-nums', fontFamily: 'var(--font-code, monospace)' }}>{contextInfo.totalMessages}</span>
           </div>
         </div>
       )}

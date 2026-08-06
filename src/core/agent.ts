@@ -23,6 +23,7 @@ export interface AgentSendMessageOptions {
   onMessageAdded?: (message: ChatMessage) => void;
   onMessageUpdated?: (message: ChatMessage) => void;
   onModelResponse?: (metrics: OllamaResponseMetrics) => void;
+  onEvalCount?: (evalCount: number) => void;
   onMaxLoopsReached?: (limit: number) => void;
   signal?: AbortSignal;
   userDisplayContent?: string;
@@ -334,7 +335,7 @@ export class AgentEngine {
         'You are an intelligent AI assistant with tools for workspace files, terminal commands, web search, and reading public web pages. Use web tools for current online information and workspace tools only for local files. When using web search, do not repeatedly call web_search with query variations; after getting search results, inspect relevant result URLs with read_web_page to read page content before searching again. For stable general knowledge or math, answer directly without tools.',
       workingDir: config?.workingDir || process.cwd(),
       showWorkingDirInfo: config?.showWorkingDirInfo ?? true,
-      contextWindow: config?.contextWindow !== undefined ? config.contextWindow : 16384,
+      contextWindow: config?.contextWindow,
       maxLoops: config?.maxLoops !== undefined ? config.maxLoops : 25,
       complexityProfile: config?.complexityProfile || 'simple',
       enableThinking: config?.enableThinking ?? true,
@@ -741,13 +742,15 @@ ${conversationText}`;
     // Auto-compaction threshold check before entering execution loop
     const pruningConfig = this.contextManager.getPruningConfig();
     if (pruningConfig.enableAutoCompaction !== false) {
-      const ctxInfo = this.contextManager.getContextInfo();
-      const maxCtx = this.config.contextWindow || 8192;
-      const ratio = pruningConfig.autoCompactThresholdRatio || 0.85;
-      if (ctxInfo.estimatedTokens / maxCtx >= ratio && this.contextManager.getMessages().length > 3) {
-        const pctStr = Math.round(ratio * 100);
-        callbacks?.onChunk?.(`⚡ **Auto-Compacting Context**: Threshold reached (${pctStr}%). Distilling conversation history into a structured state package...\n\n`);
-        await this.compactContext();
+      const maxCtx = this.config.contextWindow;
+      if (maxCtx && maxCtx > 0) {
+        const ctxInfo = this.contextManager.getContextInfo();
+        const ratio = pruningConfig.autoCompactThresholdRatio || 0.85;
+        if (ctxInfo.estimatedTokens / maxCtx >= ratio && this.contextManager.getMessages().length > 3) {
+          const pctStr = Math.round(ratio * 100);
+          callbacks?.onChunk?.(`⚡ **Auto-Compacting Context**: Threshold reached (${pctStr}%). Distilling conversation history into a structured state package...\n\n`);
+          await this.compactContext();
+        }
       }
     }
 
@@ -892,6 +895,7 @@ ${conversationText}`;
             callbacks?.onToolStream?.(call.name, typeof call.arguments === 'string' ? call.arguments : JSON.stringify(call.arguments, null, 2));
           }
         },
+        onEvalCount: callbacks?.onEvalCount,
         signal: callbacks?.signal,
       });
       if (res.metrics) {

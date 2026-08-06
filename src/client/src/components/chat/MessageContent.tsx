@@ -248,7 +248,37 @@ export const ThinkingBlock: React.FC<{ thinking: string; thinkingTokens?: number
   isStreaming = false,
 }) => {
   const [isExpanded, setIsExpanded] = useState(isStreaming);
+  const thinkingContainerRef = useRef<HTMLDivElement>(null);
+  const isAutoScrollRef = useRef(true);
+  const lastScrollTopRef = useRef(0);
   const estimatedTokens = thinkingTokens || Math.ceil(thinking.length / 4);
+
+  useEffect(() => {
+    if (isStreaming) {
+      setIsExpanded(true);
+    }
+  }, [isStreaming]);
+
+  const handleScroll = () => {
+    const el = thinkingContainerRef.current;
+    if (!el) return;
+    const { scrollTop, scrollHeight, clientHeight } = el;
+    const distanceToBottom = scrollHeight - scrollTop - clientHeight;
+    const isScrollingUp = scrollTop < lastScrollTopRef.current - 2;
+    lastScrollTopRef.current = scrollTop;
+
+    if (isScrollingUp) {
+      isAutoScrollRef.current = false;
+    } else if (distanceToBottom <= 20) {
+      isAutoScrollRef.current = true;
+    }
+  };
+
+  useEffect(() => {
+    if (isStreaming && isExpanded && isAutoScrollRef.current && thinkingContainerRef.current) {
+      thinkingContainerRef.current.scrollTop = thinkingContainerRef.current.scrollHeight;
+    }
+  }, [thinking, isStreaming, isExpanded]);
 
   return (
     <div
@@ -304,6 +334,8 @@ export const ThinkingBlock: React.FC<{ thinking: string; thinkingTokens?: number
 
       {isExpanded && (
         <div
+          ref={thinkingContainerRef}
+          onScroll={handleScroll}
           style={{
             padding: '10px 14px',
             borderTop: '1px solid rgba(168, 85, 247, 0.15)',

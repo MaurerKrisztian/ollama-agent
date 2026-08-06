@@ -116,6 +116,7 @@ export class ContextManager {
         : []),
       'RULE 1d (Direct URL): If the user provides a URL and asks to read, inspect, summarize, or retrieve its content, call read_web_page directly. Do not search for a URL that is already provided.',
       'RULE 1e (Tool Separation): read_file is only for local workspace files. Never use read_file, list_directory, or grep_search to read a website or recover from a completed read_web_page call.',
+      'RULE 1f (File Search & Read Protocol): Follow a progressive search-and-inspect workflow: first locate targets using grep_search (text/regex) or search_workspace_symbols (symbol names). For large files, use read_file with start_line/end_line ranges or set outline_only: true to inspect AST structure rather than reading entire files unnecessarily.',
       useNativeTools
         ? 'RULE 2: When you need to inspect or modify code, ALWAYS issue a runtime-native structured tool call immediately.'
         : 'RULE 2: When you need to inspect or modify code, ALWAYS output the `<tool_call>` block immediately.',
@@ -460,23 +461,9 @@ export class ContextManager {
   public getConvertedContext(): string {
     const lines: string[] = [];
 
-    lines.push(`=== [BASE SYSTEM PROMPT] ===`);
-    lines.push(this.systemPrompt.trim());
+    lines.push(`=== [EFFECTIVE SYSTEM PROMPT & TOOL PROTOCOL] ===`);
+    lines.push(this.getEffectiveSystemPrompt(true));
     lines.push('');
-
-    if (this.tools.length > 0) {
-      lines.push(`=== [TOOL CALLING PROTOCOL & SCHEMAS] ===`);
-      lines.push('Available Tools:');
-      this.tools.forEach((t) => {
-        lines.push(`- Tool: ${t.name}`);
-        lines.push(`  Description: ${t.description}`);
-        lines.push(`  Parameters JSON Schema: ${JSON.stringify(t.parameters)}`);
-      });
-      lines.push('');
-      lines.push('Runtime Protocol: Native structured tool calls (schemas are supplied separately to Ollama).');
-      lines.push('Editing rule: read_file must inspect the target before edit_file constructs target_text.');
-      lines.push('');
-    }
 
     lines.push(`=== [CONVERSATION HISTORY (${this.messages.length} messages)] ===`);
 

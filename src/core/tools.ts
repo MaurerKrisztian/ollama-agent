@@ -151,6 +151,7 @@ export const TOOL_GROUP_METADATA: Record<string, { group: string; groupColor: st
   list_terminal_sessions:  { group: '🐚 Terminal & Shell',  groupColor: 'var(--accent-amber)',   groupDescription: 'Execute shell commands, manage interactive background terminal sessions, and control the working directory.' },
   terminate_terminal_session: { group: '🐚 Terminal & Shell', groupColor: 'var(--accent-amber)', groupDescription: 'Execute shell commands, manage interactive background terminal sessions, and control the working directory.' },
   get_document_symbols:    { group: '🛠️ Developer (LSP)',   groupColor: 'var(--accent-teal)',    groupDescription: 'Language-aware symbol navigation, definition jumps, reference finding, type hover, and diagnostics for TS/JS.' },
+  search_workspace_symbols: { group: '🛠️ Developer (LSP)',  groupColor: 'var(--accent-teal)',    groupDescription: 'Language-aware symbol navigation, definition jumps, reference finding, type hover, and diagnostics for TS/JS.' },
   go_to_definition:        { group: '🛠️ Developer (LSP)',   groupColor: 'var(--accent-teal)',    groupDescription: 'Language-aware symbol navigation, definition jumps, reference finding, type hover, and diagnostics for TS/JS.' },
   find_symbol_references:  { group: '🛠️ Developer (LSP)',   groupColor: 'var(--accent-teal)',    groupDescription: 'Language-aware symbol navigation, definition jumps, reference finding, type hover, and diagnostics for TS/JS.' },
   get_code_diagnostics:    { group: '🛠️ Developer (LSP)',   groupColor: 'var(--accent-teal)',    groupDescription: 'Language-aware symbol navigation, definition jumps, reference finding, type hover, and diagnostics for TS/JS.' },
@@ -190,6 +191,10 @@ export const BUILTIN_TOOLS: ToolDefinition[] = [
         end_line: {
           type: 'number',
           description: 'Optional 1-indexed end line number to view.',
+        },
+        outline_only: {
+          type: 'boolean',
+          description: 'Optional. Set to true to return high-level AST document outline (classes, functions, interfaces, methods, exports) instead of full line content.',
         },
       },
       required: ['relative_path'],
@@ -615,6 +620,24 @@ export const BUILTIN_TOOLS: ToolDefinition[] = [
         },
       },
       required: ['session_id'],
+    },
+  },
+  {
+    name: 'search_workspace_symbols',
+    description: 'Developer Tool: Search for symbol declarations (classes, functions, interfaces, types, variables) by name across the workspace.',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: {
+          type: 'string',
+          description: 'Symbol name or partial name to search for across workspace files.',
+        },
+        max_results: {
+          type: 'number',
+          description: 'Maximum number of symbol results to return (default 50).',
+        },
+      },
+      required: ['query'],
     },
   },
   {
@@ -1211,7 +1234,7 @@ export class ToolExecutor {
     } = {}
   ): Promise<void> {
     const maxResults = Math.min(200, Math.max(1, options.max_results || 50));
-    if (depth > 6) return;
+    const ignoredDirs = new Set(['.git', 'node_modules', 'dist', 'build', 'coverage', '.venv', 'venv', 'out', '.next']);
 
     try {
       const items = await fs.readdir(dir, { withFileTypes: true });
@@ -1308,7 +1331,7 @@ export class ToolExecutor {
               }
             });
           } catch (_) {}
-        } else if (item.isDirectory() && !item.name.startsWith('.') && item.name !== 'node_modules' && item.name !== 'dist') {
+        } else if (item.isDirectory() && !item.name.startsWith('.') && !ignoredDirs.has(item.name)) {
           await this.grepDirectory(fullPath, query, results, depth + 1, options);
         }
       }
@@ -1484,8 +1507,35 @@ export class ToolExecutor {
           const lines = rawContent.split('\n');
           const totalLines = lines.length;
 
+          if (args.outline_only) {
+            const symbolResult = this.lspManager.getDocumentSymbols(actualRelativePath);
+            if (symbolResult.success && symbolResult.symbols && symbolResult.symbols.length > 0) {
+              const outlineContent = symbolResult.symbols
+                .map((s) => `[Line ${s.line}:${s.character}] ${s.kind} ${s.name}${s.containerName ? ` (in ${s.containerName})` : ''}`)
+                .join('\n');
+              return {
+                file_path: actualRelativePath,
+                outline_only: true,
+                content: `AST Document Outline for "${actualRelativePath}" (${symbolResult.symbols.length} symbols):\n\n${outlineContent}`,
+                symbols: symbolResult.symbols,
+                line_count: totalLines,
+                size_bytes: stats.size,
+              };
+            }
+          }
+
+          let autoTruncated = false;
           let startLine = typeof args.start_line === 'number' && args.start_line > 0 ? Math.floor(args.start_line) : 1;
-          let endLine = typeof args.end_line === 'number' && args.end_line >= startLine ? Math.floor(args.end_line) : totalLines;
+          let endLine: number;
+          if (typeof args.end_line === 'number' && args.end_line >= startLine) {
+            endLine = Math.floor(args.end_line);
+          } else if (typeof args.start_line !== 'number' && totalLines > 500) {
+            endLine = 500;
+            autoTruncated = true;
+          } else {
+            endLine = totalLines;
+          }
+
           startLine = Math.min(startLine, totalLines);
           endLine = Math.min(endLine, totalLines);
 
@@ -1494,7 +1544,10 @@ export class ToolExecutor {
             .map((line, idx) => `${startLine + idx}: ${line}`)
             .join('\n');
 
-          const headerNote = `Showing lines ${startLine} to ${endLine} of ${totalLines} in ${actualRelativePath}. Please note that any changes targeting original code should remove the line number, colon, and leading space.`;
+          let headerNote = `Showing lines ${startLine} to ${endLine} of ${totalLines} in ${actualRelativePath}. Please note that any changes targeting original code should remove the line number, colon, and leading space.`;
+          if (autoTruncated) {
+            headerNote += `\n[NOTE: File exceeds 500 lines. Showing lines 1–500. Specify start_line and end_line parameters to inspect subsequent line ranges.]`;
+          }
 
           return {
             file_path: actualRelativePath,
@@ -1504,6 +1557,7 @@ export class ToolExecutor {
             end_line: endLine,
             line_count: totalLines,
             size_bytes: stats.size,
+            auto_truncated: autoTruncated,
           };
         } catch (err: any) {
           return { error: `Failed to read file: ${err.message}` };
@@ -1966,6 +2020,11 @@ export class ToolExecutor {
       case 'get_document_symbols': {
         if (!args.relative_path) return { error: 'Parameter relative_path is required.' };
         return this.lspManager.getDocumentSymbols(args.relative_path);
+      }
+
+      case 'search_workspace_symbols': {
+        if (!args.query) return { error: 'Parameter query is required.' };
+        return this.lspManager.getWorkspaceSymbols(args.query, args.max_results);
       }
 
       case 'go_to_definition': {

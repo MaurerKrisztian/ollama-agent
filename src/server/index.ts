@@ -1872,6 +1872,7 @@ app.post('/api/chat', async (req, res) => {
       onToolStart: (name, args) => {
         activeToolStates.set(sessionId, { name, args });
         sendEvent('tool_start', { name, args });
+        sendEvent('context_update', sessionAgent.getContextManager().getContextInfo());
       },
       onToolProgress: (name, progress) => {
         const state = activeToolStates.get(sessionId);
@@ -1881,12 +1882,17 @@ app.post('/api/chat', async (req, res) => {
       onToolEnd: (name, result) => {
         activeToolStates.delete(sessionId);
         sendEvent('tool_end', { name, result });
+        sendEvent('context_update', sessionAgent.getContextManager().getContextInfo());
         if (name.includes('terminal') || name === 'execute_command') {
           broadcastTerminalSessions();
         }
       },
       onModelResponse: (metrics) => {
         sendEvent('model_response', { metrics });
+        sendEvent('context_update', sessionAgent.getContextManager().getContextInfo());
+      },
+      onEvalCount: (evalCount) => {
+        sendEvent('eval_count_update', { evalCount });
       },
       onMaxLoopsReached: (limit) => {
         sendEvent('max_loops_reached', { maxLoops: limit });

@@ -38,6 +38,7 @@ export interface OllamaChatOptions {
   onThinkingChunk?: (thinkingChunk: string) => void;
   onToolCallChunk?: (toolCalls: Array<{ id: string; name: string; arguments: Record<string, any> }>) => void;
   onToolStreamDelta?: (toolName: string, deltaText: string) => void;
+  onEvalCount?: (evalCount: number) => void;
   signal?: AbortSignal;
 }
 
@@ -712,6 +713,9 @@ export class OllamaClient {
         try {
           const parsed = JSON.parse(trimmed);
           captureMetrics(parsed);
+          if (typeof parsed.eval_count === 'number' && options.onEvalCount) {
+            options.onEvalCount(parsed.eval_count);
+          }
           if (parsed.message) {
             const thinkingChunk = parsed.message.thinking || parsed.message.reasoning_content || parsed.message.reasoning;
             if (thinkingChunk) {

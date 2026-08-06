@@ -630,7 +630,7 @@ export const Header: React.FC<HeaderProps> = ({
             <>
               <Sidebar size={16} color={sidebarOpen ? 'var(--accent-primary)' : 'var(--text-muted)'} />
               <span style={{ fontSize: '0.825rem', fontWeight: 600, color: sidebarOpen ? 'var(--accent-primary)' : 'var(--text-main)' }}>Context Inspector</span>
-              <span style={{ fontSize: '0.75rem', fontWeight: 600, background: 'rgba(99, 102, 241, 0.15)', color: 'var(--accent-primary)', padding: '2px 8px', borderRadius: '12px', border: '1px solid rgba(99, 102, 241, 0.3)' }}>
+              <span style={{ fontSize: '0.75rem', fontWeight: 600, background: 'rgba(99, 102, 241, 0.15)', color: 'var(--accent-primary)', padding: '2px 8px', borderRadius: '12px', border: '1px solid rgba(99, 102, 241, 0.3)', fontVariantNumeric: 'tabular-nums', fontFamily: 'var(--font-code, monospace)', display: 'inline-block', textAlign: 'center', minWidth: '90px' }}>
                 {contextInfo ? `${contextInfo.estimatedTokens.toLocaleString()} tokens` : '0 tokens'}
               </span>
             </>

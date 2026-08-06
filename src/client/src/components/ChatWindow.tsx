@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { User, Bot, ShieldAlert, CheckCircle2, XCircle, Loader2, RotateCcw, FileText, Zap, X } from 'lucide-react';
+import { User, Bot, ShieldAlert, CheckCircle2, XCircle, Loader2, RotateCcw, FileText, Zap, X, ArrowDown } from 'lucide-react';
 import { ChatMessage, ImageAttachment, BatchReviewFile, PendingApprovalCall, TextAttachment, TerminalSessionInfo } from '../types';
 import { BatchReviewCard } from './chat/BatchReviewCard';
 import { findActiveSkillMention } from '../skillMention';
@@ -97,9 +97,12 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   const [skillMenuDismissed, setSkillMenuDismissed] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
   const chatMainRef = useRef<HTMLDivElement>(null);
   const dragDepth = useRef(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const isAutoScrollRef = useRef(true);
+  const [showScrollToBottom, setShowScrollToBottom] = useState(false);
 
   const [previewImage, setPreviewImage] = useState<{ src: string; alt?: string } | null>(null);
 
@@ -373,22 +376,108 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
     setAttachments((current) => [...current, ...withinTotalLimit]);
   };
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  const isProgrammaticScrollRef = useRef(false);
+  const lastScrollTopRef = useRef(0);
+  const touchStartRef = useRef(0);
+
+  const handleWheel = (e: React.WheelEvent<HTMLDivElement>) => {
+    if (e.deltaY < 0) {
+      isAutoScrollRef.current = false;
+      setShowScrollToBottom(true);
+    }
+  };
+
+  const handleTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (e.touches.length > 0) {
+      touchStartRef.current = e.touches[0].clientY;
+    }
+  };
+
+  const handleTouchMove = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (e.touches.length > 0) {
+      const deltaY = e.touches[0].clientY - touchStartRef.current;
+      if (deltaY > 10) {
+        isAutoScrollRef.current = false;
+        setShowScrollToBottom(true);
+      }
+    }
+  };
+
+  const handleScroll = () => {
+    const container = messagesContainerRef.current;
+    if (!container) return;
+    const { scrollTop, scrollHeight, clientHeight } = container;
+    const distanceToBottom = scrollHeight - scrollTop - clientHeight;
+    const isScrollingUp = scrollTop < lastScrollTopRef.current - 4;
+    lastScrollTopRef.current = scrollTop;
+
+    // Detect user scrolling UP regardless of programmatic flag to prevent rapid streaming override
+    if (isScrollingUp) {
+      isAutoScrollRef.current = false;
+      setShowScrollToBottom(true);
+      return;
+    }
+
+    if (isProgrammaticScrollRef.current) return;
+
+    if (distanceToBottom <= 15) {
+      // User scrolled all the way DOWN to the bottom -> Re-attach!
+      isAutoScrollRef.current = true;
+      setShowScrollToBottom(false);
+    } else if (distanceToBottom > 40) {
+      // User is scrolled up away from bottom -> Ensure autoscroll is detached
+      isAutoScrollRef.current = false;
+      setShowScrollToBottom(true);
+    }
+  };
+
+  const scrollToBottom = (force = false) => {
+    const container = messagesContainerRef.current;
+    if (!container) return;
+    if (force) {
+      isAutoScrollRef.current = true;
+      setShowScrollToBottom(false);
+    }
+    if (isAutoScrollRef.current || force) {
+      isProgrammaticScrollRef.current = true;
+      container.scrollTop = container.scrollHeight;
+      messagesEndRef.current?.scrollIntoView({ behavior: 'instant' as ScrollBehavior });
+      requestAnimationFrame(() => {
+        isProgrammaticScrollRef.current = false;
+      });
+    }
   };
 
   useEffect(() => {
-    scrollToBottom();
-  }, [messages, streamingText, isGenerating]);
+    if (isGenerating && !streamingText && !streamingThinking) {
+      isAutoScrollRef.current = true;
+      setShowScrollToBottom(false);
+    }
+  }, [isGenerating]);
+
+  useEffect(() => {
+    if (isAutoScrollRef.current && messagesContainerRef.current) {
+      isProgrammaticScrollRef.current = true;
+      messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight;
+      requestAnimationFrame(() => {
+        isProgrammaticScrollRef.current = false;
+      });
+    }
+  }, [messages, streamingText, streamingThinking, activeToolCall, isGenerating]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!input.trim() || isGenerating) return;
+    isAutoScrollRef.current = true;
+    setShowScrollToBottom(false);
     onSendMessage(input.trim(), attachments, imageAttachments);
     setInput('');
     setAttachments([]);
     setImageAttachments([]);
     setAttachmentError('');
+    setTimeout(() => {
+      scrollToBottom(true);
+    }, 50);
   };
 
   const handleSelectHelperPrompt = (promptText: string) => {
@@ -436,9 +525,49 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
         </div>
       )}
 
-      <div ref={chatMainRef} className="chat-main" style={{ flex: 1, display: 'flex', minHeight: 0 }}>
+      <div ref={chatMainRef} className="chat-main" style={{ flex: 1, display: 'flex', minHeight: 0, position: 'relative' }}>
+        {/* Floating Scroll-to-Bottom Re-attach Button */}
+        {showScrollToBottom && (
+          <button
+            onClick={() => scrollToBottom(true)}
+            className="animate-fade-in"
+            style={{
+              position: 'absolute',
+              bottom: '20px',
+              right: '32px',
+              zIndex: 35,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '8px 14px',
+              borderRadius: '20px',
+              border: '1px solid rgba(99, 102, 241, 0.4)',
+              background: 'rgba(15, 23, 42, 0.92)',
+              backdropFilter: 'blur(8px)',
+              color: '#fff',
+              fontSize: '0.8rem',
+              fontWeight: 600,
+              cursor: 'pointer',
+              boxShadow: '0 4px 16px rgba(0, 0, 0, 0.45)',
+              transition: 'transform 0.15s ease, background 0.15s ease',
+            }}
+            title="Re-attach auto-scroll to bottom"
+          >
+            <ArrowDown size={15} style={{ color: 'var(--accent-primary)' }} />
+            <span>Scroll to bottom</span>
+          </button>
+        )}
+
         {/* Messages Scrollable Container */}
-        <div className="messages-container" style={{ flex: 1, minWidth: 0, overflowY: 'auto', padding: '24px 32px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+        <div
+          ref={messagesContainerRef}
+          onScroll={handleScroll}
+          onWheel={handleWheel}
+          onTouchStart={handleTouchStart}
+          onTouchMove={handleTouchMove}
+          className="messages-container"
+          style={{ flex: 1, minWidth: 0, overflowY: 'auto', padding: '24px 32px', display: 'flex', flexDirection: 'column', gap: '20px' }}
+        >
           {messages.length === 0 && !streamingText && (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '80%', color: 'var(--text-dim)', textAlign: 'center', gap: '20px' }}>
               <div style={{ width: '64px', height: '64px', borderRadius: '16px', background: 'rgba(99, 102, 241, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>

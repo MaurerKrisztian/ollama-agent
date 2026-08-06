@@ -509,4 +509,39 @@ export class LspManager {
       return { success: false, error: err.message };
     }
   }
+
+  public getWorkspaceSymbols(query: string, maxResults: number = 50): { success: boolean; symbols?: Array<LspSymbolInformation & { filePath: string }>; error?: string } {
+    if (!this.service) {
+      return { success: false, error: 'Language service not initialized' };
+    }
+    try {
+      const items = this.service.getNavigateToItems(query, maxResults);
+      const results: Array<LspSymbolInformation & { filePath: string }> = [];
+      for (const item of items) {
+        if (!item.fileName || item.fileName.includes('node_modules')) continue;
+        const relPath = path.relative(this.workingDir, item.fileName).replaceAll('\\', '/');
+        let line = 1;
+        let character = 1;
+        try {
+          const content = fs.readFileSync(item.fileName, 'utf-8');
+          const sf = ts.createSourceFile(item.fileName, content, ts.ScriptTarget.Latest, true);
+          const pos = sf.getLineAndCharacterOfPosition(item.textSpan.start);
+          line = pos.line + 1;
+          character = pos.character + 1;
+        } catch (_) {}
+        results.push({
+          name: item.name,
+          kind: item.kind,
+          containerName: item.containerName || undefined,
+          filePath: relPath,
+          line,
+          character,
+        });
+      }
+      return { success: true, symbols: results };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
 }
+
