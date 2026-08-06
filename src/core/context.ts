@@ -311,7 +311,7 @@ export class ContextManager {
 
     const isPruned = (content: string) => content.startsWith('[Context Pruned:');
 
-    const readFileResponsesByPath = new Map<string, { msgIndex: number; toolCallId?: string }[]>();
+    const readFileResponsesByPath = new Map<string, { msgIndex: number; toolCallId?: string; startLine?: number; endLine?: number; isFullRead: boolean }[]>();
     const readTerminalResponsesBySession = new Map<string, { msgIndex: number; toolCallId?: string }[]>();
     const mutations: { path: string; toolName: string; msgIndex: number }[] = [];
 
@@ -325,19 +325,23 @@ export class ContextManager {
       // Strategy 1 & 2: Collect file reads, terminal reads & file mutations
       if (toolName === 'read_file') {
         let filePath = toolArgs.relative_path || toolArgs.path || toolArgs.file;
+        let startLine: number | undefined = toolArgs.start_line !== undefined ? Number(toolArgs.start_line) : undefined;
+        let endLine: number | undefined = toolArgs.end_line !== undefined ? Number(toolArgs.end_line) : undefined;
          
-        // Fallback: extract file_path from tool result JSON if not found in tool_call args
-        // (handles synthetic/auto-triggered reads without proper tool_call linkage)
-        if (!filePath && typeof msg.content === 'string') {
+        // Fallback: extract file_path and line bounds from tool result JSON if not found in tool_call args
+        if (typeof msg.content === 'string') {
           try {
             const parsed = JSON.parse(msg.content);
-            filePath = parsed.file_path;
+            if (!filePath) filePath = parsed.file_path;
+            if (startLine === undefined && parsed.start_line !== undefined) startLine = Number(parsed.start_line);
+            if (endLine === undefined && parsed.end_line !== undefined) endLine = Number(parsed.end_line);
           } catch (_) {}
         }
          
         if (filePath) {
           const list = readFileResponsesByPath.get(filePath) || [];
-          list.push({ msgIndex, toolCallId: msg.tool_call_id });
+          const isFullRead = startLine === undefined && endLine === undefined;
+          list.push({ msgIndex, toolCallId: msg.tool_call_id, startLine, endLine, isFullRead });
           readFileResponsesByPath.set(filePath, list);
         }
       } else if (toolName === 'read_terminal_output') {
@@ -379,7 +383,7 @@ export class ContextManager {
       }
     });
 
-    // Strategy 1: Superseded File & Terminal Read Pruning (Latest-Only)
+    // Strategy 1: Superseded File & Terminal Read Pruning (Range-Aware)
     if (this.pruningConfig.pruneSupersededReads) {
       // Build set of reads that will be invalidated by mutations (Strategy 2)
       // to avoid double-pruning them
@@ -398,12 +402,34 @@ export class ContextManager {
       readFileResponsesByPath.forEach((responses, filePath) => {
         if (responses.length > 1) {
           for (let i = 0; i < responses.length - 1; i++) {
-            // Skip if this read will be pruned by Strategy 2
-            if (readsInvalidatedByMutation.has(responses[i].msgIndex)) continue;
-            
-            const msg = this.messages[responses[i].msgIndex];
-            if (!isPruned(msg.content)) {
-              msg.content = `[Context Pruned: Content of '${filePath}' superseded by a newer read_file tool response.]`;
+            const older = responses[i];
+            if (readsInvalidatedByMutation.has(older.msgIndex)) continue;
+
+            // Check if any newer read supersedes the older read
+            let isSuperseded = false;
+            for (let j = i + 1; j < responses.length; j++) {
+              const newer = responses[j];
+              if (newer.isFullRead) {
+                // A full file read supersedes all previous reads
+                isSuperseded = true;
+                break;
+              }
+              if (!older.isFullRead && older.startLine !== undefined && older.endLine !== undefined &&
+                  newer.startLine !== undefined && newer.endLine !== undefined) {
+                // If both are range reads, newer supersedes older only if newer covers or overlaps older's range
+                const isOverlappingOrCovering = newer.startLine <= older.startLine && newer.endLine >= older.endLine;
+                if (isOverlappingOrCovering) {
+                  isSuperseded = true;
+                  break;
+                }
+              }
+            }
+
+            if (isSuperseded) {
+              const msg = this.messages[older.msgIndex];
+              if (!isPruned(msg.content)) {
+                msg.content = `[Context Pruned: Content of '${filePath}' superseded by a newer read_file tool response.]`;
+              }
             }
           }
         }

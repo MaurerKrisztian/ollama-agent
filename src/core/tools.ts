@@ -1208,6 +1208,113 @@ export class ToolExecutor {
     };
   }
 
+  private async grepFile(
+    fullPath: string,
+    relativePath: string,
+    query: string,
+    results: Array<{ file: string; line: number; content: string; spans?: Array<{ start: number; end: number }>; context?: string[] }>,
+    options: {
+      is_regex?: boolean;
+      case_sensitive?: boolean;
+      whole_word?: boolean;
+      context_lines?: number;
+      max_results?: number;
+      highlight_match?: boolean;
+      max_line_length?: number;
+      offset?: number;
+      include_spans?: boolean;
+      stats?: {
+        files_scanned: number;
+        total_matches: number;
+        files_with_matches: Set<string>;
+      };
+    }
+  ): Promise<void> {
+    const maxResults = Math.min(200, Math.max(1, options.max_results || 50));
+    const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    let pattern = options.is_regex ? query : escapeRegExp(query);
+    if (options.whole_word) {
+      pattern = `\\b(?:${pattern})\\b`;
+    }
+    const flags = (options.case_sensitive ? '' : 'i') + 'g';
+    const matcher = new RegExp(pattern, flags);
+
+    const ctxLines = Math.min(5, Math.max(0, options.context_lines || 0));
+    const doHighlight = options.highlight_match !== false;
+    const maxLineLen = Math.max(20, options.max_line_length || 300);
+
+    const truncateText = (text: string): string => {
+      if (text.length <= maxLineLen) return text;
+      return text.slice(0, maxLineLen) + `... [truncated ${text.length - maxLineLen} chars]`;
+    };
+
+    if (options.stats) {
+      options.stats.files_scanned++;
+    }
+
+    try {
+      const content = await fs.readFile(fullPath, 'utf-8');
+      const lines = content.split('\n');
+      lines.forEach((lineText, idx) => {
+        matcher.lastIndex = 0;
+        if (matcher.test(lineText)) {
+          if (options.stats) {
+            options.stats.total_matches++;
+            options.stats.files_with_matches.add(relativePath);
+          }
+
+          const offsetVal = Math.max(0, options.offset || 0);
+          const currentMatchIndex = options.stats ? options.stats.total_matches : (results.length + 1);
+
+          if (currentMatchIndex > offsetVal && results.length < maxResults) {
+            matcher.lastIndex = 0;
+            const trimmedLine = lineText.trim();
+            const rawContent = doHighlight
+              ? lineText.replace(matcher, (m) => `>>>${m}<<<`).trim()
+              : trimmedLine;
+            const formattedContent = truncateText(rawContent);
+
+            let spans: Array<{ start: number; end: number }> | undefined = undefined;
+            if (options.include_spans !== false) {
+              spans = [];
+              let matchExec: RegExpExecArray | null;
+              const spanMatcher = new RegExp(pattern, flags);
+              while ((matchExec = spanMatcher.exec(trimmedLine)) !== null) {
+                spans.push({ start: matchExec.index, end: matchExec.index + matchExec[0].length });
+                if (!spanMatcher.global || matchExec[0].length === 0) break;
+              }
+              if (spans.length === 0) spans = undefined;
+            }
+
+            let contextSnippet: string[] | undefined = undefined;
+            if (ctxLines > 0) {
+              const startLine = Math.max(0, idx - ctxLines);
+              const endLine = Math.min(lines.length, idx + ctxLines + 1);
+              contextSnippet = lines.slice(startLine, endLine).map((l, offset) => {
+                const lineNum = startLine + offset + 1;
+                const isMatchLine = lineNum === idx + 1;
+                const prefix = isMatchLine ? `> ${lineNum}: ` : `  ${lineNum}: `;
+                matcher.lastIndex = 0;
+                const lineVal = isMatchLine && doHighlight
+                  ? l.replace(matcher, (m) => `>>>${m}<<<`)
+                  : l;
+                return truncateText(`${prefix}${lineVal}`);
+              });
+            }
+
+            results.push({
+              file: relativePath,
+              line: idx + 1,
+              content: formattedContent,
+              spans,
+              context: contextSnippet,
+            });
+          }
+        }
+      });
+    } catch (_) {}
+  }
+
   private async grepDirectory(
     dir: string,
     query: string,
@@ -1233,29 +1340,11 @@ export class ToolExecutor {
       };
     } = {}
   ): Promise<void> {
-    const maxResults = Math.min(200, Math.max(1, options.max_results || 50));
     const ignoredDirs = new Set(['.git', 'node_modules', 'dist', 'build', 'coverage', '.venv', 'venv', 'out', '.next']);
 
     try {
       const items = await fs.readdir(dir, { withFileTypes: true });
-
-      const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      let pattern = options.is_regex ? query : escapeRegExp(query);
-      if (options.whole_word) {
-        pattern = `\\b(?:${pattern})\\b`;
-      }
-      const flags = (options.case_sensitive ? '' : 'i') + 'g';
-      const matcher = new RegExp(pattern, flags);
       const globMatcher = this.compileGlobMatcher(options.includes, options.excludes, options.file_pattern);
-
-      const ctxLines = Math.min(5, Math.max(0, options.context_lines || 0));
-      const doHighlight = options.highlight_match !== false;
-      const maxLineLen = Math.max(20, options.max_line_length || 300);
-
-      const truncateText = (text: string): string => {
-        if (text.length <= maxLineLen) return text;
-        return text.slice(0, maxLineLen) + `... [truncated ${text.length - maxLineLen} chars]`;
-      };
 
       for (const item of items) {
         const fullPath = path.join(dir, item.name);
@@ -1266,71 +1355,7 @@ export class ToolExecutor {
             continue;
           }
 
-          if (options.stats) {
-            options.stats.files_scanned++;
-          }
-
-          try {
-            const content = await fs.readFile(fullPath, 'utf-8');
-            const lines = content.split('\n');
-            lines.forEach((lineText, idx) => {
-              matcher.lastIndex = 0;
-              if (matcher.test(lineText)) {
-                if (options.stats) {
-                  options.stats.total_matches++;
-                  options.stats.files_with_matches.add(relativePath);
-                }
-
-                const offsetVal = Math.max(0, options.offset || 0);
-                const currentMatchIndex = options.stats ? options.stats.total_matches : (results.length + 1);
-
-                if (currentMatchIndex > offsetVal && results.length < maxResults) {
-                  matcher.lastIndex = 0;
-                  const trimmedLine = lineText.trim();
-                  const rawContent = doHighlight
-                    ? lineText.replace(matcher, (m) => `>>>${m}<<<`).trim()
-                    : trimmedLine;
-                  const formattedContent = truncateText(rawContent);
-
-                  let spans: Array<{ start: number; end: number }> | undefined = undefined;
-                  if (options.include_spans !== false) {
-                    spans = [];
-                    let matchExec: RegExpExecArray | null;
-                    const spanMatcher = new RegExp(pattern, flags);
-                    while ((matchExec = spanMatcher.exec(trimmedLine)) !== null) {
-                      spans.push({ start: matchExec.index, end: matchExec.index + matchExec[0].length });
-                      if (!spanMatcher.global || matchExec[0].length === 0) break;
-                    }
-                    if (spans.length === 0) spans = undefined;
-                  }
-
-                  let contextSnippet: string[] | undefined = undefined;
-                  if (ctxLines > 0) {
-                    const startLine = Math.max(0, idx - ctxLines);
-                    const endLine = Math.min(lines.length, idx + ctxLines + 1);
-                    contextSnippet = lines.slice(startLine, endLine).map((l, offset) => {
-                      const lineNum = startLine + offset + 1;
-                      const isMatchLine = lineNum === idx + 1;
-                      const prefix = isMatchLine ? `> ${lineNum}: ` : `  ${lineNum}: `;
-                      matcher.lastIndex = 0;
-                      const lineVal = isMatchLine && doHighlight
-                        ? l.replace(matcher, (m) => `>>>${m}<<<`)
-                        : l;
-                      return truncateText(`${prefix}${lineVal}`);
-                    });
-                  }
-
-                  results.push({
-                    file: relativePath,
-                    line: idx + 1,
-                    content: formattedContent,
-                    spans,
-                    context: contextSnippet,
-                  });
-                }
-              }
-            });
-          } catch (_) {}
+          await this.grepFile(fullPath, relativePath, query, results, options);
         } else if (item.isDirectory() && !item.name.startsWith('.') && !ignoredDirs.has(item.name)) {
           await this.grepDirectory(fullPath, query, results, depth + 1, options);
         }
@@ -1791,7 +1816,12 @@ export class ToolExecutor {
           };
           const startTime = Date.now();
 
-          await this.grepDirectory(searchDir, query, results, 0, {
+          const stat = await fs.stat(searchDir).catch(() => null);
+          if (!stat) {
+            return { error: `Target search path "${relative_path || ''}" does not exist.` };
+          }
+
+          const grepOptions = {
             is_regex,
             case_sensitive,
             whole_word,
@@ -1805,7 +1835,14 @@ export class ToolExecutor {
             offset: currentOffset,
             include_spans: include_spans !== false,
             stats,
-          });
+          };
+
+          if (stat.isFile()) {
+            const relPath = path.relative(this.workingDir, searchDir);
+            await this.grepFile(searchDir, relPath, query, results, grepOptions);
+          } else {
+            await this.grepDirectory(searchDir, query, results, 0, grepOptions);
+          }
 
           const executionTimeMs = Date.now() - startTime;
           const totalMatchesCount = stats.total_matches;

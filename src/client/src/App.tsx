@@ -1109,6 +1109,7 @@ export const App: React.FC = () => {
           isReverting={isReverting}
           onRevertToCheckpoint={handleRevertToCheckpoint}
           onImportConfig={(importedCfg) => setConfig(importedCfg)}
+          onChangeWorkingDir={handleChangeWorkingDir}
         />
         {activeView === 'chat' ? (
           <ChatWindow

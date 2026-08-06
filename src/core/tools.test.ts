@@ -384,6 +384,23 @@ test('grep_search supports regex mode, case sensitivity, and file pattern filter
     assert.equal(page3.next_offset, null);
     assert.strictEqual(page3.has_more, false);
     assert.equal(page3.matches[0].content, 'const item5 = 5;');
+
+    // Single file target in relative_path
+    const singleFileRes = await executor.executeTool('grep_search', {
+      query: 'ProcessData',
+      relative_path: 'service.ts',
+    });
+    assert.equal(singleFileRes.files_scanned, 1);
+    assert.equal(singleFileRes.returned_matches, 1);
+    assert.equal(singleFileRes.matches[0].file, 'service.ts');
+
+    // Non-existent relative_path returns descriptive error
+    const missingPathRes = await executor.executeTool('grep_search', {
+      query: 'ProcessData',
+      relative_path: 'nonexistent.ts',
+    });
+    assert.ok(missingPathRes.error);
+    assert.match(missingPathRes.error, /does not exist/);
   });
 });
 

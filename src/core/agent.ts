@@ -782,7 +782,7 @@ ${conversationText}`;
           }
         }
       }
-      if (msg.role === 'tool' && (msg.name === 'read_file' || msg.name === 'create_file')) {
+      if (msg.role === 'tool') {
         try {
           const parsed = typeof msg.content === 'string' ? JSON.parse(msg.content) : msg.content;
           if (parsed?.file_path) {

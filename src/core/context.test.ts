@@ -63,6 +63,44 @@ test('Strategy 1: Superseded File Read Pruning (Latest-Only)', () => {
   assert.strictEqual(activeMsg!.content, 'console.log("v2");');
 });
 
+test('Strategy 1: Range-Aware Read Pruning (Non-overlapping slice reads are retained)', () => {
+  const cm = new ContextManager();
+
+  // Read lines 1-100
+  cm.addMessage({
+    role: 'assistant',
+    content: '',
+    tool_calls: [{ id: 'call_1', name: 'read_file', arguments: { relative_path: 'bigfile.ts', start_line: 1, end_line: 100 } }],
+  });
+  const firstRead = cm.addMessage({
+    role: 'tool',
+    name: 'read_file',
+    tool_call_id: 'call_1',
+    content: 'lines 1 to 100 content',
+  });
+
+  // Read lines 101-200 (disjoint range)
+  cm.addMessage({
+    role: 'assistant',
+    content: '',
+    tool_calls: [{ id: 'call_2', name: 'read_file', arguments: { relative_path: 'bigfile.ts', start_line: 101, end_line: 200 } }],
+  });
+  const secondRead = cm.addMessage({
+    role: 'tool',
+    name: 'read_file',
+    tool_call_id: 'call_2',
+    content: 'lines 101 to 200 content',
+  });
+
+  const messages = cm.getMessages();
+  const msg1 = messages.find((m) => m.id === firstRead.id);
+  const msg2 = messages.find((m) => m.id === secondRead.id);
+
+  // Both non-overlapping range reads must be retained intact
+  assert.strictEqual(msg1!.content, 'lines 1 to 100 content');
+  assert.strictEqual(msg2!.content, 'lines 101 to 200 content');
+});
+
 test('Strategy 2: Post-Mutation Invalidation (Prune on File Edit)', () => {
   const cm = new ContextManager();
 

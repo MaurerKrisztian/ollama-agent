@@ -277,34 +277,6 @@ export const Header: React.FC<HeaderProps> = ({
         </label>
       )}
       <div className="header-center-controls" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-        {/* Active Working Directory Picker */}
-        <button
-          className="header-workdir-control"
-          onClick={onOpenWorkingDirPicker}
-          title={`Active Working Directory: ${config.workingDir}\nClick to change folder`}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-            background: 'rgba(15, 23, 42, 0.6)',
-            padding: '6px 12px',
-            borderRadius: '8px',
-            border: '1px solid var(--border-color)',
-            color: 'var(--text-main)',
-            fontSize: '0.8rem',
-            cursor: 'pointer',
-            maxWidth: '220px',
-            transition: 'all 0.15s ease',
-          }}
-        >
-          <FolderOpen size={15} color="var(--accent-teal)" style={{ flexShrink: 0 }} />
-          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: 'var(--font-code)', fontSize: '0.78rem' }}>
-            {config.workingDir || 'Select folder...'}
-          </span>
-        </button>
-
-        {/* Active Working Directory Picker */}
-
         {/* Model Selector */}
         <div className="header-model-control" style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'rgba(15, 23, 42, 0.6)', padding: '6px 12px', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
           <Cpu size={16} color="var(--accent-primary)" />

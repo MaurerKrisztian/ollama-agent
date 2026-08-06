@@ -53,6 +53,7 @@ interface LeftSidebarProps {
   isReverting?: boolean;
   onRevertToCheckpoint?: (promptId: string) => void;
   onImportConfig?: (config: AgentConfig) => void;
+  onChangeWorkingDir?: (path: string) => Promise<boolean>;
 }
 
 export const LeftSidebar: React.FC<LeftSidebarProps> = ({
@@ -83,11 +84,17 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
   isReverting = false,
   onRevertToCheckpoint,
   onImportConfig,
+  onChangeWorkingDir,
 }) => {
   const [copiedSessionId, setCopiedSessionId] = useState<string | null>(null);
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState<string>('');
+  const [workdirInput, setWorkdirInput] = useState<string>(config.workingDir || '');
   const fileInputRef = React.useRef<HTMLInputElement>(null);
+
+  React.useEffect(() => {
+    setWorkdirInput(config.workingDir || '');
+  }, [config.workingDir]);
 
   const handleExportUserConfig = async () => {
     try {
@@ -442,6 +449,99 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
               <span>Benchmark Runner</span>
             </button>
           </div>
+        </div>
+
+        {/* Active Working Directory Card */}
+        <div style={{ background: 'rgba(30, 41, 59, 0.45)', padding: '14px', borderRadius: '10px', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <FolderOpen size={16} color="var(--accent-teal)" />
+              <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-main)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                Active Working Directory
+              </span>
+            </div>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '0.72rem', color: 'var(--text-muted)' }} title="Include working directory context in model requests">
+              <input
+                type="checkbox"
+                checked={config.showWorkingDirInfo}
+                onChange={(e) => onToggleWorkingDirInfo(e.target.checked)}
+                style={{ accentColor: 'var(--accent-teal)', cursor: 'pointer' }}
+              />
+              <span>Context</span>
+            </label>
+          </div>
+
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (workdirInput.trim() && onChangeWorkingDir) {
+                void onChangeWorkingDir(workdirInput.trim());
+              }
+            }}
+            style={{ display: 'flex', gap: '6px' }}
+          >
+            <input
+              type="text"
+              value={workdirInput}
+              onChange={(e) => setWorkdirInput(e.target.value)}
+              placeholder="/path/to/working/dir"
+              title="Active working directory absolute path"
+              style={{
+                flex: 1,
+                minWidth: 0,
+                padding: '6px 9px',
+                borderRadius: '6px',
+                border: '1px solid var(--border-color)',
+                background: 'rgba(15, 23, 42, 0.8)',
+                color: 'var(--text-main)',
+                fontSize: '0.78rem',
+                fontFamily: 'var(--font-code, monospace)',
+                outline: 'none',
+              }}
+            />
+            <button
+              type="submit"
+              title="Apply working directory path"
+              style={{
+                padding: '6px 10px',
+                borderRadius: '6px',
+                border: '1px solid rgba(20, 184, 166, 0.4)',
+                background: 'rgba(20, 184, 166, 0.15)',
+                color: 'var(--accent-teal)',
+                fontSize: '0.75rem',
+                fontWeight: 600,
+                cursor: 'pointer',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              Apply
+            </button>
+          </form>
+
+          <button
+            type="button"
+            onClick={onOpenWorkingDirPicker}
+            title="Browse server filesystem directories"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '6px',
+              width: '100%',
+              padding: '8px 10px',
+              borderRadius: '6px',
+              border: '1px solid rgba(20, 184, 166, 0.35)',
+              background: 'rgba(20, 184, 166, 0.1)',
+              color: 'var(--accent-teal)',
+              fontSize: '0.78rem',
+              fontWeight: 600,
+              cursor: 'pointer',
+              transition: 'all 0.15s ease',
+            }}
+          >
+            <FolderOpen size={14} color="var(--accent-teal)" />
+            <span>Browse & Change Folder</span>
+          </button>
         </div>
 
         {/* Model & Agent Settings */}
