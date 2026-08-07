@@ -836,6 +836,20 @@ export const App: React.FC = () => {
     });
   };
 
+  const handleTogglePlanMode = async (enabled: boolean) => {
+    setConfig((prev) => ({ ...prev, planMode: enabled }));
+    await fetch('/api/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ planMode: enabled }),
+    });
+    await fetch('/api/chat/tool-settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ planMode: enabled }),
+    });
+  };
+
   const handleApproveToolCall = async () => {
     if (isSubmittingToolApproval) return;
     setIsSubmittingToolApproval(true);
@@ -951,7 +965,7 @@ export const App: React.FC = () => {
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...body, sessionId: activeSessionId }),
+        body: JSON.stringify({ ...body, planMode: config.planMode, sessionId: activeSessionId }),
       });
 
       if (!response.ok) {
@@ -1061,6 +1075,7 @@ export const App: React.FC = () => {
         onChangeTemperature={handleChangeTemperature}
         onChangeContextWindow={handleChangeContextWindow}
         onToggleThinking={handleToggleThinking}
+        onTogglePlanMode={handleTogglePlanMode}
         onNewChat={handleNewChat}
         onOpenSystemPrompt={() => setSystemPromptModalOpen(true)}
         onOpenToolSettings={() => setToolSettingsModalOpen(true)}
@@ -1101,6 +1116,7 @@ export const App: React.FC = () => {
           onToggleWorkingDirInfo={handleToggleWorkingDirInfo}
           onChangeTemperature={handleChangeTemperature}
           onToggleThinking={handleToggleThinking}
+          onTogglePlanMode={handleTogglePlanMode}
           onOpenModelDetails={() => setModelDetailsModalOpen(true)}
           systemMetrics={systemMetrics}
           activeTerminalCount={terminalSessions.filter((s) => s.status === 'running').length}
@@ -1142,6 +1158,8 @@ export const App: React.FC = () => {
             onOpenModelDetails={() => setModelDetailsModalOpen(true)}
             onCompactContext={handleCompactContext}
             isCompacting={isCompacting}
+            planMode={config.planMode}
+            onTogglePlanMode={handleTogglePlanMode}
             terminalSessions={terminalSessions}
             onOpenTerminal={(sessionId) => {
               if (sessionId) setSelectedTerminalSessionId(sessionId);

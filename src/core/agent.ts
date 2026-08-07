@@ -810,13 +810,14 @@ ${conversationText}`;
     while (isUnlimited || maxLoops > 0) {
       callbacks?.signal?.throwIfAborted();
       if (!isUnlimited) maxLoops--;
+      let hasPlanModeBlockedCall = false;
 
       const activeTools = deepResearchCompleted ? [] : this.getActiveTools();
       this.contextManager.setTools(activeTools);
 
       const supportsNativeTools = await this.ollamaClient.checkModelToolSupport(this.config.model);
 
-      let effectiveSystemPrompt = this.contextManager.getEffectiveSystemPrompt(supportsNativeTools);
+      let effectiveSystemPrompt = this.contextManager.getEffectiveSystemPrompt(supportsNativeTools, Boolean(this.config.planMode));
       if (this.config.showWorkingDirInfo && !deepResearchCompleted) {
         effectiveSystemPrompt += `\n\n${await this.getWorkingDirectoryPromptContext()}`;
       }
@@ -1062,8 +1063,28 @@ ${conversationText}`;
             failedToolCalls.delete(callFingerprint);
           }
 
+          const isMutatingTool = [
+            'edit_file',
+            'replace_file',
+            'create_file',
+            'write_file',
+            'apply_patch',
+            'grep_replace',
+            'execute_command',
+            'start_terminal_session',
+            'send_terminal_input',
+            'terminate_terminal_session',
+            'set_working_directory',
+          ].includes(call.name);
+
           const toolResult =
-            mutationPath && !hasReadMutationTarget
+            Boolean(this.config.planMode) && isMutatingTool
+              ? {
+                  error:
+                    `[Plan Mode Active] Tool call "${call.name}" is blocked during Plan Mode. Complete your read-only research and present a clear implementation plan for user review before attempting edits.`,
+                  plan_mode_blocked: true,
+                }
+              : mutationPath && !hasReadMutationTarget
               ? automaticReadResult?.error
                 ? {
                     error: isFileNotFound
@@ -1213,6 +1234,10 @@ ${conversationText}`;
             failedToolCalls.set(callFingerprint, (failedToolCalls.get(callFingerprint) || 0) + 1);
           }
 
+          if (toolResult?.plan_mode_blocked === true || toolResult?.plan_submitted === true) {
+            hasPlanModeBlockedCall = true;
+          }
+
           if (callbacks?.onToolEnd) {
             callbacks.onToolEnd(call.name, toolResult);
           }
@@ -1240,6 +1265,11 @@ ${conversationText}`;
             if (callbacks?.onMessageAdded) callbacks.onMessageAdded(autoReadMsg);
             deferredAutoReadMessage = null;
           }
+        }
+
+        if (hasPlanModeBlockedCall) {
+          normalTurnEnd = true;
+          break;
         }
 
         const workflowCompletedAfterThisCall =

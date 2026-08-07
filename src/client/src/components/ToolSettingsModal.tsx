@@ -851,6 +851,46 @@ export const ToolSettingsModal: React.FC<ToolSettingsModalProps> = ({
             </label>
           </div>
 
+          {/* Section 3.5b: Plan Mode */}
+          <div className="tool-settings-section" style={{ background: 'rgba(15, 23, 42, 0.6)', padding: '16px', borderRadius: '12px', border: '1px solid var(--border-color)', marginBottom: '16px' }}>
+            <div className="tool-settings-section-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontSize: '18px' }}>📋</span>
+                <span style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--text-main)' }}>
+                  Antigravity Plan Mode
+                </span>
+              </div>
+              <span
+                style={{
+                  fontSize: '0.8rem',
+                  fontWeight: 700,
+                  fontFamily: 'var(--font-code)',
+                  color: settings.planMode ? '#60a5fa' : 'var(--text-muted)',
+                  background: settings.planMode ? 'rgba(59, 130, 246, 0.15)' : 'rgba(148, 163, 184, 0.15)',
+                  padding: '2px 8px',
+                  borderRadius: '6px',
+                  border: settings.planMode ? '1px solid rgba(59, 130, 246, 0.3)' : '1px solid rgba(148, 163, 184, 0.3)',
+                }}
+              >
+                {settings.planMode ? 'Enabled' : 'Disabled'}
+              </span>
+            </div>
+            <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', lineHeight: 1.5, marginBottom: '12px' }}>
+              When Plan Mode is enabled, the agent performs read-only codebase research, formulates a structured implementation plan, and waits for explicit user approval before modifying any files or running commands.
+            </p>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '0.825rem', color: 'var(--text-main)', fontWeight: 500 }}>
+              <input
+                type="checkbox"
+                checked={settings.planMode === true}
+                onChange={(e) => {
+                  onUpdateSettings({ ...settings, planMode: e.target.checked });
+                }}
+                style={{ accentColor: '#3b82f6', cursor: 'pointer' }}
+              />
+              <span>Enable Plan Mode (Read-only research & plan review before edits)</span>
+            </label>
+          </div>
+
           {/* Section 3.6: Prevent Repeated Tool Calls */}
           <div className="tool-settings-section" style={{ background: 'rgba(15, 23, 42, 0.6)', padding: '16px', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
             <div className="tool-settings-section-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>

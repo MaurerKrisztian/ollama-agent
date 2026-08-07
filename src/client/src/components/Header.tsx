@@ -33,6 +33,7 @@ interface HeaderProps {
   onChangeTemperature: (temp: number) => void;
   onChangeContextWindow?: (ctx: number) => void;
   onToggleThinking?: (enabled: boolean) => void;
+  onTogglePlanMode?: (enabled: boolean) => void;
   onNewChat: () => void;
   onOpenSystemPrompt: () => void;
   onOpenToolSettings: () => void;
@@ -71,6 +72,7 @@ export const Header: React.FC<HeaderProps> = ({
   onChangeTemperature,
   onChangeContextWindow,
   onToggleThinking,
+  onTogglePlanMode,
   onNewChat,
   onOpenSystemPrompt,
   onOpenToolSettings,
@@ -384,6 +386,35 @@ export const Header: React.FC<HeaderProps> = ({
             >
               <Brain size={15} color={btnColor} />
               <span>{btnText}</span>
+            </button>
+          );
+        })()}
+
+        {/* Plan Mode Toggle */}
+        {onTogglePlanMode && (() => {
+          const isPlanEnabled = config.planMode === true;
+          return (
+            <button
+              className="header-thinking-control"
+              type="button"
+              onClick={() => onTogglePlanMode(!isPlanEnabled)}
+              title={isPlanEnabled ? 'Plan Mode active: Research & generate plan before editing code' : 'Enable Plan Mode: Read-only research & plan review before edits'}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '6px 12px',
+                borderRadius: '8px',
+                fontSize: '0.78rem',
+                fontWeight: 600,
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+                background: isPlanEnabled ? 'rgba(59, 130, 246, 0.18)' : 'rgba(15, 23, 42, 0.6)',
+                border: isPlanEnabled ? '1px solid rgba(59, 130, 246, 0.5)' : '1px solid var(--border-color)',
+                color: isPlanEnabled ? '#60a5fa' : 'var(--text-muted)',
+              }}
+            >
+              <span>{isPlanEnabled ? '📋 Plan: ON' : '📋 Plan: OFF'}</span>
             </button>
           );
         })()}

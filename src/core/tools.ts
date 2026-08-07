@@ -160,7 +160,49 @@ export const TOOL_GROUP_METADATA: Record<string, { group: string; groupColor: st
 };
 
 export const BUILTIN_TOOLS: ToolDefinition[] = [
-
+  {
+    name: 'create_plan',
+    description: 'Submit an Antigravity-style detailed implementation plan (covering Goal, User Review Required, Proposed Changes per file, and Verification Plan) for user review and approval before executing edits.',
+    parameters: {
+      type: 'object',
+      properties: {
+        title: {
+          type: 'string',
+          description: 'Title of the proposed implementation plan.',
+        },
+        goal: {
+          type: 'string',
+          description: 'Detailed description of the problem, background context, and what the change accomplishes.',
+        },
+        user_review_required: {
+          type: 'string',
+          description: 'Document anything requiring user review or feedback (breaking changes, architectural decisions).',
+        },
+        proposed_changes: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              file_path: { type: 'string', description: 'Relative path to file' },
+              action: { type: 'string', description: 'MODIFY, NEW, or DELETE' },
+              description: { type: 'string', description: 'Detailed explanation of specific changes planned for this file' },
+            },
+            required: ['file_path', 'description'],
+          },
+          description: 'Detailed file-by-file breakdown of proposed changes.',
+        },
+        verification_plan: {
+          type: 'string',
+          description: 'Summary of automated tests and manual steps to verify the changes.',
+        },
+        markdown_content: {
+          type: 'string',
+          description: 'Optional full Markdown text of the implementation plan.',
+        },
+      },
+      required: ['title', 'goal', 'proposed_changes'],
+    },
+  },
   {
     name: 'list_directory',
     description: 'List contents of a directory in the active working directory.',
@@ -1468,6 +1510,46 @@ export class ToolExecutor {
     }
 
     switch (name) {
+      case 'create_plan': {
+        const title = String(args.title || 'Implementation Plan');
+        const goal = String(args.goal || args.summary || '');
+        const userReview = String(args.user_review_required || '');
+        const proposedChanges = Array.isArray(args.proposed_changes)
+          ? args.proposed_changes
+          : Array.isArray(args.steps)
+          ? args.steps.map((s: any) => ({ file_path: '', description: String(s) }))
+          : [];
+        const verificationPlan = String(args.verification_plan || '');
+        const affectedFiles = Array.isArray(args.affected_files)
+          ? args.affected_files.map(String)
+          : proposedChanges.map((c: any) => c.file_path).filter(Boolean);
+
+        const proposedMarkdown = proposedChanges
+          .map((c: any) => `#### [${c.action || 'MODIFY'}] \`${c.file_path || 'file'}\`\n${c.description}`)
+          .join('\n\n');
+
+        const planMarkdown = args.markdown_content || `# ${title}\n\n${goal}\n\n${userReview ? `## User Review Required\n${userReview}\n\n` : ''}## Proposed Changes\n\n${proposedMarkdown}\n\n${verificationPlan ? `## Verification Plan\n${verificationPlan}\n` : ''}`;
+
+        try {
+          const planFilePath = path.resolve(this.workingDir, 'implementation_plan.md');
+          await fs.writeFile(planFilePath, planMarkdown, 'utf-8');
+        } catch (_) {}
+
+        return {
+          plan_submitted: true,
+          title,
+          goal,
+          user_review_required: userReview,
+          proposed_changes: proposedChanges,
+          verification_plan: verificationPlan,
+          affected_files: affectedFiles,
+          markdown_content: planMarkdown,
+          plan_file: 'implementation_plan.md',
+          status: 'pending_user_approval',
+          message: 'Implementation plan submitted for user review and approval in UI.',
+        };
+      }
+
       case 'list_directory': {
         const subPath = args.relative_path || '.';
         const targetDir = path.resolve(this.workingDir, subPath);
@@ -1645,6 +1727,17 @@ export class ToolExecutor {
               file_path: actualRelativePath,
               changed: false,
             };
+          }
+
+          if (!hasRange && target_text !== undefined) {
+            const occurrences = content.split(matchToReplace).length - 1;
+            if (occurrences > 1) {
+              return {
+                error: `Target text matches multiple (${occurrences}) locations in "${actualRelativePath}". Please specify start_line and end_line range to select which occurrence to edit.`,
+                file_path: actualRelativePath,
+                changed: false,
+              };
+            }
           }
 
           const replacementToWrite = preserveFirstLineIndent(matchToReplace, cleanReplacementText);

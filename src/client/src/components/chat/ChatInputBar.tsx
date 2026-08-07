@@ -121,6 +121,8 @@ export interface ChatInputBarProps {
   setViewedAttachment: (file: TextAttachment | null) => void;
   addImageFiles: (files: File[]) => Promise<void>;
   setInputCursor: (pos: number | null) => void;
+  planMode?: boolean;
+  onTogglePlanMode?: (enabled: boolean) => void;
 }
 
 export const ChatInputBar: React.FC<ChatInputBarProps> = ({
@@ -158,6 +160,8 @@ export const ChatInputBar: React.FC<ChatInputBarProps> = ({
   setViewedAttachment,
   addImageFiles,
   setInputCursor,
+  planMode,
+  onTogglePlanMode,
 }) => {
   return (
     <div className="chat-composer" style={{ padding: '14px 24px', background: 'rgba(15, 23, 42, 0.8)', borderTop: '1px solid var(--border-color)', zIndex: 5, display: 'flex', flexDirection: 'column', gap: '10px' }}>
@@ -462,6 +466,35 @@ export const ChatInputBar: React.FC<ChatInputBarProps> = ({
       )}
 
       <form onSubmit={handleSubmit} style={{ display: 'flex', gap: '10px', alignItems: 'flex-end', background: 'rgba(30, 41, 59, 0.8)', padding: '8px 14px', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
+        {onTogglePlanMode && (
+          <button
+            type="button"
+            onClick={() => onTogglePlanMode(!planMode)}
+            title={planMode ? 'Plan Mode is ACTIVE: Research & generate plan before editing code' : 'Enable Plan Mode: Read-only research & plan review before edits'}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              height: '36px',
+              padding: '0 12px',
+              borderRadius: '8px',
+              border: planMode ? '1px solid rgba(59, 130, 246, 0.6)' : '1px solid var(--border-color)',
+              background: planMode ? 'rgba(59, 130, 246, 0.18)' : 'rgba(255, 255, 255, 0.05)',
+              color: planMode ? '#60a5fa' : 'var(--text-muted)',
+              fontSize: '0.78rem',
+              fontWeight: 600,
+              cursor: 'pointer',
+              marginBottom: '2px',
+              whiteSpace: 'nowrap',
+              transition: 'all 0.15s ease',
+              flexShrink: 0,
+            }}
+          >
+            <span style={{ fontSize: '14px' }}>📋</span>
+            <span>{planMode ? 'Plan: ON' : 'Plan: OFF'}</span>
+          </button>
+        )}
+
         {supportsVision && (
           <label
             title="Upload image for vision model"

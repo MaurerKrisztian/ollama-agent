@@ -935,7 +935,6 @@ code {
 }
 
 @media (max-width: 1120px) {
-  .header-thinking-control,
   .header-context-control {
     display: none !important;
   }

@@ -33,6 +33,7 @@ export interface AgentConfig {
   toolMode?: 'native' | 'prompt_fallback';
   complexityProfile?: ToolComplexityProfile;
   enabledTools?: Record<string, boolean>;
+  planMode?: boolean;
   terminalGuiMode?: boolean;
   customTerminalCmd?: string;
   topP?: number;
@@ -71,6 +72,7 @@ export interface ToolSettings {
   enableThinking?: boolean;
   supportsThinking?: boolean;
   effectiveThinking?: boolean;
+  planMode?: boolean;
   preventRepeatedCalls?: boolean;
   terminalGuiMode?: boolean;
   customTerminalCmd?: string;

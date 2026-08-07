@@ -5,7 +5,7 @@ import { BatchReviewCard } from './chat/BatchReviewCard';
 import { findActiveSkillMention } from '../skillMention';
 import { categorizeError, CategorizedError } from './chat/chatUtils';
 import { MarkdownContent, AssistantResponse, MetricBadge, ThinkingBlock, FileDiff } from './chat/MessageContent';
-import { CompactedContextCard, ToolExecutionCard, ToolInvocationCard } from './chat/ToolExecutionCard';
+import { CompactedContextCard, ToolExecutionCard, ToolInvocationCard, PlanReviewCard } from './chat/ToolExecutionCard';
 import { AttachmentModal } from './chat/AttachmentModal';
 import { ChatInputBar, SLASH_COMMANDS, SlashCommandItem, SkillListItem, QUICK_HELPER_PROMPTS } from './chat/ChatInputBar';
 
@@ -44,6 +44,8 @@ export interface ChatWindowProps {
   onOpenTerminal?: (sessionId?: string) => void;
   onTerminateTerminalSession?: (sessionId: string) => Promise<void>;
   isCompacting?: boolean;
+  planMode?: boolean;
+  onTogglePlanMode?: (enabled: boolean) => void;
 }
 
 export const ChatWindow: React.FC<ChatWindowProps> = ({
@@ -79,6 +81,8 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   onOpenTerminal,
   onTerminateTerminalSession,
   isCompacting,
+  planMode,
+  onTogglePlanMode,
 }) => {
   const [input, setInput] = useState('');
   const [attachments, setAttachments] = useState<TextAttachment[]>([]);
@@ -745,6 +749,29 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                           {toolCalls.map((tc, tcIdx) => {
                             const matchingToolMsg = findMatchingToolResult(msgIdx, tc, tcIdx);
+                            if (tc.name === 'create_plan') {
+                              let planData: any = tc.arguments || {};
+                              if (matchingToolMsg?.content) {
+                                try {
+                                  const parsed = JSON.parse(matchingToolMsg.content);
+                                  if (parsed && typeof parsed === 'object') planData = { ...planData, ...parsed };
+                                } catch (_) {}
+                              }
+                              return (
+                                <PlanReviewCard
+                                  key={tc.id || `${tc.name}-${tcIdx}`}
+                                  plan={planData}
+                                  onApprovePlan={() => {
+                                    onTogglePlanMode?.(false);
+                                    onSendMessage('Plan approved! Proceed with execution.');
+                                  }}
+                                  onRejectPlan={(feedback) => {
+                                    onSendMessage(`Plan revision requested: ${feedback}. Please update the implementation plan and call create_plan again.`);
+                                  }}
+                                />
+                              );
+                            }
+
                             const isWorking = Boolean(
                               isGenerating &&
                               activeToolCall &&
@@ -763,6 +790,8 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                                 isGenerating={isGenerating}
                                 onRegenerateDeepResearch={onRegenerateDeepResearch}
                                 onCancelGeneration={onCancelGeneration}
+                                onTogglePlanMode={onTogglePlanMode}
+                                onSendMessage={(msg) => onSendMessage(msg)}
                               />
                             );
                           })}
@@ -793,15 +822,43 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                 const matchingCall = messages
                   .flatMap((message) => message.tool_calls || [])
                   .find((call) => call.id === msg.tool_call_id);
+                const toolName = msg.name || matchingCall?.name || 'tool';
+
+                if (toolName === 'create_plan') {
+                  let planData: any = matchingCall?.arguments || {};
+                  if (msg.content) {
+                    try {
+                      const parsed = JSON.parse(msg.content);
+                      if (parsed && typeof parsed === 'object') planData = { ...planData, ...parsed };
+                    } catch (_) {}
+                  }
+                  return (
+                    <div key={msg.id} style={{ marginLeft: '44px', maxWidth: '80%' }}>
+                      <PlanReviewCard
+                        plan={planData}
+                        onApprovePlan={() => {
+                          onTogglePlanMode?.(false);
+                          onSendMessage('Plan approved! Proceed with execution.');
+                        }}
+                        onRejectPlan={(feedback) => {
+                          onSendMessage(`Plan revision requested: ${feedback}. Please update the implementation plan and call create_plan again.`);
+                        }}
+                      />
+                    </div>
+                  );
+                }
+
                 return (
                   <div key={msg.id} style={{ marginLeft: '44px', maxWidth: '80%' }}>
                     <ToolExecutionCard
-                      toolName={msg.name || matchingCall?.name || 'tool'}
+                      toolName={toolName}
                       args={matchingCall?.arguments || {}}
                       resultMessage={msg}
                       onOpenFile={openAttachmentViewer}
                       isGenerating={isGenerating}
                       onRegenerateDeepResearch={onRegenerateDeepResearch}
+                      onTogglePlanMode={onTogglePlanMode}
+                      onSendMessage={(text) => onSendMessage(text)}
                     />
                   </div>
                 );
@@ -1125,6 +1182,8 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
         setViewedAttachment={setViewedAttachment}
         addImageFiles={addImageFiles}
         setInputCursor={setInputCursor}
+        planMode={planMode}
+        onTogglePlanMode={onTogglePlanMode}
       />
     </div>
   );

@@ -207,6 +207,8 @@ export const ToolExecutionCard: React.FC<{
   onCancelGeneration?: () => void;
   defaultExpanded?: boolean;
   streamingMetrics?: { liveTokPerSec: number; tokenCount: number } | null;
+  onTogglePlanMode?: (enabled: boolean) => void;
+  onSendMessage?: (msg: string) => void;
 }> = ({
   toolName,
   args,
@@ -219,16 +221,19 @@ export const ToolExecutionCard: React.FC<{
   onCancelGeneration,
   defaultExpanded,
   streamingMetrics,
+  onTogglePlanMode,
+  onSendMessage,
 }) => {
-  const [expanded, setExpanded] = useState<boolean>(defaultExpanded ?? Boolean(args?._streaming));
+  const isPlanTool = toolName === 'create_plan';
+  const [expanded, setExpanded] = useState<boolean>(defaultExpanded ?? (isPlanTool || Boolean(args?._streaming)));
   const [viewMode, setViewMode] = useState<'formatted' | 'raw_input' | 'raw_result'>('formatted');
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
-    if (args?._streaming) {
+    if (args?._streaming || isPlanTool) {
       setExpanded(true);
     }
-  }, [args?._streaming]);
+  }, [args?._streaming, isPlanTool]);
 
   const fullResultContent = resultMessage?.displayContent || resultMessage?.content || '';
   const isPruned = typeof resultMessage?.content === 'string' && resultMessage.content.startsWith('[Context Pruned:');
@@ -403,21 +408,29 @@ export const ToolExecutionCard: React.FC<{
             <Wrench size={15} style={{ flexShrink: 0, color: 'var(--accent-amber)' }} />
           )}
 
-          <span style={{ whiteSpace: 'nowrap' }}>Tool Execution:</span>
-          <span
-            style={{
-              fontFamily: 'var(--font-code)',
-              background: 'rgba(15, 23, 42, 0.4)',
-              padding: '2px 8px',
-              borderRadius: '6px',
-              color: mainColor,
-              fontSize: '0.8rem',
-              fontWeight: 700,
-              flexShrink: 0,
-            }}
-          >
-            {toolName}
-          </span>
+          {isPlanTool ? (
+            <span style={{ fontSize: '0.875rem', color: '#60a5fa', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '6px' }}>
+              📋 Implementation Plan Submitted
+            </span>
+          ) : (
+            <>
+              <span style={{ whiteSpace: 'nowrap' }}>Tool Execution:</span>
+              <span
+                style={{
+                  fontFamily: 'var(--font-code)',
+                  background: 'rgba(15, 23, 42, 0.4)',
+                  padding: '2px 8px',
+                  borderRadius: '6px',
+                  color: mainColor,
+                  fontSize: '0.8rem',
+                  fontWeight: 700,
+                  flexShrink: 0,
+                }}
+              >
+                {toolName}
+              </span>
+            </>
+          )}
 
           {/* Status Badge */}
           {args?._streaming ? (
@@ -717,7 +730,20 @@ export const ToolExecutionCard: React.FC<{
                       )}
                       {fileDiff && <FileDiff diff={fileDiff} />}
 
-                      {!isWebSearch && !isWebPageRead && !(isDeepResearch && parsedContent?.sources) && !fileDiff && (
+                      {toolName === 'create_plan' && (
+                        <PlanReviewCard
+                          plan={parsedContent || args}
+                          onApprovePlan={() => {
+                            onTogglePlanMode?.(false);
+                            onSendMessage?.('Plan approved! Proceed with execution.');
+                          }}
+                          onRejectPlan={(feedback) => {
+                            onSendMessage?.(`Plan revision requested: ${feedback}. Please update the implementation plan and call create_plan again.`);
+                          }}
+                        />
+                      )}
+
+                      {!isWebSearch && !isWebPageRead && !(isDeepResearch && parsedContent?.sources) && !fileDiff && toolName !== 'create_plan' && (
                         <pre style={{ margin: 0, padding: '10px 12px', background: '#090d16', borderRadius: '8px', border: '1px solid var(--border-color)', fontFamily: 'var(--font-code)', fontSize: '0.8rem', color: isFailed ? '#fca5a5' : '#e2e8f0', whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: '350px', overflowY: 'auto' }}>
                           {resultWithoutDiff ? JSON.stringify(resultWithoutDiff, null, 2) : fullResultContent}
                         </pre>
@@ -741,3 +767,252 @@ export const ToolInvocationCard: React.FC<{
 }> = ({ name, args, defaultExpanded = true }) => (
   <ToolExecutionCard toolName={name} args={args} defaultExpanded={defaultExpanded} />
 );
+
+export const PlanReviewCard: React.FC<{
+  plan: {
+    title?: string;
+    goal?: string;
+    summary?: string;
+    user_review_required?: string;
+    proposed_changes?: Array<{ file_path?: string; action?: string; description?: string }>;
+    steps?: string[];
+    verification_plan?: string;
+    affected_files?: string[];
+    markdown_content?: string;
+  };
+  onApprovePlan?: () => void;
+  onRejectPlan?: (feedback: string) => void;
+}> = ({ plan, onApprovePlan, onRejectPlan }) => {
+  const [rejectFeedback, setRejectFeedback] = useState('');
+  const [showRejectInput, setShowRejectInput] = useState(false);
+  const [approved, setApproved] = useState(false);
+
+  const goalText = plan.goal || plan.summary || '';
+  const changes = Array.isArray(plan.proposed_changes) && plan.proposed_changes.length > 0
+    ? plan.proposed_changes
+    : Array.isArray(plan.steps)
+    ? plan.steps.map((s) => ({ file_path: '', action: 'TASK', description: String(s) }))
+    : [];
+
+  return (
+    <div
+      className="animate-fade-in"
+      style={{
+        background: 'rgba(15, 23, 42, 0.95)',
+        border: '1px solid rgba(59, 130, 246, 0.4)',
+        borderRadius: '12px',
+        padding: '18px 22px',
+        boxShadow: '0 8px 30px rgba(59, 130, 246, 0.15)',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '16px',
+        margin: '12px 0',
+      }}
+    >
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <span style={{ fontSize: '1.25rem' }}>📋</span>
+        <h3 style={{ margin: 0, fontSize: '1.05rem', color: '#60a5fa', fontWeight: 700 }}>
+          {plan.title || 'Implementation Plan'}
+        </h3>
+        <span
+          style={{
+            marginLeft: 'auto',
+            fontSize: '0.72rem',
+            padding: '3px 9px',
+            borderRadius: '10px',
+            background: approved ? 'rgba(16, 185, 129, 0.2)' : 'rgba(59, 130, 246, 0.2)',
+            color: approved ? '#10b981' : '#60a5fa',
+            fontWeight: 600,
+            border: `1px solid ${approved ? 'rgba(16, 185, 129, 0.3)' : 'rgba(59, 130, 246, 0.3)'}`,
+          }}
+        >
+          {approved ? 'Plan Approved ✓' : 'Awaiting User Approval'}
+        </span>
+      </div>
+
+      {/* Goal & Objectives Section */}
+      {goalText && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+          <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+            Goal & Objectives
+          </div>
+          <div style={{ fontSize: '0.875rem', color: 'var(--text-main)', lineHeight: 1.6 }}>
+            <MarkdownContent content={goalText} />
+          </div>
+        </div>
+      )}
+
+      {/* User Review Required Section */}
+      {plan.user_review_required && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', padding: '10px 14px', borderRadius: '8px', background: 'rgba(245, 158, 11, 0.12)', border: '1px solid rgba(245, 158, 11, 0.3)' }}>
+          <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#fcd34d', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+            ⚠️ User Review Required
+          </div>
+          <div style={{ fontSize: '0.85rem', color: '#fef3c7', lineHeight: 1.55 }}>
+            <MarkdownContent content={plan.user_review_required} />
+          </div>
+        </div>
+      )}
+
+      {/* Proposed Changes Section */}
+      {changes.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+            Proposed Changes per Component
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            {changes.map((item, idx) => {
+              const action = (item.action || 'MODIFY').toUpperCase();
+              const badgeBg = action === 'NEW' ? 'rgba(16, 185, 129, 0.2)' : action === 'DELETE' ? 'rgba(239, 68, 68, 0.2)' : 'rgba(59, 130, 246, 0.2)';
+              const badgeColor = action === 'NEW' ? '#10b981' : action === 'DELETE' ? '#ef4444' : '#60a5fa';
+              const badgeBorder = action === 'NEW' ? 'rgba(16, 185, 129, 0.4)' : action === 'DELETE' ? 'rgba(239, 68, 68, 0.4)' : 'rgba(59, 130, 246, 0.4)';
+              return (
+                <div
+                  key={idx}
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '6px',
+                    background: 'rgba(30, 41, 59, 0.6)',
+                    padding: '10px 14px',
+                    borderRadius: '8px',
+                    border: '1px solid var(--border-color)',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span
+                      style={{
+                        fontSize: '0.675rem',
+                        fontWeight: 700,
+                        padding: '2px 7px',
+                        borderRadius: '4px',
+                        background: badgeBg,
+                        color: badgeColor,
+                        border: `1px solid ${badgeBorder}`,
+                      }}
+                    >
+                      [{action}]
+                    </span>
+                    <span style={{ fontFamily: 'var(--font-code)', fontSize: '0.825rem', fontWeight: 600, color: 'var(--accent-teal)' }}>
+                      {item.file_path || `Task #${idx + 1}`}
+                    </span>
+                  </div>
+                  {item.description && (
+                    <div style={{ fontSize: '0.825rem', color: 'var(--text-main)', lineHeight: 1.5 }}>
+                      <MarkdownContent content={item.description} />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Verification Plan Section */}
+      {plan.verification_plan && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+          <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+            Verification Plan
+          </div>
+          <div style={{ fontSize: '0.85rem', color: 'var(--text-main)', lineHeight: 1.55 }}>
+            <MarkdownContent content={plan.verification_plan} />
+          </div>
+        </div>
+      )}
+
+      {/* Interactive Action Buttons */}
+      {!approved && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '4px', paddingTop: '12px', borderTop: '1px solid rgba(255, 255, 255, 0.08)' }}>
+          <button
+            type="button"
+            onClick={() => {
+              setApproved(true);
+              onApprovePlan?.();
+            }}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '8px 16px',
+              borderRadius: '8px',
+              border: 'none',
+              background: 'linear-gradient(135deg, #10b981, #059669)',
+              color: '#fff',
+              fontWeight: 700,
+              fontSize: '0.825rem',
+              cursor: 'pointer',
+              boxShadow: '0 4px 12px rgba(16, 185, 129, 0.25)',
+              transition: 'all 0.15s ease',
+            }}
+          >
+            <CheckCircle2 size={16} />
+            <span>Approve & Execute Plan</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setShowRejectInput((prev) => !prev)}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '8px 14px',
+              borderRadius: '8px',
+              border: '1px solid var(--border-color)',
+              background: 'rgba(30, 41, 59, 0.8)',
+              color: 'var(--text-muted)',
+              fontWeight: 600,
+              fontSize: '0.825rem',
+              cursor: 'pointer',
+              transition: 'all 0.15s ease',
+            }}
+          >
+            <XCircle size={15} />
+            <span>Request Changes</span>
+          </button>
+        </div>
+      )}
+
+      {showRejectInput && !approved && (
+        <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
+          <input
+            type="text"
+            value={rejectFeedback}
+            onChange={(e) => setRejectFeedback(e.target.value)}
+            placeholder="Type revision feedback (e.g. 'Use a different class structure')..."
+            style={{
+              flex: 1,
+              padding: '8px 12px',
+              borderRadius: '6px',
+              background: 'rgba(15, 23, 42, 0.8)',
+              border: '1px solid var(--border-color)',
+              color: '#fff',
+              fontSize: '0.825rem',
+            }}
+          />
+          <button
+            type="button"
+            onClick={() => {
+              onRejectPlan?.(rejectFeedback || 'Please revise the plan according to feedback.');
+              setShowRejectInput(false);
+            }}
+            style={{
+              padding: '8px 14px',
+              borderRadius: '6px',
+              border: 'none',
+              background: 'var(--accent-amber)',
+              color: '#000',
+              fontWeight: 700,
+              fontSize: '0.8rem',
+              cursor: 'pointer',
+            }}
+          >
+            Send Feedback
+          </button>
+        </div>
+      )}
+    </div>
+  );
+};

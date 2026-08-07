@@ -36,6 +36,7 @@ program
   .option('--no-tool-ttl', 'Disable terminal/web tool-output expiry')
   .option('--terminal-ttl <turns>', 'Terminal output lifetime in conversation turns', '5')
   .option('--web-ttl <turns>', 'Web output lifetime in conversation turns', '5')
+  .option('-p, --plan', 'Enable Plan Mode (research & plan first before executing edits)', false)
   .option('-y, --auto-approve', 'Auto-approve terminal command execution without asking', false)
   .option('-w, --whitelist <cmds...>', 'Whitelisted commands to auto-approve without asking', DEFAULT_COMMAND_WHITELIST.join(','))
   .option('-s, --system <prompt>', 'Custom system prompt')
@@ -90,6 +91,7 @@ async function startCli() {
     temperature: Number(options.temperature),
     complexityProfile: options.toolProfile as ToolComplexityProfile,
     pruningConfig,
+    planMode: Boolean(options.plan),
   });
 
   const getBenchmarkAgentConfig = (): BenchmarkAgentConfig => {

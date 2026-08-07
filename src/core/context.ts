@@ -96,7 +96,7 @@ export class ContextManager {
   /**
    * Generates effective system prompt with 5-tool core rules & generic syntax examples
    */
-  public getEffectiveSystemPrompt(useNativeTools: boolean = false): string {
+  public getEffectiveSystemPrompt(useNativeTools: boolean = false, planMode: boolean = false): string {
     if (!this.tools || this.tools.length === 0) {
       return this.systemPrompt;
     }
@@ -133,6 +133,18 @@ export class ContextManager {
       'RULE 6 (No Deferred Actions): Never announce a future tool action without invoking it in the same response. Do not end a response between requested workflow steps.',
       'RULE 7 (No Fabricated Results): Never write or imitate a `<tool_response>` block. Only the runtime can produce tool results. To perform another action, issue another real structured tool call.',
     ];
+
+    if (planMode) {
+      lines.push(
+        '',
+        '# PLAN MODE PROTOCOL INSTRUCTIONS',
+        'You are currently in PLAN MODE.',
+        '1. Use ONLY read-only research tools (read_file, list_directory, grep_search, search_workspace_symbols, web_search, read_web_page). DO NOT execute mutating tool calls (write_file, edit_file, replace_file, execute_command).',
+        '2. Thoroughly investigate the workspace and requirements first.',
+        '3. Formulate a structured implementation plan and call the create_plan tool (with title, summary, steps, affected_files).',
+        '4. The create_plan tool call will present an interactive Approve & Execute card in the UI for user approval before code edits.'
+      );
+    }
 
     if (useNativeTools) {
       lines.push(

@@ -604,6 +604,42 @@ test('edit_file falls back to unbounded search if start_line/end_line bounds fai
   });
 });
 
+test('edit_file allows target_text without line numbers if unique, but fails if non-unique', async () => {
+  await withWorkspace(async (workspace, executor) => {
+    await fs.writeFile(
+      path.join(workspace, 'app.js'),
+      'const dup = "item";\nconst unique = "hello";\nconst dup = "item";\n'
+    );
+
+    // 1. Unique target_text without line numbers -> succeeds
+    const uniqueResult = await executor.executeTool('edit_file', {
+      relative_path: 'app.js',
+      target_text: 'const unique = "hello";',
+      replacement_text: 'const unique = "world";',
+    });
+    assert.equal(uniqueResult.success, true);
+
+    // 2. Non-unique target_text without line numbers -> fails with error requiring range
+    const dupResult = await executor.executeTool('edit_file', {
+      relative_path: 'app.js',
+      target_text: 'const dup = "item";',
+      replacement_text: 'const dup = "replaced";',
+    });
+    assert.equal(dupResult.changed, false);
+    assert.match(dupResult.error, /Target text matches multiple \(2\) locations/);
+
+    // 3. Non-unique target_text WITH line range -> succeeds
+    const boundedResult = await executor.executeTool('edit_file', {
+      relative_path: 'app.js',
+      start_line: 1,
+      end_line: 2,
+      target_text: 'const dup = "item";',
+      replacement_text: 'const dup = "replaced";',
+    });
+    assert.equal(boundedResult.success, true);
+  });
+});
+
 
 
 

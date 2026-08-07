@@ -177,6 +177,7 @@ export interface AgentConfig {
   toolMode?: 'native' | 'prompt_fallback';
   preventRepeatedCalls?: boolean;
   enabledTools?: Record<string, boolean>;
+  planMode?: boolean;
   terminalGuiMode?: boolean;
   customTerminalCmd?: string;
   topP?: number;

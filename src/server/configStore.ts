@@ -223,6 +223,7 @@ export interface PersistedConfig {
   systemPrompt?: string;
   showWorkingDirInfo?: boolean;
   pruningConfig?: ContextPruningConfig;
+  planMode?: boolean;
   terminalGuiMode?: boolean;
   customTerminalCmd?: string;
   topP?: number;
@@ -271,6 +272,7 @@ export function getInitialPersistedConfig(): PersistedConfig {
   let systemPrompt: string | undefined = undefined;
   let showWorkingDirInfo: boolean | undefined = undefined;
   let pruningConfig: ContextPruningConfig | undefined = undefined;
+  let planMode: boolean | undefined = undefined;
   let terminalGuiMode: boolean | undefined = undefined;
   let customTerminalCmd: string | undefined = undefined;
   let topP: number | undefined = undefined;
@@ -364,6 +366,9 @@ export function getInitialPersistedConfig(): PersistedConfig {
       if (parsed.pruningConfig && typeof parsed.pruningConfig === 'object' && !Array.isArray(parsed.pruningConfig)) {
         pruningConfig = parsed.pruningConfig;
       }
+      if (typeof parsed.planMode === 'boolean') {
+        planMode = parsed.planMode;
+      }
       if (typeof parsed.terminalGuiMode === 'boolean') {
         terminalGuiMode = parsed.terminalGuiMode;
       }
@@ -433,6 +438,7 @@ export function getInitialPersistedConfig(): PersistedConfig {
     systemPrompt,
     showWorkingDirInfo,
     pruningConfig,
+    planMode,
     terminalGuiMode,
     customTerminalCmd,
     topP,

@@ -52,7 +52,7 @@ const httpServer = createServer(app);
 const io = new SocketIOServer(httpServer, {
   cors: { origin: true, credentials: true },
 });
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 3012;
 
 import {
   CONFIG_FILE_PATH,
@@ -772,6 +772,7 @@ app.post('/api/config', async (req, res) => {
     mirostatTau,
     ollamaOrigins,
     ollamaLoadTimeout,
+    planMode,
   } = req.body;
 
   if (ollamaHost !== undefined) {
@@ -824,6 +825,7 @@ app.post('/api/config', async (req, res) => {
     mirostatTau,
     ollamaOrigins,
     ollamaLoadTimeout,
+    planMode,
   };
   for (const engine of getConfigurableEngines()) engine.updateConfig(configUpdate);
 
@@ -839,6 +841,7 @@ app.post('/api/config', async (req, res) => {
     systemPrompt: currentConfig.systemPrompt,
     showWorkingDirInfo: currentConfig.showWorkingDirInfo,
     enableThinking: currentConfig.enableThinking,
+    planMode: currentConfig.planMode,
     maxLoops: currentConfig.maxLoops,
     complexityProfile: currentConfig.complexityProfile,
     preventRepeatedCalls: currentConfig.preventRepeatedCalls,
@@ -954,6 +957,7 @@ app.post('/api/chat/sessions', (req, res) => {
       contextWindow: Number.isInteger(requestedConfig.contextWindow) ? requestedConfig.contextWindow : globalConfig.contextWindow,
       maxLoops: Number.isInteger(requestedConfig.maxLoops) ? requestedConfig.maxLoops : globalConfig.maxLoops,
       enableThinking: typeof requestedConfig.enableThinking === 'boolean' ? requestedConfig.enableThinking : globalConfig.enableThinking,
+      planMode: typeof requestedConfig.planMode === 'boolean' ? requestedConfig.planMode : globalConfig.planMode,
       complexityProfile: requestedConfig.complexityProfile === 'simple' || requestedConfig.complexityProfile === 'medium' || requestedConfig.complexityProfile === 'advanced'
         ? requestedConfig.complexityProfile
         : globalConfig.complexityProfile,
@@ -1467,7 +1471,7 @@ app.post('/api/chat/revert', async (req, res) => {
 
 // POST /api/chat/tool-settings - Update tool approval preferences & max loops & thinking
 app.post('/api/chat/tool-settings', (req, res) => {
-  const { terminalMode, fileEditMode: newFileEditMode, allowedCommands, maxLoops, enableThinking, preventRepeatedCalls, complexityProfile, enabledTools, terminalGuiMode, customTerminalCmd } = req.body;
+  const { terminalMode, fileEditMode: newFileEditMode, allowedCommands, maxLoops, enableThinking, planMode, preventRepeatedCalls, complexityProfile, enabledTools, terminalGuiMode, customTerminalCmd } = req.body;
   if (terminalMode === 'confirm' || terminalMode === 'auto') {
     terminalRequireConfirm = terminalMode === 'confirm';
   }
@@ -1482,6 +1486,9 @@ app.post('/api/chat/tool-settings', (req, res) => {
   }
   if (typeof enableThinking === 'boolean') {
     for (const engine of getConfigurableEngines()) engine.updateConfig({ enableThinking });
+  }
+  if (typeof planMode === 'boolean') {
+    for (const engine of getConfigurableEngines()) engine.updateConfig({ planMode });
   }
   if (typeof preventRepeatedCalls === 'boolean') {
     for (const engine of getConfigurableEngines()) engine.updateConfig({ preventRepeatedCalls });
@@ -1572,6 +1579,7 @@ app.post('/api/chat', async (req, res) => {
     attachments = [],
     imageAttachments = [],
     regenerateFromToolMessageId,
+    planMode,
   } = req.body;
   const isDeepResearchRegeneration = typeof regenerateFromToolMessageId === 'string';
   const message = isDeepResearchRegeneration ? '' : requestedMessage;
@@ -1661,6 +1669,8 @@ app.post('/api/chat', async (req, res) => {
     return res.status(500).json({ error: err.message });
   }
   const sessionAgent = sessionRuntime.engine;
+  const effectivePlanMode = typeof planMode === 'boolean' ? planMode : agent.getConfig().planMode;
+  sessionAgent.updateConfig({ planMode: effectivePlanMode });
 
   const modelMessage = attachments.length
     ? `${effectiveMessage}\n\nThe user attached the following text files. Use their contents to answer the request.\n\n${attachments
