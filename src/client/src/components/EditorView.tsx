@@ -331,9 +331,13 @@ export const EditorView: React.FC<EditorViewProps> = ({ config, lastAiEditEvent,
     }
   }, [tabs]);
 
+  const processedEventTimestampRef = useRef<number | null>(null);
+
   // ── Handle AI Live Edit Events (Auto-open tab + scroll & highlight) ────────
   useEffect(() => {
-    if (!lastAiEditEvent || !lastAiEditEvent.path) return;
+    if (!lastAiEditEvent || !lastAiEditEvent.path || !lastAiEditEvent.timestamp) return;
+    if (processedEventTimestampRef.current === lastAiEditEvent.timestamp) return;
+    processedEventTimestampRef.current = lastAiEditEvent.timestamp;
 
     let targetPath = lastAiEditEvent.path.trim();
     if (workingDir && targetPath.startsWith(workingDir)) {
