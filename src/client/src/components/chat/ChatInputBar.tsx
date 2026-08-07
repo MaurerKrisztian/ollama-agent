@@ -123,6 +123,7 @@ export interface ChatInputBarProps {
   setInputCursor: (pos: number | null) => void;
   planMode?: boolean;
   onTogglePlanMode?: (enabled: boolean) => void;
+  isCompact?: boolean;
 }
 
 export const ChatInputBar: React.FC<ChatInputBarProps> = ({
@@ -162,6 +163,7 @@ export const ChatInputBar: React.FC<ChatInputBarProps> = ({
   setInputCursor,
   planMode,
   onTogglePlanMode,
+  isCompact = false,
 }) => {
   return (
     <div className="chat-composer" style={{ padding: '14px 24px', background: 'rgba(15, 23, 42, 0.8)', borderTop: '1px solid var(--border-color)', zIndex: 5, display: 'flex', flexDirection: 'column', gap: '10px' }}>
@@ -256,41 +258,43 @@ export const ChatInputBar: React.FC<ChatInputBarProps> = ({
       )}
 
       {/* Quick Helper Chips Bar */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', overflowX: 'auto', paddingBottom: '2px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.725rem', fontWeight: 600, color: 'var(--accent-primary)', paddingRight: '6px', whiteSpace: 'nowrap' }}>
-          <Sparkles size={13} />
-          <span>Quick Prompts:</span>
+      {!isCompact && (
+        <div className="quick-helpers-bar" style={{ display: 'flex', alignItems: 'center', gap: '6px', overflowX: 'auto', paddingBottom: '2px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.725rem', fontWeight: 600, color: 'var(--accent-primary)', paddingRight: '6px', whiteSpace: 'nowrap' }}>
+            <Sparkles size={13} />
+            <span>Quick Prompts:</span>
+          </div>
+          {QUICK_HELPER_PROMPTS.map((item, idx) => {
+            const IconComponent = item.icon;
+            return (
+              <button
+                key={idx}
+                onClick={() => handleSelectHelperPrompt(item.prompt)}
+                disabled={isGenerating}
+                title={item.prompt}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '5px',
+                  background: 'rgba(30, 41, 59, 0.6)',
+                  border: '1px solid var(--border-color)',
+                  color: 'var(--text-muted)',
+                  padding: '4px 10px',
+                  borderRadius: '14px',
+                  fontSize: '0.75rem',
+                  fontWeight: 500,
+                  whiteSpace: 'nowrap',
+                  cursor: isGenerating ? 'not-allowed' : 'pointer',
+                  transition: 'all 0.2s',
+                }}
+              >
+                <IconComponent size={13} color="var(--accent-primary)" />
+                <span>{item.label}</span>
+              </button>
+            );
+          })}
         </div>
-        {QUICK_HELPER_PROMPTS.map((item, idx) => {
-          const IconComponent = item.icon;
-          return (
-            <button
-              key={idx}
-              onClick={() => handleSelectHelperPrompt(item.prompt)}
-              disabled={isGenerating}
-              title={item.prompt}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '5px',
-                background: 'rgba(30, 41, 59, 0.6)',
-                border: '1px solid var(--border-color)',
-                color: 'var(--text-muted)',
-                padding: '4px 10px',
-                borderRadius: '14px',
-                fontSize: '0.75rem',
-                fontWeight: 500,
-                whiteSpace: 'nowrap',
-                cursor: isGenerating ? 'not-allowed' : 'pointer',
-                transition: 'all 0.2s',
-              }}
-            >
-              <IconComponent size={13} color="var(--accent-primary)" />
-              <span>{item.label}</span>
-            </button>
-          );
-        })}
-      </div>
+      )}
 
       {generationStatus !== 'idle' && (
         <div
@@ -465,7 +469,7 @@ export const ChatInputBar: React.FC<ChatInputBarProps> = ({
         </div>
       )}
 
-      <form onSubmit={handleSubmit} style={{ display: 'flex', gap: '10px', alignItems: 'flex-end', background: 'rgba(30, 41, 59, 0.8)', padding: '8px 14px', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
+      <form onSubmit={handleSubmit} style={{ display: 'flex', gap: '10px', alignItems: 'center', background: 'rgba(30, 41, 59, 0.8)', padding: '8px 14px', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
         {onTogglePlanMode && (
           <button
             type="button"
@@ -484,14 +488,13 @@ export const ChatInputBar: React.FC<ChatInputBarProps> = ({
               fontSize: '0.78rem',
               fontWeight: 600,
               cursor: 'pointer',
-              marginBottom: '2px',
               whiteSpace: 'nowrap',
               transition: 'all 0.15s ease',
               flexShrink: 0,
             }}
           >
             <span style={{ fontSize: '14px' }}>📋</span>
-            <span>{planMode ? 'Plan: ON' : 'Plan: OFF'}</span>
+            <span className="plan-mode-label">{planMode ? 'Plan: ON' : 'Plan: OFF'}</span>
           </button>
         )}
 
@@ -509,7 +512,6 @@ export const ChatInputBar: React.FC<ChatInputBarProps> = ({
               border: '1px solid var(--border-color)',
               color: 'var(--accent-primary)',
               cursor: isGenerating ? 'not-allowed' : 'pointer',
-              marginBottom: '2px',
               transition: 'all 0.15s ease',
             }}
           >
@@ -586,8 +588,8 @@ export const ChatInputBar: React.FC<ChatInputBarProps> = ({
             }
             handleKeyDown(e);
           }}
-          placeholder={supportsVision ? "Type a message, @ for skills, or attach images..." : "Type a message, @ for skills, or / for commands..."}
-          rows={2}
+          placeholder={supportsVision ? "Type instructions, @skills, or attach images..." : "Type instructions, @skills, or /commands..."}
+          rows={1}
           style={{
             flex: 1,
             background: 'transparent',
@@ -597,7 +599,9 @@ export const ChatInputBar: React.FC<ChatInputBarProps> = ({
             lineHeight: '1.4',
             resize: 'none',
             outline: 'none',
-            fontFamily: 'var(--font-main)',
+            fontFamily: 'var(--font-code, monospace)',
+            padding: '6px 4px',
+            margin: 0,
             maxHeight: '200px',
             overflowY: 'auto',
           }}

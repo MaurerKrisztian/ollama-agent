@@ -117,6 +117,11 @@ export class ContextManager {
       'RULE 1d (Direct URL): If the user provides a URL and asks to read, inspect, summarize, or retrieve its content, call read_web_page directly. Do not search for a URL that is already provided.',
       'RULE 1e (Tool Separation): read_file is only for local workspace files. Never use read_file, list_directory, or grep_search to read a website or recover from a completed read_web_page call.',
       'RULE 1f (File Search & Read Protocol): Follow a progressive search-and-inspect workflow: first locate targets using grep_search (text/regex) or search_workspace_symbols (symbol names). For large files, use read_file with start_line/end_line ranges or set outline_only: true to inspect AST structure rather than reading entire files unnecessarily.',
+      ...(this.tools.some((tool) => tool.name === 'get_document_symbols')
+        ? [
+            'RULE 1g (Developer/LSP Tools): For TypeScript/JavaScript code navigation, PREFER LSP tools over grep_search + read_file. Use get_document_symbols to outline a file\'s class/function structure before reading it. Use search_workspace_symbols to locate where a symbol is declared. Use go_to_definition to jump from a usage site to its declaration. Use find_symbol_references to find all usages of a symbol across the project. Use get_type_hover to inspect type signatures without reading full files. Use get_code_diagnostics to check for TypeScript compiler errors or warnings. Use map_module_dependencies to understand import/export relationships of a file. These tools are faster and more precise than text search for code navigation tasks.',
+          ]
+        : []),
       useNativeTools
         ? 'RULE 2: When you need to inspect or modify code, ALWAYS issue a runtime-native structured tool call immediately.'
         : 'RULE 2: When you need to inspect or modify code, ALWAYS output the `<tool_call>` block immediately.',

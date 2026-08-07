@@ -282,53 +282,59 @@ export const ThinkingBlock: React.FC<{ thinking: string; thinkingTokens?: number
 
   return (
     <div
+      className="thinking-block"
       style={{
-        marginBottom: '10px',
-        borderRadius: '10px',
-        border: '1px solid rgba(168, 85, 247, 0.25)',
-        background: 'rgba(147, 51, 234, 0.06)',
+        borderRadius: '6px',
+        border: '1px solid rgba(168, 85, 247, 0.2)',
+        background: 'rgba(147, 51, 234, 0.05)',
         overflow: 'hidden',
-        transition: 'all 0.2s ease',
+        transition: 'all 0.15s ease',
       }}
     >
       <button
         type="button"
         onClick={() => setIsExpanded((prev) => !prev)}
+        className="thinking-block-header"
         style={{
           width: '100%',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          padding: '8px 12px',
-          background: 'rgba(147, 51, 234, 0.1)',
+          flexWrap: 'nowrap',
+          gap: '6px',
+          padding: '3px 8px',
+          height: '24px',
+          background: 'rgba(147, 51, 234, 0.08)',
           border: 'none',
           color: '#c084fc',
-          fontSize: '0.8rem',
+          fontSize: '0.72rem',
           fontWeight: 600,
           cursor: 'pointer',
           textAlign: 'left',
+          userSelect: 'none',
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <Brain size={15} color="#c084fc" />
-          <span>{isStreaming ? 'Thinking...' : 'Thinking'}</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', overflow: 'hidden', whiteSpace: 'nowrap' }}>
+          <Brain size={13} color="#c084fc" style={{ flexShrink: 0 }} />
+          <span style={{ whiteSpace: 'nowrap' }}>{isStreaming ? 'Thinking...' : 'Thinking'}</span>
           <span
+            className="thinking-tokens-label"
             style={{
-              fontSize: '0.725rem',
+              fontSize: '0.675rem',
               fontWeight: 500,
-              color: 'rgba(216, 180, 254, 0.85)',
-              background: 'rgba(168, 85, 247, 0.2)',
-              padding: '1px 6px',
-              borderRadius: '6px',
+              color: 'rgba(216, 180, 254, 0.8)',
+              background: 'rgba(168, 85, 247, 0.15)',
+              padding: '1px 5px',
+              borderRadius: '4px',
               fontFamily: 'var(--font-code)',
+              whiteSpace: 'nowrap',
             }}
           >
-            {estimatedTokens} thinking tokens
+            {estimatedTokens} tok
           </span>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: 'var(--text-dim)', fontSize: '0.75rem' }}>
-          <span>{isExpanded ? 'Hide' : 'Show'}</span>
-          {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '2px', color: 'rgba(192, 132, 252, 0.7)', fontSize: '0.7rem', marginLeft: 'auto', flexShrink: 0 }}>
+          {isExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
         </div>
       </button>
 
@@ -338,10 +344,11 @@ export const ThinkingBlock: React.FC<{ thinking: string; thinkingTokens?: number
           onScroll={handleScroll}
           style={{
             padding: '10px 14px',
-            borderTop: '1px solid rgba(168, 85, 247, 0.15)',
+            borderTop: '1px solid rgba(168, 85, 247, 0.25)',
             fontSize: '0.825rem',
             lineHeight: 1.55,
-            color: '#cbd5e1',
+            color: '#f1f5f9',
+            background: 'rgba(15, 10, 25, 0.4)',
             fontFamily: 'var(--font-code)',
             whiteSpace: 'pre-wrap',
             maxHeight: '350px',
@@ -356,6 +363,7 @@ export const ThinkingBlock: React.FC<{ thinking: string; thinkingTokens?: number
 };
 
 export const MetricBadge: React.FC<{ metrics?: OllamaResponseMetrics }> = ({ metrics }) => {
+  const [isExpanded, setIsExpanded] = useState(false);
   if (!metrics || (!metrics.evalCount && !metrics.promptEvalCount)) return null;
 
   const evalTokPerSec = metrics.evalCount && metrics.evalDurationNs && metrics.evalDurationNs > 0
@@ -371,47 +379,56 @@ export const MetricBadge: React.FC<{ metrics?: OllamaResponseMetrics }> = ({ met
     : null;
 
   return (
-    <div
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: '6px',
-        marginTop: '10px',
-        padding: '3px 8px',
-        borderRadius: '6px',
-        background: 'rgba(15, 23, 42, 0.45)',
-        border: '1px solid rgba(148, 163, 184, 0.2)',
-        fontSize: '0.72rem',
-        color: 'var(--text-muted)',
-        fontFamily: 'var(--font-code, monospace)',
-      }}
+    <button
+      type="button"
+      onClick={() => setIsExpanded((prev) => !prev)}
       title={
         [
           evalTokPerSec ? `Generation Speed: ${evalTokPerSec} tok/s` : null,
           metrics.evalCount !== undefined ? `Generated: ${metrics.evalCount} tokens` : null,
-          metrics.promptEvalCount !== undefined ? `Prompt: ${metrics.promptEvalCount} tokens${promptTokPerSec ? ` (${promptTokPerSec} tok/s)` : ''}` : null,
+          metrics.promptEvalCount !== undefined ? `Prompt Context: ${metrics.promptEvalCount} tokens${promptTokPerSec ? ` (${promptTokPerSec} tok/s)` : ''}` : null,
           totalDurationSec ? `Total Duration: ${totalDurationSec}s` : null,
+          "Click to toggle detailed breakdown",
         ]
           .filter(Boolean)
           .join('\n')
       }
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: '4px',
+        height: '24px',
+        padding: '3px 8px',
+        borderRadius: '6px',
+        background: isExpanded ? 'rgba(56, 189, 248, 0.15)' : 'rgba(22, 27, 34, 0.7)',
+        border: `1px solid ${isExpanded ? 'rgba(56, 189, 248, 0.4)' : 'var(--border-color, #30363d)'}`,
+        fontSize: '0.7rem',
+        color: isExpanded ? '#38bdf8' : 'var(--text-muted)',
+        fontFamily: 'var(--font-code, monospace)',
+        cursor: 'pointer',
+        whiteSpace: 'nowrap',
+        flexShrink: 0,
+        transition: 'all 0.15s ease',
+      }}
     >
-      <Zap size={12} style={{ color: 'var(--accent-primary)', flexShrink: 0 }} />
-      {evalTokPerSec && (
-        <span style={{ color: 'var(--accent-primary)', fontWeight: 600 }}>
-          ⚡ {evalTokPerSec} tok/s
+      <Zap size={11} style={{ color: 'var(--accent-primary)', flexShrink: 0 }} />
+      {!isExpanded ? (
+        <span style={{ fontWeight: 600, color: 'var(--accent-primary)' }}>
+          ⚡ {evalTokPerSec ? `${evalTokPerSec} tok/s` : (totalDurationSec ? `${totalDurationSec}s` : 'Metrics')}
+        </span>
+      ) : (
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+          {evalTokPerSec && (
+            <span style={{ color: 'var(--accent-primary)', fontWeight: 600 }}>⚡ {evalTokPerSec} tok/s</span>
+          )}
+          {metrics.evalCount !== undefined && <span>· {metrics.evalCount} gen</span>}
+          {metrics.promptEvalCount !== undefined && (
+            <span>· {metrics.promptEvalCount} prompt</span>
+          )}
+          {totalDurationSec && <span>· {totalDurationSec}s</span>}
         </span>
       )}
-      {metrics.evalCount !== undefined && (
-        <span>· {metrics.evalCount} gen tokens</span>
-      )}
-      {metrics.promptEvalCount !== undefined && (
-        <span>· {metrics.promptEvalCount} prompt tokens</span>
-      )}
-      {totalDurationSec && (
-        <span>· {totalDurationSec}s</span>
-      )}
-    </div>
+    </button>
   );
 };
 
@@ -423,21 +440,26 @@ export const AssistantResponse: React.FC<{ content: string; thinking?: string; t
 }) => {
   const [showRaw, setShowRaw] = useState(false);
   const isMaxLoops = content?.includes('Max tool call iterations limit reached');
+  const hasControls = Boolean(metrics || content);
 
   return (
-    <div className="glass-panel assistant-response" style={{ padding: '12px 18px 16px', borderRadius: '16px 16px 16px 4px', fontSize: '0.925rem', lineHeight: 1.6 }}>
-      {thinking && (
-        <ThinkingBlock thinking={thinking} thinkingTokens={thinkingTokens} />
-      )}
-      {isMaxLoops && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 12px', background: 'rgba(245, 158, 11, 0.15)', border: '1px solid rgba(245, 158, 11, 0.3)', borderRadius: '8px', color: 'var(--accent-amber)', fontSize: '0.825rem', fontWeight: 600, marginBottom: '10px' }}>
-          <ShieldAlert size={16} style={{ flexShrink: 0 }} />
-          <span>Max Tool Call Iterations Limit Reached</span>
-        </div>
-      )}
-      {content && (
-        <>
-          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '6px' }}>
+    <div className="glass-panel assistant-response" style={{ width: '100%', boxSizing: 'border-box', padding: '10px 14px 12px', borderRadius: '14px 14px 14px 4px', fontSize: '0.965rem', lineHeight: 1.6, position: 'relative' }}>
+      {/* Header controls: Metrics & Raw button floated right */}
+      {hasControls && (
+        <div
+          style={{
+            float: 'right',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            marginLeft: '12px',
+            marginBottom: '4px',
+            zIndex: 2,
+            position: 'relative',
+          }}
+        >
+          {metrics && <MetricBadge metrics={metrics} />}
+          {content && (
             <button
               type="button"
               onClick={() => setShowRaw((current) => !current)}
@@ -446,28 +468,49 @@ export const AssistantResponse: React.FC<{ content: string; thinking?: string; t
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                gap: '5px',
-                padding: '4px 8px',
+                gap: '4px',
+                padding: '3px 8px',
+                height: '24px',
                 borderRadius: '6px',
-                border: '1px solid var(--border-color)',
-                background: 'rgba(15, 23, 42, 0.45)',
+                border: '1px solid var(--border-color, #30363d)',
+                background: 'rgba(22, 27, 34, 0.7)',
                 color: 'var(--text-muted)',
                 cursor: 'pointer',
-                fontSize: '0.72rem',
+                fontSize: '0.7rem',
+                fontFamily: 'var(--font-code, monospace)',
+                whiteSpace: 'nowrap',
+                flexShrink: 0,
               }}
             >
-              {showRaw ? <Eye size={13} /> : <Code2 size={13} />}
-              {showRaw ? 'Rendered' : 'Raw'}
+              {showRaw ? <Eye size={12} /> : <Code2 size={12} />}
+              <span>{showRaw ? 'Rendered' : 'Raw'}</span>
             </button>
-          </div>
+          )}
+        </div>
+      )}
+
+      {thinking && (
+        <div style={{ marginBottom: content ? '8px' : '0px', overflow: 'hidden' }}>
+          <ThinkingBlock thinking={thinking} thinkingTokens={thinkingTokens} />
+        </div>
+      )}
+
+      {isMaxLoops && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 12px', background: 'rgba(245, 158, 11, 0.15)', border: '1px solid rgba(245, 158, 11, 0.3)', borderRadius: '8px', color: 'var(--accent-amber)', fontSize: '0.825rem', fontWeight: 600, marginBottom: '10px', clear: 'both' }}>
+          <ShieldAlert size={16} style={{ flexShrink: 0 }} />
+          <span>Max Tool Call Iterations Limit Reached</span>
+        </div>
+      )}
+
+      {content && (
+        <div style={{ minWidth: 0 }}>
           {showRaw ? (
             <pre className="assistant-response-raw">{content}</pre>
           ) : (
             <MarkdownContent content={content} />
           )}
-        </>
+        </div>
       )}
-      <MetricBadge metrics={metrics} />
     </div>
   );
 };

@@ -11,6 +11,7 @@ import {
   Terminal,
   MessageSquare,
   Zap,
+  Code2,
   FolderOpen,
   Brain,
   Square,
@@ -24,10 +25,10 @@ interface HeaderProps {
   models: OllamaModelInfo[];
   runningModels: OllamaRunningModelInfo[];
   sidebarOpen: boolean;
-  activeView: 'chat' | 'benchmark';
+  activeView: 'chat' | 'benchmark' | 'editor';
   isGenerating?: boolean;
   modelLoadElapsed?: number;
-  onSelectView: (view: 'chat' | 'benchmark') => void;
+  onSelectView: (view: 'chat' | 'benchmark' | 'editor') => void;
   onToggleSidebar: () => void;
   onSelectModel: (model: string) => void;
   onChangeTemperature: (temp: number) => void;
@@ -150,7 +151,7 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
       </div>
 
-      {/* Navigation View Switcher Tabs: Chat Agent Studio & Benchmark Runner */}
+      {/* Navigation View Switcher Tabs: Chat Agent Studio, Code Editor & Benchmark Runner */}
       <div className="header-view-switcher" style={{ display: 'flex', alignItems: 'center', background: 'rgba(15, 23, 42, 0.7)', padding: '4px', borderRadius: '10px', border: '1px solid var(--border-color)', gap: '4px' }}>
         <button
           onClick={() => onSelectView('chat')}
@@ -173,6 +174,28 @@ export const Header: React.FC<HeaderProps> = ({
         >
           <MessageSquare size={15} />
           <span>Chat Agent Studio</span>
+        </button>
+
+        <button
+          onClick={() => onSelectView('editor')}
+          title="Switch to Code Editor View"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            padding: '6px 12px',
+            borderRadius: '8px',
+            border: activeView === 'editor' ? '1px solid rgba(137, 180, 250, 0.5)' : '1px solid transparent',
+            fontSize: '0.825rem',
+            fontWeight: 600,
+            cursor: 'pointer',
+            background: activeView === 'editor' ? 'rgba(137, 180, 250, 0.2)' : 'transparent',
+            color: activeView === 'editor' ? 'var(--accent, #89b4fa)' : 'var(--text-muted)',
+            transition: 'all 0.15s ease',
+          }}
+        >
+          <Code2 size={15} color={activeView === 'editor' ? 'var(--accent, #89b4fa)' : 'var(--text-muted)'} />
+          <span>Code Editor</span>
         </button>
 
         <button

@@ -1,11 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { io, type Socket } from 'socket.io-client';
+import { ChevronRight, MessageSquare, PanelRightClose, PanelRightOpen } from 'lucide-react';
 import { Header } from './components/Header';
 import { ChatWindow } from './components/ChatWindow';
 import { ContextSidebar } from './components/ContextSidebar';
 import { LeftSidebar } from './components/LeftSidebar';
 import { SystemPromptModal } from './components/SystemPromptModal';
 import { BenchmarkView } from './components/BenchmarkView';
+import { EditorView, type AiEditEvent } from './components/EditorView';
 import { ToolSettingsModal } from './components/ToolSettingsModal';
 import { ConnectionSettingsModal } from './components/ConnectionSettingsModal';
 import { DirectoryPickerModal } from './components/DirectoryPickerModal';
@@ -17,7 +19,36 @@ import { AgentConfig, BatchReviewFile, ChatMessage, ChatSessionSummary, Checkpoi
 import { DEFAULT_COMMAND_WHITELIST } from '../../core/commandWhitelist.js';
 
 export const App: React.FC = () => {
-  const [activeView, setActiveView] = useState<'chat' | 'benchmark'>('chat');
+  const [activeView, setActiveView] = useState<'chat' | 'benchmark' | 'editor'>('chat');
+  const [editorChatOpen, setEditorChatOpen] = useState(true);
+  const [editorChatWidth, setEditorChatWidth] = useState(450);
+  const isResizingChatRef = useRef(false);
+
+  const handleMouseDownResizeChat = (e: React.MouseEvent) => {
+    e.preventDefault();
+    isResizingChatRef.current = true;
+    document.body.style.userSelect = 'none';
+    document.body.style.cursor = 'col-resize';
+
+    const onMouseMove = (moveEvent: MouseEvent) => {
+      if (!isResizingChatRef.current) return;
+      const newWidth = window.innerWidth - moveEvent.clientX;
+      const minW = 280;
+      const maxW = Math.min(900, window.innerWidth - 300);
+      setEditorChatWidth(Math.max(minW, Math.min(maxW, newWidth)));
+    };
+
+    const onMouseUp = () => {
+      isResizingChatRef.current = false;
+      document.body.style.userSelect = '';
+      document.body.style.cursor = '';
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
+
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+  };
   const benchmarkContextWindowSetter = useRef<((ctx: number) => void) | null>(null);
   const [benchmarkContextWindow, setBenchmarkContextWindow] = useState<number>(16384);
 
@@ -95,6 +126,8 @@ export const App: React.FC = () => {
   const [terminalSessionsModalOpen, setTerminalSessionsModalOpen] = useState(false);
   const [terminalSidebarOpen, setTerminalSidebarOpen] = useState(false);
   const [activeGenerationsCount, setActiveGenerationsCount] = useState<number>(0);
+  const [lastAiEditEvent, setLastAiEditEvent] = useState<AiEditEvent | null>(null);
+  const [aiEditNotification, setAiEditNotification] = useState<{ path: string; operationType: 'read' | 'write'; timestamp: number } | null>(null);
   const liveSocketRef = useRef<Socket | null>(null);
   const activeSessionIdRef = useRef('');
   const chatStreamAbortControllerRef = useRef<AbortController | null>(null);
@@ -127,6 +160,86 @@ export const App: React.FC = () => {
     streamingStartTimeRef.current = null;
     streamingTokenCountRef.current = 0;
     setStreamingMetrics(null);
+  };
+
+  const handleFileEditNotification = (name: string, args: any, diff?: any, result?: any) => {
+    const rawPath =
+      args?.relative_path ||
+      args?.file_path ||
+      args?.path ||
+      args?.TargetFile ||
+      args?.targetFile ||
+      result?.relative_path ||
+      result?.file_path ||
+      result?.path ||
+      diff?.path ||
+      diff?.newPath;
+
+    if (rawPath && typeof rawPath === 'string') {
+      let cleanPath = rawPath.trim();
+      const workingDir = config.workingDir || '';
+      if (workingDir && cleanPath.startsWith(workingDir)) {
+        cleanPath = cleanPath.slice(workingDir.length);
+      } else if (workingDir && cleanPath.startsWith(workingDir.replace(/^[\/\\]+/, ''))) {
+        cleanPath = cleanPath.slice(workingDir.replace(/^[\/\\]+/, '').length);
+      }
+      cleanPath = cleanPath.replace(/^(\.\/|\/|\\)+/, '');
+
+      const isReadTool = [
+        'read_file',
+        'view_file',
+        'grep_search',
+        'get_file_tree',
+        'list_dir',
+        'list_directory',
+        'search_workspace_symbols',
+        'get_document_symbols',
+        'get_definition',
+        'find_references',
+        'get_diagnostics',
+        'get_hover',
+        'get_module_dependencies',
+        'web_search',
+        'read_web_page',
+      ].includes((name || '').toLowerCase());
+      const operationType: 'read' | 'write' = isReadTool ? 'read' : 'write';
+
+      const startLine =
+        typeof args?.start_line === 'number' ? args.start_line :
+        typeof args?.startLine === 'number' ? args.startLine :
+        typeof args?.line === 'number' ? args.line :
+        typeof args?.line_number === 'number' ? args.line_number :
+        typeof args?.lineNumber === 'number' ? args.lineNumber :
+        typeof result?.start_line === 'number' ? result.start_line :
+        typeof result?.startLine === 'number' ? result.startLine :
+        typeof result?.line === 'number' ? result.line : undefined;
+
+      const endLine =
+        typeof args?.end_line === 'number' ? args.end_line :
+        typeof args?.endLine === 'number' ? args.endLine :
+        typeof result?.end_line === 'number' ? result.end_line :
+        typeof result?.endLine === 'number' ? result.endLine :
+        typeof result?.line_count === 'number' ? result.line_count :
+        typeof result?.lineCount === 'number' ? result.lineCount :
+        (startLine !== undefined ? startLine + 10 : undefined);
+
+      const beforeContent = diff?.before ?? (diff as any)?.oldContent ?? (result as any)?.before;
+      const afterContent = diff?.after ?? (diff as any)?.newContent ?? (result as any)?.after;
+
+      const eventObj: AiEditEvent = {
+        path: cleanPath,
+        startLine,
+        endLine,
+        operationType,
+        beforeContent,
+        afterContent,
+        timestamp: Date.now(),
+      };
+      setLastAiEditEvent(eventObj);
+      if (operationType === 'write') {
+        setAiEditNotification({ path: cleanPath, operationType, timestamp: Date.now() });
+      }
+    }
   };
 
   const applyChatStreamEvent = (eventType: string, eventData: any) => {
@@ -183,11 +296,16 @@ export const App: React.FC = () => {
       });
     } else if (eventType === 'tool_approval_required') {
       setPendingApprovalCall({ name: eventData.name, args: eventData.args, diff: eventData.diff });
+      handleFileEditNotification(eventData.name, eventData.args, eventData.diff);
     } else if (eventType === 'batch_review_ready') {
       setBatchReviewPromptId(eventData.promptId ?? null);
+      const files = eventData.files ?? [];
       setBatchReview(
-        (eventData.files ?? []).map((f: any) => ({ path: f.path, before: f.before, after: f.after, revert: false }))
+        files.map((f: any) => ({ path: f.path, before: f.before, after: f.after, revert: false }))
       );
+      if (files[0]?.path) {
+        handleFileEditNotification('batch_review', { relative_path: files[0].path });
+      }
     } else if (eventType === 'checkpoint_saved') {
       setCheckpoints((prev) => [
         ...prev,
@@ -209,6 +327,7 @@ export const App: React.FC = () => {
       setStreamingText('');
       setStreamingThinking('');
       resetStreamingMetrics();
+      handleFileEditNotification(eventData.name, eventData.args);
     } else if (eventType === 'tool_progress') {
       setActiveToolCall((current) => current?.name === eventData.name
         ? { ...current, progress: eventData.progress }
@@ -216,6 +335,7 @@ export const App: React.FC = () => {
     } else if (eventType === 'tool_end') {
       setActiveToolCall(null);
       setPendingApprovalCall(null);
+      handleFileEditNotification(eventData.name, eventData.args, undefined, eventData.result);
     } else if (eventType === 'done') {
       setActiveToolCall(null);
       setPendingApprovalCall(null);
@@ -926,6 +1046,57 @@ export const App: React.FC = () => {
     }
   };
 
+  const handleEditorSave = (savedPath: string) => {
+    // 1. Clear file from batchReview card in chat if present
+    setBatchReview((prev) => {
+      if (!prev) return null;
+      const remaining = prev.filter((f) => f.path !== savedPath && !savedPath.endsWith(f.path) && !f.path.endsWith(savedPath));
+      if (remaining.length === 0) {
+        setBatchReviewPromptId(null);
+        return null;
+      }
+      return remaining;
+    });
+
+    // 2. Clear pending tool approval call in chat if it targets this file
+    setPendingApprovalCall((prev) => {
+      if (!prev) return null;
+      const targetPath =
+        prev.args?.relative_path ||
+        prev.args?.file_path ||
+        prev.args?.path ||
+        prev.diff?.path;
+      if (targetPath && (targetPath === savedPath || savedPath.endsWith(targetPath) || targetPath.endsWith(savedPath))) {
+        return null;
+      }
+      return prev;
+    });
+  };
+
+  const handleEditorRevert = async (revertedPath: string) => {
+    // 1. Revert file via batch review endpoint if part of batchReview
+    if (batchReview && batchReview.some((f) => f.path === revertedPath || revertedPath.endsWith(f.path) || f.path.endsWith(revertedPath))) {
+      await handleBatchReviewConfirm([revertedPath]);
+    }
+
+    // 2. Reject pending approval call if it targets this file
+    if (pendingApprovalCall) {
+      const targetPath =
+        pendingApprovalCall.args?.relative_path ||
+        pendingApprovalCall.args?.file_path ||
+        pendingApprovalCall.args?.path ||
+        pendingApprovalCall.diff?.path;
+      if (targetPath && (targetPath === revertedPath || revertedPath.endsWith(targetPath) || targetPath.endsWith(revertedPath))) {
+        await handleRejectToolCall();
+      }
+    }
+  };
+
+  const handleSendErrorToAi = (errorText: string) => {
+    setActiveView('chat');
+    void handleSendMessage(errorText);
+  };
+
   const handleRevertToCheckpoint = async (promptId: string) => {
     if (isReverting) return;
     if (!window.confirm('Revert all file changes made after this prompt? This cannot be undone.')) return;
@@ -1154,6 +1325,7 @@ export const App: React.FC = () => {
             onRewindToMessage={handleRewindToMessage}
             onRegenerateDeepResearch={handleRegenerateDeepResearch}
             onClearChat={handleNewChat}
+            onNewSession={handleNewChat}
             onOpenToolSettings={() => setToolSettingsModalOpen(true)}
             onOpenModelDetails={() => setModelDetailsModalOpen(true)}
             onCompactContext={handleCompactContext}
@@ -1167,6 +1339,144 @@ export const App: React.FC = () => {
             }}
             onTerminateTerminalSession={handleTerminateTerminalSession}
           />
+        ) : activeView === 'editor' ? (
+          <div style={{ flex: 1, display: 'flex', overflow: 'hidden', height: '100%', position: 'relative' }}>
+            <div style={{ flex: 1, minWidth: 0, height: '100%', display: 'flex' }}>
+              <EditorView
+                config={config}
+                lastAiEditEvent={lastAiEditEvent}
+                onSaveFile={handleEditorSave}
+                onRevertFile={handleEditorRevert}
+                onSendErrorToAi={handleSendErrorToAi}
+              />
+            </div>
+            {editorChatOpen ? (
+              <div
+                className="chat-window-container"
+                style={{
+                  width: `${editorChatWidth}px`,
+                  borderLeft: '1px solid var(--border, #313244)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  height: '100%',
+                  background: 'var(--bg-primary, #11111b)',
+                  flexShrink: 0,
+                  position: 'relative'
+                }}
+              >
+                {/* Drag Resize Handle */}
+                <div
+                  onMouseDown={handleMouseDownResizeChat}
+                  onDoubleClick={() => setEditorChatWidth(450)}
+                  title="Drag to resize AI chat (double click to reset)"
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: '-4px',
+                    width: '8px',
+                    height: '100%',
+                    cursor: 'col-resize',
+                    zIndex: 50,
+                    background: 'transparent',
+                    transition: 'background 0.15s ease',
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(137, 180, 250, 0.4)')}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                />
+
+                <button
+                  onClick={() => setEditorChatOpen(false)}
+                  title="Hide Chat Panel"
+                  style={{
+                    position: 'absolute',
+                    top: '8px',
+                    left: '-14px',
+                    zIndex: 55,
+                    background: 'var(--bg-secondary, #1e1e2e)',
+                    border: '1px solid var(--border, #313244)',
+                    borderRadius: '50%',
+                    width: '26px',
+                    height: '26px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    cursor: 'pointer',
+                    color: 'var(--text-secondary, #a6adc8)',
+                    boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
+                  }}
+                >
+                  <ChevronRight size={14} />
+                </button>
+                <ChatWindow
+                  messages={messages}
+                  streamingText={streamingText}
+                  streamingThinking={streamingThinking}
+                  streamingMetrics={streamingMetrics}
+                  isGenerating={isGenerating}
+                  isModelLoaded={isActiveModelLoaded}
+                  modelLoadElapsed={modelLoadElapsed}
+                  activeGenerationsCount={activeGenerationsCount}
+                  generationStatus={generationStatus}
+                  pendingApprovalCall={pendingApprovalCall}
+                  isSubmittingToolApproval={isSubmittingToolApproval}
+                  activeToolCall={activeToolCall}
+                  pendingBatchEdits={batchReview}
+                  isSubmittingBatchApproval={isSubmittingBatchReview}
+                  supportsVision={supportsVision}
+                  isCompact={editorChatWidth < 450}
+                  onSendMessage={handleSendMessage}
+                  onCancelGeneration={handleCancelGeneration}
+                  onApproveToolCall={handleApproveToolCall}
+                  onRejectToolCall={handleRejectToolCall}
+                  onBatchApprove={handleBatchReviewConfirm}
+                  onBatchRejectAll={() => handleBatchReviewConfirm([])}
+                  onBatchToggle={handleBatchReviewToggle}
+                  onRewindToMessage={handleRewindToMessage}
+                  onRegenerateDeepResearch={handleRegenerateDeepResearch}
+                  onClearChat={handleNewChat}
+                  onNewSession={handleNewChat}
+                  onOpenToolSettings={() => setToolSettingsModalOpen(true)}
+                  onOpenModelDetails={() => setModelDetailsModalOpen(true)}
+                  onCompactContext={handleCompactContext}
+                  isCompacting={isCompacting}
+                  planMode={config.planMode}
+                  onTogglePlanMode={handleTogglePlanMode}
+                  terminalSessions={terminalSessions}
+                  onOpenTerminal={(sessionId) => {
+                    if (sessionId) setSelectedTerminalSessionId(sessionId);
+                    setTerminalSidebarOpen(true);
+                  }}
+                  onTerminateTerminalSession={handleTerminateTerminalSession}
+                />
+              </div>
+            ) : (
+              <button
+                onClick={() => setEditorChatOpen(true)}
+                title="Show Chat Panel"
+                style={{
+                  position: 'absolute',
+                  top: '10px',
+                  right: '12px',
+                  zIndex: 40,
+                  background: 'var(--bg-secondary, #1e1e2e)',
+                  border: '1px solid var(--border, #313244)',
+                  borderRadius: '8px',
+                  padding: '6px 12px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  cursor: 'pointer',
+                  color: 'var(--text-primary, #cdd6f4)',
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
+                }}
+              >
+                <MessageSquare size={14} />
+                <span>Open Chat</span>
+              </button>
+            )}
+          </div>
         ) : (
           <BenchmarkView
             models={models}
@@ -1352,6 +1662,40 @@ export const App: React.FC = () => {
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Floating AI Edit/Read Notification Toast */}
+      {aiEditNotification && activeView !== 'editor' && (
+        <div
+          style={{
+            position: 'fixed',
+            top: '64px',
+            right: '24px',
+            zIndex: 9999,
+            background: aiEditNotification.operationType === 'read' ? '#89dceb' : '#a6e3a1',
+            color: '#11111b',
+            padding: '10px 16px',
+            borderRadius: '8px',
+            boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '12px',
+            fontSize: '13px',
+            fontWeight: 600,
+            cursor: 'pointer',
+            animation: 'fadeIn 0.2s ease',
+          }}
+          onClick={() => {
+            setActiveView('editor');
+            setAiEditNotification(null);
+          }}
+        >
+          <span>
+            {aiEditNotification.operationType === 'read' ? '👁️ AI reading' : '⚡ AI modified'}{' '}
+            <code>{aiEditNotification.path}</code>
+          </span>
+          <span style={{ textDecoration: 'underline', opacity: 0.9 }}>View in Editor →</span>
         </div>
       )}
     </div>

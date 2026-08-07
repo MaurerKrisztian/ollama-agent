@@ -22,6 +22,7 @@ import {
   Clock,
   Download,
   Upload,
+  FileCode2,
 } from 'lucide-react';
 import { AgentConfig, ChatSessionSummary, CheckpointEntry, SystemMetrics } from '../types';
 
@@ -29,8 +30,8 @@ interface LeftSidebarProps {
   isOpen: boolean;
   onClose: () => void;
   config: AgentConfig;
-  activeView: 'chat' | 'benchmark';
-  onSelectView: (view: 'chat' | 'benchmark') => void;
+  activeView: 'chat' | 'benchmark' | 'editor';
+  onSelectView: (view: 'chat' | 'benchmark' | 'editor') => void;
   onNewChat: () => void;
   chatSessions: ChatSessionSummary[];
   activeSessionId: string;
@@ -449,6 +450,26 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
             >
               <Zap size={16} />
               <span>Benchmark Runner</span>
+            </button>
+            <button
+              onClick={() => onSelectView('editor')}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '10px',
+                padding: '9px 12px',
+                borderRadius: '8px',
+                border: 'none',
+                fontSize: '0.85rem',
+                fontWeight: 600,
+                cursor: 'pointer',
+                background: activeView === 'editor' ? 'rgba(137, 180, 250, 0.2)' : 'rgba(30, 41, 59, 0.5)',
+                color: activeView === 'editor' ? '#89b4fa' : 'var(--text-muted)',
+                textAlign: 'left',
+              }}
+            >
+              <FileCode2 size={16} />
+              <span>Workdir Editor</span>
             </button>
           </div>
         </div>

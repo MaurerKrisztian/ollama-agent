@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { User, Bot, ShieldAlert, CheckCircle2, XCircle, Loader2, RotateCcw, FileText, Zap, X, ArrowDown } from 'lucide-react';
+import { User, Bot, ShieldAlert, CheckCircle2, XCircle, Loader2, RotateCcw, FileText, Zap, X, ArrowDown, Plus } from 'lucide-react';
 import { ChatMessage, ImageAttachment, BatchReviewFile, PendingApprovalCall, TextAttachment, TerminalSessionInfo } from '../types';
 import { BatchReviewCard } from './chat/BatchReviewCard';
 import { findActiveSkillMention } from '../skillMention';
@@ -37,6 +37,7 @@ export interface ChatWindowProps {
   onRewindToMessage?: (messageId: string, promptContent: string) => void;
   onRegenerateDeepResearch?: (toolMessageId: string) => void;
   onClearChat?: () => void;
+  onNewSession?: () => void;
   onOpenToolSettings?: () => void;
   onOpenModelDetails?: () => void;
   onCompactContext?: () => void;
@@ -46,6 +47,7 @@ export interface ChatWindowProps {
   isCompacting?: boolean;
   planMode?: boolean;
   onTogglePlanMode?: (enabled: boolean) => void;
+  isCompact?: boolean;
 }
 
 export const ChatWindow: React.FC<ChatWindowProps> = ({
@@ -74,6 +76,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   onRewindToMessage,
   onRegenerateDeepResearch,
   onClearChat,
+  onNewSession,
   onOpenToolSettings,
   onOpenModelDetails,
   onCompactContext,
@@ -83,6 +86,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   isCompacting,
   planMode,
   onTogglePlanMode,
+  isCompact = false,
 }) => {
   const [input, setInput] = useState('');
   const [attachments, setAttachments] = useState<TextAttachment[]>([]);
@@ -517,7 +521,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
         setIsDragging(false);
         if (!isGenerating) void addFiles(Array.from(event.dataTransfer.files));
       }}
-      className="chat-window"
+      className={`chat-window chat-window-container ${isCompact ? 'is-compact-chat' : ''}`}
       style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', position: 'relative' }}
     >
       {isDragging && (
@@ -528,6 +532,72 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
           </div>
         </div>
       )}
+
+      {/* Developer HUD Header Bar */}
+      <div
+        className="dev-chat-hud"
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '6px 12px',
+          background: '#0d1117',
+          borderBottom: '1px solid var(--border-color, #30363d)',
+          fontSize: '0.74rem',
+          fontFamily: 'var(--font-code, monospace)',
+          color: 'var(--text-muted)',
+          userSelect: 'none',
+          flexShrink: 0,
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden', whiteSpace: 'nowrap' }}>
+          <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: isGenerating ? '#f59e0b' : '#10b981', boxShadow: isGenerating ? '0 0 6px #f59e0b' : '0 0 6px #10b981', flexShrink: 0 }} />
+          <span style={{ fontWeight: 700, color: '#38bdf8', fontFamily: 'var(--font-code)' }}>$ ai-agent</span>
+          <span style={{ color: 'var(--text-dim)' }}>•</span>
+          <span style={{ color: '#c084fc' }}>{messages.length} msgs</span>
+          {planMode && (
+            <span style={{ background: 'rgba(59, 130, 246, 0.2)', color: '#60a5fa', border: '1px solid rgba(59, 130, 246, 0.4)', padding: '1px 5px', borderRadius: '4px', fontSize: '0.66rem', fontWeight: 700 }}>
+              PLAN MODE
+            </span>
+          )}
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+          {onNewSession && (
+            <button
+              type="button"
+              onClick={onNewSession}
+              title="Start a new chat session"
+              style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '2px 4px', fontSize: '0.72rem', fontFamily: 'var(--font-code)', display: 'flex', alignItems: 'center', gap: '4px' }}
+            >
+              <Plus size={11} color="#38bdf8" />
+              <span className="dev-hud-label">New Session</span>
+            </button>
+          )}
+          {onCompactContext && (
+            <button
+              type="button"
+              onClick={onCompactContext}
+              title="Compact & summarize context (/compact)"
+              style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '2px 4px', fontSize: '0.72rem', fontFamily: 'var(--font-code)', display: 'flex', alignItems: 'center', gap: '4px' }}
+            >
+              <Zap size={11} color="#a855f7" />
+              <span className="dev-hud-label">Compact</span>
+            </button>
+          )}
+          {onClearChat && (
+            <button
+              type="button"
+              onClick={onClearChat}
+              title="Clear context (/clear)"
+              style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '2px 4px', fontSize: '0.72rem', fontFamily: 'var(--font-code)', display: 'flex', alignItems: 'center', gap: '4px' }}
+            >
+              <RotateCcw size={11} />
+              <span className="dev-hud-label">Clear</span>
+            </button>
+          )}
+        </div>
+      </div>
 
       <div ref={chatMainRef} className="chat-main" style={{ flex: 1, display: 'flex', minHeight: 0, position: 'relative' }}>
         {/* Floating Scroll-to-Bottom Re-attach Button */}
@@ -654,7 +724,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                 return (
                   <div key={msg.id} className="animate-fade-in chat-message chat-message-user" style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
                     <div className="message-content" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px', maxWidth: '75%' }}>
-                      <div style={{ background: 'var(--accent-gradient)', color: '#fff', padding: '12px 16px', borderRadius: '16px 16px 4px 16px', fontSize: '0.925rem', lineHeight: 1.5, boxShadow: '0 4px 12px rgba(99, 102, 241, 0.25)', width: '100%' }}>
+                      <div style={{ background: 'linear-gradient(135deg, #1c2333 0%, #151b26 100%)', border: '1px solid rgba(56, 189, 248, 0.4)', color: '#f0f6fc', padding: '12px 16px', borderRadius: '16px 16px 4px 16px', fontSize: '0.965rem', lineHeight: 1.5, boxShadow: '0 4px 14px rgba(0, 0, 0, 0.3)', width: '100%' }}>
                         <div style={{ whiteSpace: 'pre-wrap' }}>{msg.displayContent ?? msg.content}</div>
                         {msg.imageAttachments && msg.imageAttachments.length > 0 && (
                           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '10px' }}>
@@ -717,7 +787,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                         <span>Rewind</span>
                       </button>
                     </div>
-                    <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: 'rgba(255, 255, 255, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <div className="chat-avatar user-avatar" style={{ width: '32px', height: '32px', borderRadius: '50%', background: 'rgba(255, 255, 255, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                       <User size={18} color="#fff" />
                     </div>
                   </div>
@@ -734,19 +804,19 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                 return (
                   <div key={msg.id} className="animate-fade-in chat-message" style={{ display: 'flex', gap: '12px', justifyContent: 'flex-start' }}>
                     {!isConsecutiveAssistant ? (
-                      <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: 'var(--accent-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                      <div className="chat-avatar assistant-avatar" style={{ width: '32px', height: '32px', borderRadius: '50%', background: 'var(--accent-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                         <Bot size={18} color="#fff" />
                       </div>
                     ) : (
-                      <div style={{ width: '32px', height: '32px', flexShrink: 0 }} />
+                      <div className="chat-avatar-spacer" style={{ width: '32px', height: '32px', flexShrink: 0 }} />
                     )}
-                    <div className="message-content" style={{ maxWidth: '80%', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <div className="message-content" style={{ flex: 1, minWidth: 0, width: '100%', display: 'flex', flexDirection: 'column', gap: '8px' }}>
                       {(msg.content || msg.thinking) && (
                         <AssistantResponse content={msg.content} thinking={msg.thinking} thinkingTokens={msg.thinkingTokens} metrics={msg.metrics} />
                       )}
 
                       {toolCalls.length > 0 && (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', width: '100%' }}>
                           {toolCalls.map((tc, tcIdx) => {
                             const matchingToolMsg = findMatchingToolResult(msgIdx, tc, tcIdx);
                             if (tc.name === 'create_plan') {
@@ -833,7 +903,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                     } catch (_) {}
                   }
                   return (
-                    <div key={msg.id} style={{ marginLeft: '44px', maxWidth: '80%' }}>
+                    <div key={msg.id} className="tool-message-wrapper" style={{ marginLeft: isCompact ? '0px' : '44px', width: isCompact ? '100%' : 'calc(100% - 44px)' }}>
                       <PlanReviewCard
                         plan={planData}
                         onApprovePlan={() => {
@@ -849,7 +919,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                 }
 
                 return (
-                  <div key={msg.id} style={{ marginLeft: '44px', maxWidth: '80%' }}>
+                  <div key={msg.id} className="tool-message-wrapper" style={{ marginLeft: isCompact ? '0px' : '44px', width: isCompact ? '100%' : 'calc(100% - 44px)' }}>
                     <ToolExecutionCard
                       toolName={toolName}
                       args={matchingCall?.arguments || {}}
@@ -875,15 +945,15 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
               lastMsg && (lastMsg.role === 'assistant' || lastMsg.role === 'tool')
             );
             return (
-              <div className="animate-fade-in" style={{ display: 'flex', gap: '12px', justifyContent: 'flex-start' }}>
+              <div className="animate-fade-in" style={{ display: 'flex', gap: '12px', justifyContent: 'flex-start', width: '100%' }}>
                 {!isStreamingConsecutive ? (
-                  <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: 'var(--accent-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  <div className="chat-avatar assistant-avatar" style={{ width: '32px', height: '32px', borderRadius: '50%', background: 'var(--accent-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                     <Bot size={18} color="#fff" />
                   </div>
                 ) : (
-                  <div style={{ width: '32px', height: '32px', flexShrink: 0 }} />
+                  <div className="chat-avatar-spacer" style={{ width: '32px', height: '32px', flexShrink: 0 }} />
                 )}
-                <div className="glass-panel" style={{ maxWidth: '80%', padding: '14px 18px', borderRadius: '16px 16px 16px 4px', fontSize: '0.925rem', lineHeight: 1.6 }}>
+                <div className="glass-panel" style={{ flex: 1, minWidth: 0, width: '100%', padding: '14px 18px', borderRadius: '16px 16px 16px 4px', fontSize: '0.925rem', lineHeight: 1.6 }}>
                   {streamingThinking && (
                     <ThinkingBlock thinking={streamingThinking} isStreaming={!streamingText} />
                   )}
@@ -891,12 +961,12 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                     <MarkdownContent content={streamingText} streaming />
                   )}
                   {streamingMetrics && (streamingMetrics.liveTokPerSec > 0 || streamingMetrics.tokenCount > 0) && (
-                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', marginTop: '10px', padding: '3px 8px', borderRadius: '6px', background: 'rgba(99, 102, 241, 0.12)', border: '1px solid rgba(99, 102, 241, 0.25)', fontSize: '0.72rem', color: 'var(--accent-primary)', fontFamily: 'var(--font-code, monospace)' }}>
-                      <Zap size={12} className="spin" style={{ flexShrink: 0 }} />
+                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', marginTop: '6px', padding: '2px 6px', borderRadius: '5px', background: 'rgba(99, 102, 241, 0.12)', border: '1px solid rgba(99, 102, 241, 0.25)', fontSize: '0.68rem', color: 'var(--accent-primary)', fontFamily: 'var(--font-code, monospace)', whiteSpace: 'nowrap', flexWrap: 'nowrap' }}>
+                      <Zap size={11} className="spin" style={{ flexShrink: 0 }} />
                       <span style={{ fontWeight: 600 }}>
                         ⚡ {streamingMetrics.liveTokPerSec > 0 ? `${streamingMetrics.liveTokPerSec} tok/s` : 'Streaming…'}
                       </span>
-                      <span>· {streamingMetrics.tokenCount} tokens</span>
+                      <span>· {streamingMetrics.tokenCount} gen</span>
                     </div>
                   )}
                 </div>
@@ -906,7 +976,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
 
           {/* Standalone Active Tool Execution Indicator */}
           {isGenerating && activeToolCall && !messages.some((m) => m.role === 'assistant' && m.tool_calls?.some((tc) => tc.name === activeToolCall.name && !messages.some((tm) => tm.role === 'tool' && tm.tool_call_id === tc.id))) && (
-            <div style={{ marginLeft: '44px', maxWidth: '80%' }}>
+            <div className="tool-message-wrapper" style={{ marginLeft: isCompact ? '0px' : '44px', width: isCompact ? '100%' : 'calc(100% - 44px)' }}>
               <ToolExecutionCard
                 toolName={activeToolCall.name}
                 args={activeToolCall.args || {}}
@@ -1184,6 +1254,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
         setInputCursor={setInputCursor}
         planMode={planMode}
         onTogglePlanMode={onTogglePlanMode}
+        isCompact={isCompact}
       />
     </div>
   );

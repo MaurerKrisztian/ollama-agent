@@ -7,7 +7,9 @@ import {
   LspDiagnosticItem,
   LspHoverInformation,
   LspModuleDependencies,
+  LspCompletionItem,
 } from './types.js';
+
 
 export class LspManager {
   private workingDir: string;
@@ -539,6 +541,75 @@ export class LspManager {
         });
       }
       return { success: true, symbols: results };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public getCompletions(
+    filePath: string,
+    line: number,
+    character: number,
+  ): { success: boolean; items?: LspCompletionItem[]; error?: string } {
+    if (!this.service) return { success: false, error: 'LSP service unavailable' };
+    const absPath = this.resolvePath(filePath);
+    if (!fs.existsSync(absPath)) return { success: false, error: `File not found: ${filePath}` };
+
+    try {
+      const code = fs.readFileSync(absPath, 'utf-8');
+      const sourceFile = ts.createSourceFile(absPath, code, ts.ScriptTarget.Latest, true);
+      const pos = ts.getPositionOfLineAndCharacter(sourceFile, Math.max(0, line - 1), Math.max(0, character - 1));
+
+      const result = this.service.getCompletionsAtPosition(absPath, pos, {
+        triggerKind: ts.CompletionTriggerKind.Invoked,
+      });
+
+      if (!result) return { success: true, items: [] };
+
+      const kindMap: Record<string, string> = {
+        keyword: 'Keyword',
+        function: 'Function',
+        method: 'Method',
+        property: 'Property',
+        field: 'Field',
+        variable: 'Variable',
+        class: 'Class',
+        interface: 'Interface',
+        module: 'Module',
+        type: 'TypeParameter',
+        enum: 'Enum',
+        enumMember: 'EnumMember',
+        constructor: 'Constructor',
+        snippet: 'Snippet',
+      };
+
+      const items: LspCompletionItem[] = result.entries.slice(0, 50).map((entry) => {
+        let detail: string | undefined;
+        try {
+          const details = this.service!.getCompletionEntryDetails(
+            absPath,
+            pos,
+            entry.name,
+            {},
+            entry.source,
+            {},
+            entry.data,
+          );
+          if (details) {
+            detail = ts.displayPartsToString(details.displayParts || []);
+          }
+        } catch { /* ignore detail errors */ }
+
+        return {
+          label: entry.name,
+          kind: kindMap[entry.kind] || 'Text',
+          detail,
+          insertText: entry.name,
+          sortText: entry.sortText,
+        };
+      });
+
+      return { success: true, items };
     } catch (err: any) {
       return { success: false, error: err.message };
     }

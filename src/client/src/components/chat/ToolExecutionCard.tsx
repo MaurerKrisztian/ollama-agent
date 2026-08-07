@@ -225,15 +225,15 @@ export const ToolExecutionCard: React.FC<{
   onSendMessage,
 }) => {
   const isPlanTool = toolName === 'create_plan';
-  const [expanded, setExpanded] = useState<boolean>(defaultExpanded ?? (isPlanTool || Boolean(args?._streaming)));
+  const [expanded, setExpanded] = useState<boolean>(defaultExpanded ?? isPlanTool);
   const [viewMode, setViewMode] = useState<'formatted' | 'raw_input' | 'raw_result'>('formatted');
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
-    if (args?._streaming || isPlanTool) {
+    if (isPlanTool) {
       setExpanded(true);
     }
-  }, [args?._streaming, isPlanTool]);
+  }, [isPlanTool]);
 
   const fullResultContent = resultMessage?.displayContent || resultMessage?.content || '';
   const isPruned = typeof resultMessage?.content === 'string' && resultMessage.content.startsWith('[Context Pruned:');
@@ -372,7 +372,7 @@ export const ToolExecutionCard: React.FC<{
         transition: 'all 0.2s ease',
       }}
     >
-      {/* Header Bar */}
+      {/* Header Bar - Strict 1 Line */}
       <div
         role="button"
         tabIndex={0}
@@ -385,78 +385,59 @@ export const ToolExecutionCard: React.FC<{
           }
         }}
         aria-expanded={expanded}
+        className="tool-execution-header"
         style={{
-          padding: '8px 12px',
+          padding: '6px 12px',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
+          flexWrap: 'nowrap',
+          gap: '8px',
           cursor: 'pointer',
           background: 'rgba(15, 23, 42, 0.2)',
           userSelect: 'none',
+          whiteSpace: 'nowrap',
+          overflow: 'hidden',
+          minWidth: 0,
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: mainColor, fontWeight: 600, minWidth: 0, flex: 1 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: mainColor, fontWeight: 600, minWidth: 0, flex: 1, overflow: 'hidden', whiteSpace: 'nowrap' }}>
           {isWorking ? (
-            <Loader2 size={16} className="spin" style={{ flexShrink: 0, color: 'var(--accent-primary)' }} />
+            <Loader2 size={15} className="spin" style={{ flexShrink: 0, color: 'var(--accent-primary)' }} />
           ) : isPruned ? (
-            <Scissors size={15} style={{ flexShrink: 0, color: '#c084fc' }} />
+            <Scissors size={14} style={{ flexShrink: 0, color: '#c084fc' }} />
           ) : isFailed ? (
-            <XCircle size={15} style={{ flexShrink: 0, color: '#f43f5e' }} />
+            <XCircle size={14} style={{ flexShrink: 0, color: '#f43f5e' }} />
           ) : resultMessage ? (
-            <CheckCircle2 size={15} style={{ flexShrink: 0, color: 'var(--accent-teal)' }} />
+            <CheckCircle2 size={14} style={{ flexShrink: 0, color: 'var(--accent-teal)' }} />
           ) : (
-            <Wrench size={15} style={{ flexShrink: 0, color: 'var(--accent-amber)' }} />
+            <Wrench size={14} style={{ flexShrink: 0, color: 'var(--accent-amber)' }} />
           )}
 
           {isPlanTool ? (
-            <span style={{ fontSize: '0.875rem', color: '#60a5fa', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '6px' }}>
-              📋 Implementation Plan Submitted
+            <span style={{ fontSize: '0.825rem', color: '#60a5fa', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '6px', whiteSpace: 'nowrap' }}>
+              📋 Plan Submitted
             </span>
           ) : (
-            <>
-              <span style={{ whiteSpace: 'nowrap' }}>Tool Execution:</span>
-              <span
-                style={{
-                  fontFamily: 'var(--font-code)',
-                  background: 'rgba(15, 23, 42, 0.4)',
-                  padding: '2px 8px',
-                  borderRadius: '6px',
-                  color: mainColor,
-                  fontSize: '0.8rem',
-                  fontWeight: 700,
-                  flexShrink: 0,
-                }}
-              >
-                {toolName}
-              </span>
-            </>
+            <span
+              style={{
+                fontFamily: 'var(--font-code)',
+                background: 'rgba(15, 23, 42, 0.4)',
+                padding: '2px 7px',
+                borderRadius: '6px',
+                color: mainColor,
+                fontSize: '0.78rem',
+                fontWeight: 700,
+                flexShrink: 0,
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {toolName}
+            </span>
           )}
 
-          {/* Status Badge */}
-          {args?._streaming ? (
-            <span style={{ background: 'rgba(56, 189, 248, 0.25)', color: '#7dd3fc', border: '1px solid rgba(56, 189, 248, 0.4)', padding: '1px 7px', borderRadius: '4px', fontSize: '0.675rem', fontWeight: 700, textTransform: 'uppercase', flexShrink: 0, display: 'flex', alignItems: 'center', gap: '4px' }}>
-              <Loader2 size={10} className="spin" /> Writing Tool Call… {streamingMetrics && (streamingMetrics.liveTokPerSec > 0 || streamingMetrics.tokenCount > 0) ? `⚡ ${streamingMetrics.liveTokPerSec > 0 ? `${streamingMetrics.liveTokPerSec} tok/s` : 'streaming'} (${streamingMetrics.tokenCount} tok)` : ''}
-            </span>
-          ) : isWorking ? (
-            <span style={{ background: 'rgba(99, 102, 241, 0.25)', color: '#a5b4fc', border: '1px solid rgba(99, 102, 241, 0.4)', padding: '1px 7px', borderRadius: '4px', fontSize: '0.675rem', fontWeight: 700, textTransform: 'uppercase', flexShrink: 0, display: 'flex', alignItems: 'center', gap: '4px' }}>
-              <Loader2 size={10} className="spin" /> Executing… {streamingMetrics && streamingMetrics.liveTokPerSec > 0 ? `⚡ ${streamingMetrics.liveTokPerSec} tok/s` : ''}
-            </span>
-          ) : isPruned ? (
-            <span style={{ background: 'rgba(168, 85, 247, 0.2)', color: '#e9d5ff', border: '1px solid rgba(168, 85, 247, 0.4)', padding: '1px 7px', borderRadius: '4px', fontSize: '0.675rem', fontWeight: 700, textTransform: 'uppercase', flexShrink: 0 }}>
-              Pruned
-            </span>
-          ) : isFailed ? (
-            <span style={{ background: 'rgba(244, 63, 94, 0.2)', color: '#fca5a5', border: '1px solid rgba(244, 63, 94, 0.4)', padding: '1px 7px', borderRadius: '4px', fontSize: '0.675rem', fontWeight: 700, textTransform: 'uppercase', flexShrink: 0 }}>
-              Failed
-            </span>
-          ) : resultMessage ? (
-            <span style={{ background: 'rgba(20, 184, 166, 0.2)', color: '#99f6e4', border: '1px solid rgba(20, 184, 166, 0.4)', padding: '1px 7px', borderRadius: '4px', fontSize: '0.675rem', fontWeight: 700, textTransform: 'uppercase', flexShrink: 0 }}>
-              Completed
-            </span>
-          ) : null}
-
           {readFilePath ? (
-            <span style={{ minWidth: 0, display: 'flex', alignItems: 'center', gap: '5px', overflow: 'hidden', color: 'var(--text-muted)', fontFamily: 'var(--font-code)', fontSize: '0.75rem' }}>
+            <span style={{ minWidth: 0, display: 'flex', alignItems: 'center', gap: '4px', overflow: 'hidden', color: 'var(--text-muted)', fontFamily: 'var(--font-code)', fontSize: '0.75rem', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>
               <button
                 type="button"
                 onClick={openReadFile}
@@ -465,8 +446,8 @@ export const ToolExecutionCard: React.FC<{
               >
                 {readFilePath}
               </button>
-              <span style={{ whiteSpace: 'nowrap' }}>
-                ({readFileLineCount} {readFileLineCount === 1 ? 'line' : 'lines'}, {readFileSize} bytes)
+              <span style={{ whiteSpace: 'nowrap', flexShrink: 0, color: 'var(--text-dim)', fontSize: '0.72rem' }}>
+                ({readFileLineCount} lines)
               </span>
             </span>
           ) : displaySummary && (
@@ -485,108 +466,31 @@ export const ToolExecutionCard: React.FC<{
               {displaySummary}
             </span>
           )}
-
-          {isWebSearch && sideDriftPages.length > 0 && (
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', flexShrink: 0, padding: '2px 7px', borderRadius: '999px', border: '1px solid rgba(56, 189, 248, 0.45)', background: 'rgba(14, 116, 144, 0.2)', color: '#7dd3fc', fontFamily: 'var(--font-code)', fontSize: '0.66rem', fontWeight: 700 }}>
-              <Sparkles size={10} /> Side Drift ⚡ {sideDriftPages.length} page{sideDriftPages.length === 1 ? '' : 's'} read
-            </span>
-          )}
-
-          {isDeepResearch && resultMessage && (
-            <span title={`${resultMessage.content.length.toLocaleString()} chars (~${synthesisTokenEstimate.toLocaleString()} tokens)`} style={{ flexShrink: 0, padding: '2px 6px', borderRadius: '5px', border: '1px solid rgba(45, 212, 191, 0.28)', background: 'rgba(20, 184, 166, 0.1)', color: '#99f6e4', fontFamily: 'var(--font-code)', fontSize: '0.65rem' }}>
-              synthesis ~{synthesisTokenEstimate.toLocaleString()} tokens
-            </span>
-          )}
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0, marginLeft: '8px' }}>
-          {/* View Mode Tabs */}
-          <div style={{ display: 'flex', gap: '2px', background: 'rgba(15, 23, 42, 0.7)', padding: '2px', borderRadius: '6px', border: '1px solid var(--border-color)' }}>
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                setViewMode('formatted');
-              }}
-              title="Formatted View"
-              style={{
-                padding: '3px 8px',
-                borderRadius: '4px',
-                border: 'none',
-                background: viewMode === 'formatted' ? 'rgba(255, 255, 255, 0.15)' : 'transparent',
-                color: viewMode === 'formatted' ? '#fff' : 'var(--text-muted)',
-                fontSize: '0.72rem',
-                fontWeight: 600,
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '4px',
-              }}
-            >
-              <Eye size={12} />
-              <span>Formatted</span>
-            </button>
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                setViewMode('raw_input');
-              }}
-              title="Raw Inputs JSON"
-              style={{
-                padding: '3px 8px',
-                borderRadius: '4px',
-                border: 'none',
-                background: viewMode === 'raw_input' ? 'rgba(255, 255, 255, 0.15)' : 'transparent',
-                color: viewMode === 'raw_input' ? '#fff' : 'var(--text-muted)',
-                fontSize: '0.72rem',
-                fontWeight: 600,
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '4px',
-              }}
-            >
-              <Code2 size={12} />
-              <span>Input</span>
-            </button>
-            {resultMessage && (
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setViewMode('raw_result');
-                }}
-                title="Raw Result JSON"
-                style={{
-                  padding: '3px 8px',
-                  borderRadius: '4px',
-                  border: 'none',
-                  background: viewMode === 'raw_result' ? 'rgba(255, 255, 255, 0.15)' : 'transparent',
-                  color: viewMode === 'raw_result' ? '#fff' : 'var(--text-muted)',
-                  fontSize: '0.72rem',
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '4px',
-                }}
-              >
-                <Code2 size={12} />
-                <span>Result</span>
-              </button>
-            )}
-          </div>
-
-          {/* Copy Button */}
-          <button
-            type="button"
-            onClick={handleCopy}
-            title={viewMode === 'raw_result' ? 'Copy Raw Result' : 'Copy Raw Input Args'}
-            style={{ background: 'none', border: 'none', color: copied ? '#10b981' : 'var(--text-muted)', cursor: 'pointer', padding: '2px 4px', display: 'flex', alignItems: 'center', gap: '3px', fontSize: '0.72rem' }}
-          >
-            {copied ? <Check size={13} /> : <Copy size={13} />}
-          </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0, marginLeft: 'auto', whiteSpace: 'nowrap' }}>
+          {/* Status Badge */}
+          {args?._streaming ? (
+            <span style={{ background: 'rgba(56, 189, 248, 0.25)', color: '#7dd3fc', border: '1px solid rgba(56, 189, 248, 0.4)', padding: '1px 6px', borderRadius: '4px', fontSize: '0.65rem', fontWeight: 700, textTransform: 'uppercase', flexShrink: 0, display: 'flex', alignItems: 'center', gap: '4px' }}>
+              <Loader2 size={9} className="spin" /> Writing…
+            </span>
+          ) : isWorking ? (
+            <span style={{ background: 'rgba(99, 102, 241, 0.25)', color: '#a5b4fc', border: '1px solid rgba(99, 102, 241, 0.4)', padding: '1px 6px', borderRadius: '4px', fontSize: '0.65rem', fontWeight: 700, textTransform: 'uppercase', flexShrink: 0, display: 'flex', alignItems: 'center', gap: '4px' }}>
+              <Loader2 size={9} className="spin" /> Executing…
+            </span>
+          ) : isPruned ? (
+            <span style={{ background: 'rgba(168, 85, 247, 0.2)', color: '#e9d5ff', border: '1px solid rgba(168, 85, 247, 0.4)', padding: '1px 6px', borderRadius: '4px', fontSize: '0.65rem', fontWeight: 700, textTransform: 'uppercase', flexShrink: 0 }}>
+              Pruned
+            </span>
+          ) : isFailed ? (
+            <span style={{ background: 'rgba(244, 63, 94, 0.2)', color: '#fca5a5', border: '1px solid rgba(244, 63, 94, 0.4)', padding: '1px 6px', borderRadius: '4px', fontSize: '0.65rem', fontWeight: 700, textTransform: 'uppercase', flexShrink: 0 }}>
+              Failed
+            </span>
+          ) : resultMessage ? (
+            <span style={{ background: 'rgba(20, 184, 166, 0.2)', color: '#99f6e4', border: '1px solid rgba(20, 184, 166, 0.4)', padding: '1px 6px', borderRadius: '4px', fontSize: '0.65rem', fontWeight: 700, textTransform: 'uppercase', flexShrink: 0 }}>
+              Done
+            </span>
+          ) : null}
 
           {/* Stop Button if Working */}
           {isWorking && onCancelGeneration && (
@@ -597,19 +501,108 @@ export const ToolExecutionCard: React.FC<{
                 onCancelGeneration();
               }}
               title="Stop Execution"
-              style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '3px 7px', borderRadius: '5px', border: '1px solid rgba(239, 68, 68, 0.5)', background: 'rgba(239, 68, 68, 0.2)', color: '#fca5a5', fontSize: '0.7rem', fontWeight: 600, cursor: 'pointer' }}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '2px 6px', borderRadius: '4px', border: '1px solid rgba(239, 68, 68, 0.5)', background: 'rgba(239, 68, 68, 0.2)', color: '#fca5a5', fontSize: '0.68rem', fontWeight: 600, cursor: 'pointer' }}
             >
-              <Square size={10} fill="currentColor" /> Stop
+              <Square size={9} fill="currentColor" /> Stop
             </button>
           )}
 
-          <ChevronDown size={16} color={mainColor} style={{ transform: expanded ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s ease' }} />
+          <ChevronDown size={15} color={mainColor} style={{ transform: expanded ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s ease', flexShrink: 0 }} />
         </div>
       </div>
 
       {/* Expanded Content Body */}
       {expanded && (
-        <div style={{ padding: '12px', borderTop: `1px solid ${borderTopColor}`, background: 'rgba(10, 15, 28, 0.65)' }}>
+        <div style={{ padding: '12px', borderTop: `1px solid ${borderTopColor}`, background: 'rgba(10, 15, 28, 0.65)', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          {/* Toolbar inside expanded content */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '6px', borderBottom: '1px solid rgba(148, 163, 184, 0.12)', paddingBottom: '8px' }}>
+            <div className="view-mode-tabs" style={{ display: 'flex', gap: '4px', background: 'rgba(15, 23, 42, 0.7)', padding: '2px 4px', borderRadius: '6px', border: '1px solid var(--border-color)' }}>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setViewMode('formatted');
+                }}
+                title="Formatted View"
+                style={{
+                  padding: '3px 8px',
+                  borderRadius: '4px',
+                  border: 'none',
+                  background: viewMode === 'formatted' ? 'rgba(255, 255, 255, 0.15)' : 'transparent',
+                  color: viewMode === 'formatted' ? '#fff' : 'var(--text-muted)',
+                  fontSize: '0.72rem',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                }}
+              >
+                <Eye size={12} />
+                <span>Formatted</span>
+              </button>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setViewMode('raw_input');
+                }}
+                title="Raw Inputs JSON"
+                style={{
+                  padding: '3px 8px',
+                  borderRadius: '4px',
+                  border: 'none',
+                  background: viewMode === 'raw_input' ? 'rgba(255, 255, 255, 0.15)' : 'transparent',
+                  color: viewMode === 'raw_input' ? '#fff' : 'var(--text-muted)',
+                  fontSize: '0.72rem',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                }}
+              >
+                <Code2 size={12} />
+                <span>Input</span>
+              </button>
+              {resultMessage && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setViewMode('raw_result');
+                  }}
+                  title="Raw Result JSON"
+                  style={{
+                    padding: '3px 8px',
+                    borderRadius: '4px',
+                    border: 'none',
+                    background: viewMode === 'raw_result' ? 'rgba(255, 255, 255, 0.15)' : 'transparent',
+                    color: viewMode === 'raw_result' ? '#fff' : 'var(--text-muted)',
+                    fontSize: '0.72rem',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                  }}
+                >
+                  <Code2 size={12} />
+                  <span>Result</span>
+                </button>
+              )}
+            </div>
+
+            <button
+              type="button"
+              onClick={handleCopy}
+              title={viewMode === 'raw_result' ? 'Copy Raw Result' : 'Copy Raw Input Args'}
+              style={{ background: 'rgba(30, 41, 59, 0.5)', border: '1px solid var(--border-color)', borderRadius: '6px', color: copied ? '#10b981' : 'var(--text-muted)', cursor: 'pointer', padding: '3px 8px', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.72rem', fontWeight: 600 }}
+            >
+              {copied ? <Check size={12} /> : <Copy size={12} />}
+              <span>{copied ? 'Copied' : 'Copy Payload'}</span>
+            </button>
+          </div>
           {viewMode === 'raw_input' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
               <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)' }}>Invocation Parameters:</span>
@@ -764,7 +757,7 @@ export const ToolInvocationCard: React.FC<{
   name: string;
   args: Record<string, any>;
   defaultExpanded?: boolean;
-}> = ({ name, args, defaultExpanded = true }) => (
+}> = ({ name, args, defaultExpanded = false }) => (
   <ToolExecutionCard toolName={name} args={args} defaultExpanded={defaultExpanded} />
 );
 

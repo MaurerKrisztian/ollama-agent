@@ -119,6 +119,14 @@ export interface LspModuleDependencies {
   imported_by: string[];
 }
 
+export interface LspCompletionItem {
+  label: string;
+  kind: string;
+  detail?: string;
+  insertText: string;
+  sortText?: string;
+}
+
 export interface ContextPruningConfig {
   enabled: boolean;
   pruneSupersededReads: boolean;

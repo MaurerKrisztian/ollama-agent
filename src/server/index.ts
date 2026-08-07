@@ -240,6 +240,236 @@ const broadcastChatSessions = () => {
   io.emit('chat:sessions', getChatSessionsState());
 };
 
+// ─── Editor API ──────────────────────────────────────────────────────────────
+
+/** Recursively build a lightweight file-tree for the editor panel. */
+function buildFileTree(
+  dir: string,
+  workingDir: string,
+  depth = 0,
+  maxDepth = 6,
+): Array<{ name: string; path: string; type: 'file' | 'dir'; children?: any[] }> {
+  if (depth > maxDepth) return [];
+  const IGNORE = new Set(['node_modules', 'dist', '.git', '.cache', '__pycache__', '.next', 'coverage', '.nyc_output']);
+  let entries: import('node:fs').Dirent[] = [];
+  try {
+    entries = fsSync.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  const result: any[] = [];
+  for (const entry of entries) {
+    if (entry.name.startsWith('.') && entry.name !== '.agent' && entry.name !== '.env') continue;
+    if (IGNORE.has(entry.name)) continue;
+    const fullPath = path.join(dir, entry.name);
+    const relPath = path.relative(workingDir, fullPath).replaceAll('\\', '/');
+    if (entry.isDirectory()) {
+      result.push({ name: entry.name, path: relPath, type: 'dir', children: buildFileTree(fullPath, workingDir, depth + 1, maxDepth) });
+    } else {
+      result.push({ name: entry.name, path: relPath, type: 'file' });
+    }
+  }
+  // Dirs first, then files — both alphabetically
+  result.sort((a, b) => {
+    if (a.type !== b.type) return a.type === 'dir' ? -1 : 1;
+    return a.name.localeCompare(b.name);
+  });
+  return result;
+}
+
+// GET /api/editor/tree  — file-tree for the current workingDir (or ?dir=subpath)
+app.get('/api/editor/tree', (req, res) => {
+  const workingDir = agent.getConfig().workingDir || process.cwd();
+  const subDir = typeof req.query.dir === 'string' ? req.query.dir : '';
+  const baseDir = subDir ? path.resolve(workingDir, subDir) : workingDir;
+  // Security: refuse traversal outside workingDir
+  if (!baseDir.startsWith(workingDir)) return res.status(403).json({ success: false, error: 'Access denied.' });
+  res.json({ success: true, tree: buildFileTree(baseDir, workingDir), workingDir });
+});
+
+// Helper to safely resolve a relative or absolute file path within workingDir
+function resolveEditorPath(workingDir: string, inputPath: string): { absPath: string; relPath: string } | null {
+  if (!inputPath || typeof inputPath !== 'string') return null;
+  const normWorking = path.resolve(workingDir);
+  let target = inputPath.trim();
+
+  if (target.startsWith(normWorking)) {
+    target = target.slice(normWorking.length);
+  } else if (target.startsWith(normWorking.replace(/^[\/\\]+/, ''))) {
+    target = target.slice(normWorking.replace(/^[\/\\]+/, '').length);
+  }
+
+  target = target.replace(/^(\.\/|\/|\\)+/, '');
+  const absPath = path.resolve(normWorking, target);
+  if (!absPath.startsWith(normWorking)) return null;
+  return { absPath, relPath: target };
+}
+
+// GET /api/editor/file?path=<relative>  — read a file
+app.get('/api/editor/file', async (req, res) => {
+  const workingDir = agent.getConfig().workingDir || process.cwd();
+  const rawPath = typeof req.query.path === 'string' ? req.query.path : '';
+  const resolved = resolveEditorPath(workingDir, rawPath);
+  if (!resolved) return res.status(400).json({ success: false, error: 'Invalid or out-of-bounds path.' });
+
+  try {
+    const content = await fs.readFile(resolved.absPath, 'utf-8');
+    res.json({ success: true, content, path: resolved.relPath });
+  } catch (err: any) {
+    res.status(404).json({ success: false, error: err.message });
+  }
+});
+
+// PUT /api/editor/file  — write a file (snapshots previous content for checkpoint revert)
+app.put('/api/editor/file', async (req, res) => {
+  const workingDir = agent.getConfig().workingDir || process.cwd();
+  const { path: rawPath, content, sessionId: bodySessionId } = req.body ?? {};
+  if (!rawPath || content === undefined) return res.status(400).json({ success: false, error: 'Missing path or content.' });
+  const resolved = resolveEditorPath(workingDir, rawPath);
+  if (!resolved) return res.status(400).json({ success: false, error: 'Invalid or out-of-bounds path.' });
+
+  const { absPath, relPath } = resolved;
+
+  try {
+    // Snapshot for checkpoint before overwriting
+    let before: string | null = null;
+    try { before = await fs.readFile(absPath, 'utf-8'); } catch { before = null; }
+
+    // Ensure parent directory exists
+    await fs.mkdir(path.dirname(absPath), { recursive: true });
+    await fs.writeFile(absPath, content, 'utf-8');
+
+    // Store snapshot in the active session's checkpoint list
+    const activeSessionId = chatSessions.getActiveId();
+    const sid = bodySessionId || activeSessionId;
+    const existing = sessionCheckpoints.get(sid) ?? [];
+    const checkpointId = `editor-save-${Date.now()}`;
+    const newEntry: CheckpointEntry = {
+      promptId: checkpointId,
+      promptText: `[Editor] Saved ${relPath}`,
+      timestamp: Date.now(),
+      snapshots: [{ path: absPath, before }],
+    };
+    existing.push(newEntry);
+    sessionCheckpoints.set(sid, existing);
+    // Notify all clients about the new checkpoint
+    io.emit('checkpoint_saved', {
+      promptId: checkpointId,
+      promptText: newEntry.promptText,
+      timestamp: newEntry.timestamp,
+      snapshotCount: 1,
+      snapshotPaths: [absPath],
+    });
+
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// DELETE /api/editor/file  — delete a file (snapshots for revert)
+app.delete('/api/editor/file', async (req, res) => {
+  const workingDir = agent.getConfig().workingDir || process.cwd();
+  const { path: rawPath } = req.body ?? {};
+  if (!rawPath) return res.status(400).json({ success: false, error: 'Missing path.' });
+  const resolved = resolveEditorPath(workingDir, rawPath);
+  if (!resolved) return res.status(400).json({ success: false, error: 'Invalid or out-of-bounds path.' });
+  const { absPath, relPath } = resolved;
+  try {
+    const stat = await fs.stat(absPath);
+    if (stat.isDirectory()) {
+      await fs.rm(absPath, { recursive: true, force: true });
+    } else {
+      let before: string | null = null;
+      try { before = await fs.readFile(absPath, 'utf-8'); } catch { before = null; }
+      await fs.unlink(absPath);
+      // Snapshot deletion for revert
+      const sid = chatSessions.getActiveId();
+      const existing = sessionCheckpoints.get(sid) ?? [];
+      const checkpointId = `editor-delete-${Date.now()}`;
+      existing.push({ promptId: checkpointId, promptText: `[Editor] Deleted ${relPath}`, timestamp: Date.now(), snapshots: [{ path: absPath, before }] });
+      sessionCheckpoints.set(sid, existing);
+    }
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/editor/mkdir  — create a directory
+app.post('/api/editor/mkdir', async (req, res) => {
+  const workingDir = agent.getConfig().workingDir || process.cwd();
+  const { path: relPath } = req.body ?? {};
+  if (!relPath) return res.status(400).json({ success: false, error: 'Missing path.' });
+  const absPath = path.resolve(workingDir, relPath);
+  if (!absPath.startsWith(workingDir)) return res.status(403).json({ success: false, error: 'Access denied.' });
+  try {
+    await fs.mkdir(absPath, { recursive: true });
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ── LSP proxy routes ──────────────────────────────────────────────────────────
+// All LSP routes reuse the LspManager already living inside the ToolExecutor.
+const getLsp = () => agent.getToolExecutor().getLspManager();
+
+// GET /api/editor/lsp/diagnostics?path=<relative>
+app.get('/api/editor/lsp/diagnostics', (req, res) => {
+  const relPath = typeof req.query.path === 'string' ? req.query.path : undefined;
+  try {
+    const result = getLsp().getDiagnostics(relPath);
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/editor/lsp/hover  — { path, line, character }
+app.post('/api/editor/lsp/hover', (req, res) => {
+  const { path: relPath, line, character } = req.body ?? {};
+  if (!relPath) return res.status(400).json({ success: false, error: 'Missing path.' });
+  try {
+    res.json(getLsp().getHover(relPath, Number(line), Number(character)));
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/editor/lsp/definition  — { path, line, character }
+app.post('/api/editor/lsp/definition', (req, res) => {
+  const { path: relPath, line, character } = req.body ?? {};
+  if (!relPath) return res.status(400).json({ success: false, error: 'Missing path.' });
+  try {
+    res.json(getLsp().getDefinition(relPath, Number(line), Number(character)));
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/editor/lsp/references  — { path, line, character }
+app.post('/api/editor/lsp/references', (req, res) => {
+  const { path: relPath, line, character } = req.body ?? {};
+  if (!relPath) return res.status(400).json({ success: false, error: 'Missing path.' });
+  try {
+    res.json(getLsp().findReferences(relPath, Number(line), Number(character)));
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/editor/lsp/completion  — { path, line, character }
+app.post('/api/editor/lsp/completion', (req, res) => {
+  const { path: relPath, line, character } = req.body ?? {};
+  if (!relPath) return res.status(400).json({ success: false, error: 'Missing path.' });
+  try {
+    res.json(getLsp().getCompletions(relPath, Number(line), Number(character)));
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // GET /api/models - Fetch models from current or specified Ollama host
 app.get('/api/models', async (req, res) => {
   try {

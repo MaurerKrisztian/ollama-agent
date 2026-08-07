@@ -1636,8 +1636,8 @@ export class ToolExecutor {
           let endLine: number;
           if (typeof args.end_line === 'number' && args.end_line >= startLine) {
             endLine = Math.floor(args.end_line);
-          } else if (typeof args.start_line !== 'number' && totalLines > 200) {
-            endLine = 200;
+          } else if (typeof args.start_line !== 'number' && totalLines > 800) {
+            endLine = 800;
             autoTruncated = true;
           } else {
             endLine = totalLines;
@@ -1653,7 +1653,7 @@ export class ToolExecutor {
 
           let headerNote = `Showing lines ${startLine} to ${endLine} of ${totalLines} in ${actualRelativePath}. Please note that any changes targeting original code should remove the line number, colon, and leading space.`;
           if (autoTruncated) {
-            headerNote += `\n[NOTE: File exceeds 200 lines. Showing lines 1–200. Specify start_line and end_line parameters to inspect subsequent line ranges.]`;
+            headerNote += `\n[NOTE: File exceeds 800 lines. Showing lines 1–800. Specify start_line and end_line parameters to inspect subsequent line ranges.]`;
           }
 
           return {
