@@ -41,6 +41,7 @@
     "socket.io-client": "^4.8.3",
     "turndown": "^7.2.4",
     "vite-plugin-monaco-editor": "^1.1.0",
+    "typescript": "^5.5.2",
     "zod": "^3.23.8"
   },
   "devDependencies": {
@@ -55,7 +56,6 @@
     "@vitejs/plugin-react": "^4.3.1",
     "concurrently": "^9.2.4",
     "tsx": "^4.16.2",
-    "typescript": "^5.5.2",
     "vite": "^5.3.1"
   }
 }
