@@ -589,6 +589,9 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
   // Modal State for Test Info
   const [selectedInfoTest, setSelectedInfoTest] = useState<BenchmarkTestCaseInfo | TestResultTrace | null>(null);
   const [hostFrameworkConfigs, setHostFrameworkConfigs] = useState<Record<string, { exists: boolean; path: string }>>({});
+  const [dockerStatus, setDockerStatus] = useState<{ dockerAvailable: boolean; imageAvailable: boolean; imageName: string } | null>(null);
+  const [isRebuildingImage, setIsRebuildingImage] = useState(false);
+  const [imageBuildLog, setImageBuildLog] = useState<string[]>([]);
 
   useEffect(() => {
     void Promise.all([
@@ -601,9 +604,49 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
       fetch('/api/benchmark/frameworks').then((res) => res.json()).then((data) => {
         if (data.hostConfigs) setHostFrameworkConfigs(data.hostConfigs);
       }),
+      fetch('/api/benchmark/docker-status').then((res) => res.json()).then((data) => {
+        if (data.success) setDockerStatus({ dockerAvailable: data.dockerAvailable, imageAvailable: data.imageAvailable, imageName: data.imageName });
+      }),
       loadSavedRuns(),
     ]).catch((err) => console.error('Error initializing benchmark view:', err));
   }, []);
+
+  const handleRebuildImage = async () => {
+    setIsRebuildingImage(true);
+    setImageBuildLog([]);
+    try {
+      const res = await fetch('/api/benchmark/docker-build', { method: 'POST' });
+      if (!res.ok || !res.body) throw new Error(`Server error ${res.status}`);
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const blocks = buffer.split('\n\n');
+        buffer = blocks.pop() ?? '';
+        for (const block of blocks) {
+          const eventMatch = block.match(/^event:\s*(.+)$/m);
+          const dataMatch = block.match(/^data:\s*(.+)$/m);
+          if (!eventMatch || !dataMatch) continue;
+          const eventType = eventMatch[1].trim();
+          const data = JSON.parse(dataMatch[1].trim());
+          if (eventType === 'log') {
+            setImageBuildLog((prev) => [...prev, data.line as string]);
+          } else if (eventType === 'done') {
+            setDockerStatus((prev) => prev ? { ...prev, imageAvailable: true } : prev);
+          } else if (eventType === 'error') {
+            setImageBuildLog((prev) => [...prev, `ERROR: ${data.error as string}`]);
+          }
+        }
+      }
+    } catch (err: any) {
+      setImageBuildLog((prev) => [...prev, `Failed to start build: ${err.message}`]);
+    } finally {
+      setIsRebuildingImage(false);
+    }
+  };
 
   useEffect(() => () => benchmarkAbortController.current?.abort(), []);
 
@@ -1232,6 +1275,47 @@ export const BenchmarkView: React.FC<BenchmarkViewProps> = ({
         {attemptsPerCase === 10 && (
           <div role="alert" style={{ marginTop: '12px', padding: '10px 12px', borderRadius: '8px', border: '1px solid rgba(245, 158, 11, 0.55)', background: 'rgba(245, 158, 11, 0.1)', color: '#fbbf24', fontSize: '0.82rem' }}>
             <strong>Maximum reliability run:</strong> every selected case will run 10 times. This can take significant time and compute.
+          </div>
+        )}
+
+        {dockerStatus !== null && !dockerStatus.dockerAvailable && (
+          <div role="alert" style={{ marginTop: '12px', padding: '10px 14px', borderRadius: '8px', border: '1px solid rgba(239, 68, 68, 0.55)', background: 'rgba(239, 68, 68, 0.08)', color: '#f87171', fontSize: '0.82rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <XCircle size={16} color="#ef4444" style={{ flexShrink: 0 }} />
+            <span><strong>Docker is not available.</strong> The benchmark runner requires Docker to be installed and the daemon to be running. Start Docker and reload this page.</span>
+          </div>
+        )}
+
+        {dockerStatus !== null && dockerStatus.dockerAvailable && (
+          <div role="alert" style={{ marginTop: '12px', padding: '12px 14px', borderRadius: '8px', border: `1px solid ${dockerStatus.imageAvailable ? 'rgba(16, 185, 129, 0.35)' : 'rgba(245, 158, 11, 0.45)'}`, background: dockerStatus.imageAvailable ? 'rgba(16, 185, 129, 0.06)' : 'rgba(245, 158, 11, 0.07)', fontSize: '0.82rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: dockerStatus.imageAvailable ? '#34d399' : '#fbbf24' }}>
+                {isRebuildingImage
+                  ? <Loader2 size={15} className="spin" color="#a78bfa" />
+                  : dockerStatus.imageAvailable
+                    ? <CheckCircle2 size={15} color="#10b981" />
+                    : <Info size={15} color="#f59e0b" />}
+                <span>
+                  {isRebuildingImage
+                    ? <><strong>Building image…</strong> <code style={{ fontSize: '0.8em', color: 'var(--text-muted)' }}>{dockerStatus.imageName}</code></>              
+                    : dockerStatus.imageAvailable
+                      ? <><strong>Image ready</strong> — <code style={{ fontSize: '0.8em', color: 'var(--text-muted)' }}>{dockerStatus.imageName}</code></>              
+                      : <><strong>Image not built yet</strong> — <code style={{ fontSize: '0.8em', color: 'var(--text-muted)' }}>{dockerStatus.imageName}</code>. Will auto-build on first run.</>}
+                </span>
+              </div>
+              <button
+                className="benchmark-secondary-button"
+                disabled={isRebuildingImage}
+                onClick={() => void handleRebuildImage()}
+                style={{ whiteSpace: 'nowrap', flexShrink: 0 }}
+              >
+                {isRebuildingImage ? <><Loader2 size={13} className="spin" /> Building…</> : <><RotateCw size={13} /> {dockerStatus.imageAvailable ? 'Rebuild image' : 'Build image'}</>}
+              </button>
+            </div>
+            {imageBuildLog.length > 0 && (
+              <pre style={{ marginTop: '10px', maxHeight: '160px', overflowY: 'auto', fontSize: '0.72rem', lineHeight: 1.5, background: 'rgba(0,0,0,0.35)', borderRadius: '6px', padding: '8px 10px', color: '#d1d5db', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+                {imageBuildLog.join('\n')}
+              </pre>
+            )}
           </div>
         )}
 

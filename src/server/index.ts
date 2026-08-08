@@ -7,7 +7,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { createServer } from 'node:http';
-import { exec } from 'node:child_process';
+import { exec, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { Server as SocketIOServer } from 'socket.io';
 import { AgentEngine } from '../core/agent.js';
@@ -18,7 +18,7 @@ import type { FileDiff } from '../core/tools/fileTools.js';
 import { BENCHMARK_TEST_CASES } from '../benchmark/cases/index.js';
 import { createBenchmarkSuiteHash } from '../benchmark/cases/benchmarks.js';
 import type { BenchmarkDefinition, BenchmarkTestCase } from '../benchmark/cases/index.js';
-import { runBenchmarkCase, runBenchmarkSuite } from '../benchmark/runtime/runner.js';
+import { runBenchmarkCase, runBenchmarkSuite, BENCHMARK_DOCKER_IMAGE } from '../benchmark/runtime/runner.js';
 import {
   DEFAULT_BENCHMARK_OUTPUT_DIR,
   BENCHMARK_PROJECT_ROOT,
@@ -2269,6 +2269,68 @@ app.get('/api/benchmark/frameworks', (_req, res) => {
     },
   };
   res.json({ success: true, hostConfigs });
+});
+
+// GET /api/benchmark/docker-status - Check Docker daemon and benchmark image availability
+app.get('/api/benchmark/docker-status', async (_req, res) => {
+  const execAsync = promisify(exec);
+  try {
+    await execAsync('docker info', { timeout: 5000 });
+  } catch {
+    res.json({ success: true, dockerAvailable: false, imageAvailable: false, imageName: BENCHMARK_DOCKER_IMAGE });
+    return;
+  }
+  let imageAvailable = false;
+  try {
+    await execAsync(`docker image inspect ${BENCHMARK_DOCKER_IMAGE}`, { timeout: 5000 });
+    imageAvailable = true;
+  } catch {
+    // image not built yet
+  }
+  res.json({ success: true, dockerAvailable: true, imageAvailable, imageName: BENCHMARK_DOCKER_IMAGE });
+});
+
+// POST /api/benchmark/docker-build - Build (or rebuild) the benchmark Docker image, streaming output as SSE
+app.post('/api/benchmark/docker-build', (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+
+  const sendEvent = (type: string, data: Record<string, unknown>) => {
+    res.write(`event: ${type}\ndata: ${JSON.stringify(data)}\n\n`);
+  };
+
+  const child = spawn(
+    'docker',
+    ['build', '--file', 'Dockerfile.benchmark', '--tag', BENCHMARK_DOCKER_IMAGE, '.'],
+    { cwd: BENCHMARK_PROJECT_ROOT },
+  );
+
+  const handleData = (chunk: Buffer) => {
+    const lines = chunk.toString().split('\n');
+    for (const line of lines) {
+      if (line.trim()) sendEvent('log', { line });
+    }
+  };
+
+  child.stdout.on('data', handleData);
+  child.stderr.on('data', handleData);
+
+  child.on('close', (code) => {
+    if (code === 0) {
+      sendEvent('done', { success: true });
+    } else {
+      sendEvent('error', { success: false, error: `docker build exited with code ${code}` });
+    }
+    res.end();
+  });
+
+  child.on('error', (err) => {
+    sendEvent('error', { success: false, error: err.message });
+    res.end();
+  });
+
+  req.on('close', () => child.kill());
 });
 
 app.get('/api/benchmark/definitions', async (_req, res) => {

@@ -20,7 +20,7 @@ import { prepareRepositoryCache } from './repositoryCache.js';
 
 export type { BenchmarkReport, TestResultTrace };
 
-export const BENCHMARK_DOCKER_IMAGE = 'local-model-chat-benchmark:node20';
+export const BENCHMARK_DOCKER_IMAGE = 'ollama-studio-benchmark:node20';
 const execFileAsync = promisify(execFile);
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 let imageBuildPromise: Promise<void> | null = null;
