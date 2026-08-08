@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { User, Bot, ShieldAlert, CheckCircle2, XCircle, Loader2, RotateCcw, FileText, Zap, X, ArrowDown, Plus, Terminal, Sliders } from 'lucide-react';
+import { User, Bot, ShieldAlert, CheckCircle2, XCircle, Loader2, RotateCcw, FileText, Zap, X, ArrowDown, Plus, Terminal, Sliders, FolderOpen, FolderPlus } from 'lucide-react';
 import { ChatMessage, ImageAttachment, BatchReviewFile, PendingApprovalCall, TextAttachment, TerminalSessionInfo } from '../types';
 import { BatchReviewCard } from './chat/BatchReviewCard';
 import { findActiveSkillMention } from '../skillMention';
@@ -27,6 +27,8 @@ export interface ChatWindowProps {
   pendingBatchEdits?: BatchReviewFile[] | null;
   isSubmittingBatchApproval?: boolean;
   supportsVision?: boolean;
+  workingDir?: string;
+  onOpenWorkingDirPicker?: () => void;
   onSendMessage: (msg: string, attachments?: TextAttachment[], imageAttachments?: ImageAttachment[]) => void;
   onCancelGeneration: () => void;
   onApproveToolCall?: () => void;
@@ -68,6 +70,8 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   pendingBatchEdits,
   isSubmittingBatchApproval = false,
   supportsVision,
+  workingDir,
+  onOpenWorkingDirPicker,
   onSendMessage,
   onCancelGeneration,
   onApproveToolCall,
@@ -836,42 +840,106 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                   Ollama Agent Studio Ready
                 </h2>
                 <p style={{ maxWidth: '520px', fontSize: '0.875rem', lineHeight: 1.6, color: 'var(--text-muted)' }}>
-                  Select a quick prompt template below or type custom instructions to inspect files, edit code, run terminal commands, and perform workspace search.
+                  Type custom instructions to inspect files, edit code, run terminal commands, and perform workspace search.
                 </p>
               </div>
 
-              {/* Starter Template Grid */}
-              <div className="quick-prompts-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px', maxWidth: '780px', width: '100%', marginTop: '10px' }}>
-                {QUICK_HELPER_PROMPTS.map((item, idx) => {
-                  const IconComponent = item.icon;
-                  return (
-                    <button
-                      key={idx}
-                      onClick={() => handleSelectHelperPrompt(item.prompt)}
-                      className="glass-panel animate-fade-in"
-                      style={{
-                        padding: '16px',
-                        borderRadius: '12px',
-                        border: '1px solid var(--border-color)',
-                        textAlign: 'left',
-                        cursor: 'pointer',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        gap: '8px',
-                        transition: 'all 0.2s ease',
-                        background: 'rgba(30, 41, 59, 0.4)',
-                      }}
-                    >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--accent-primary)', fontWeight: 600, fontSize: '0.875rem' }}>
-                        <IconComponent size={16} color="var(--accent-primary)" />
-                        <span>{item.label}</span>
+              {/* Working Directory Status Banner */}
+              <div style={{ width: '100%', maxWidth: '640px' }}>
+                {workingDir ? (
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '10px',
+                      padding: '8px 16px',
+                      borderRadius: '10px',
+                      background: 'rgba(30, 41, 59, 0.6)',
+                      border: '1px solid var(--border-color)',
+                      fontSize: '0.825rem',
+                      color: 'var(--text-main)',
+                      flexWrap: 'wrap',
+                    }}
+                  >
+                    <FolderOpen size={16} color="var(--accent-primary)" style={{ flexShrink: 0 }} />
+                    <span style={{ color: 'var(--text-muted)' }}>Workspace:</span>
+                    <span style={{ fontFamily: 'var(--font-code)', fontWeight: 600, color: 'var(--accent-teal)', wordBreak: 'break-all' }}>
+                      {workingDir}
+                    </span>
+                    {onOpenWorkingDirPicker && (
+                      <button
+                        type="button"
+                        onClick={onOpenWorkingDirPicker}
+                        style={{
+                          background: 'rgba(99, 102, 241, 0.15)',
+                          border: '1px solid rgba(99, 102, 241, 0.3)',
+                          borderRadius: '6px',
+                          color: 'var(--accent-primary)',
+                          padding: '3px 10px',
+                          fontSize: '0.75rem',
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                          marginLeft: '4px',
+                          transition: 'all 0.15s ease',
+                        }}
+                        title="Change Working Directory"
+                      >
+                        Change
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: '14px',
+                      padding: '12px 18px',
+                      borderRadius: '12px',
+                      background: 'rgba(239, 68, 68, 0.08)',
+                      border: '1px solid rgba(239, 68, 68, 0.25)',
+                      textAlign: 'left',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <FolderPlus size={20} color="#f87171" style={{ flexShrink: 0 }} />
+                      <div>
+                        <div style={{ fontSize: '0.85rem', fontWeight: 600, color: '#fca5a5' }}>
+                          No Working Directory Selected
+                        </div>
+                        <div style={{ fontSize: '0.775rem', color: 'var(--text-muted)' }}>
+                          Set a workspace folder to enable workspace file editing and project inspection.
+                        </div>
                       </div>
-                      <span style={{ fontSize: '0.775rem', color: 'var(--text-muted)', lineHeight: 1.4 }}>
-                        "{item.prompt}"
-                      </span>
-                    </button>
-                  );
-                })}
+                    </div>
+                    {onOpenWorkingDirPicker && (
+                      <button
+                        type="button"
+                        onClick={onOpenWorkingDirPicker}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          padding: '7px 14px',
+                          borderRadius: '8px',
+                          border: 'none',
+                          background: 'linear-gradient(135deg, #ef4444, #dc2626)',
+                          color: '#fff',
+                          fontSize: '0.8rem',
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                          whiteSpace: 'nowrap',
+                          boxShadow: '0 4px 12px rgba(239, 68, 68, 0.25)',
+                        }}
+                      >
+                        <FolderPlus size={14} />
+                        <span>Set Working Dir</span>
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           )}

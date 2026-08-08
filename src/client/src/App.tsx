@@ -1365,6 +1365,8 @@ export const App: React.FC = () => {
             pendingBatchEdits={batchReview}
             isSubmittingBatchApproval={isSubmittingBatchReview}
             supportsVision={supportsVision}
+            workingDir={config.workingDir}
+            onOpenWorkingDirPicker={() => setDirectoryPickerOpen(true)}
             onSendMessage={handleSendMessage}
             onCancelGeneration={handleCancelGeneration}
             onApproveToolCall={handleApproveToolCall}
@@ -1476,6 +1478,8 @@ export const App: React.FC = () => {
                   isSubmittingBatchApproval={isSubmittingBatchReview}
                   supportsVision={supportsVision}
                   isCompact={editorChatWidth < 450}
+                  workingDir={config.workingDir}
+                  onOpenWorkingDirPicker={() => setDirectoryPickerOpen(true)}
                   onSendMessage={handleSendMessage}
                   onCancelGeneration={handleCancelGeneration}
                   onApproveToolCall={handleApproveToolCall}

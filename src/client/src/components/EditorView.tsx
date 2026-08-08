@@ -303,7 +303,7 @@ export const EditorView: React.FC<EditorViewProps> = ({ config, lastAiEditEvent,
 
   // ── Open file ──────────────────────────────────────────────────────────────
   const openFile = useCallback(async (relPath: string) => {
-    // If already open, just switch
+    // Quick check using current snapshot — avoids unnecessary fetch
     if (tabs.some((t) => t.path === relPath)) {
       setActiveTabPath(relPath);
       return;
@@ -321,7 +321,11 @@ export const EditorView: React.FC<EditorViewProps> = ({ config, lastAiEditEvent,
       const content: string = data.content ?? '';
       setFileContents((prev) => ({ ...prev, [relPath]: { original: content, current: content } }));
       const name = relPath.split('/').pop() ?? relPath;
-      setTabs((prev) => [...prev, { path: relPath, name, dirty: false }]);
+      // Guard inside updater to handle concurrent calls with stale closure
+      setTabs((prev) => {
+        if (prev.some((t) => t.path === relPath)) return prev;
+        return [...prev, { path: relPath, name, dirty: false }];
+      });
       setActiveTabPath(relPath);
     } catch (e: any) {
       if (e.message && (e.message.includes('EISDIR') || e.message.includes('illegal operation on a directory'))) {
