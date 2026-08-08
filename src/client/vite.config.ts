@@ -4,10 +4,12 @@ import monacoEditorPlugin from 'vite-plugin-monaco-editor';
 
 const targetPort = process.env.PORT || '3012';
 
+const monacoPlugin = typeof monacoEditorPlugin === 'function' ? monacoEditorPlugin : (monacoEditorPlugin as any).default;
+
 export default defineConfig({
   plugins: [
     react(),
-    monacoEditorPlugin({
+    monacoPlugin({
       // Bundle only the workers we actually use — keeps the bundle small
       languageWorkers: ['editorWorkerService', 'typescript', 'json'],
     }),
