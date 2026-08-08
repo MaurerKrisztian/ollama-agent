@@ -16,6 +16,7 @@ import {
   Brain,
   Square,
   SlidersHorizontal,
+  Settings,
 } from 'lucide-react';
 import { AgentConfig, ContextInfo, OllamaModelInfo, OllamaRunningModelInfo, SystemMetrics, ollamaModelNamesMatch } from '../types';
 
@@ -599,68 +600,78 @@ export const Header: React.FC<HeaderProps> = ({
           </button>
         )}
 
-        {onOpenTerminalSessions && (
-          <button
-            onClick={onOpenTerminalSessions}
-            title="Manage Long-Running Terminal Sessions"
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              background: activeTerminalCount > 0 ? 'rgba(16, 185, 129, 0.15)' : 'rgba(15, 23, 42, 0.8)',
-              border: `1px solid ${activeTerminalCount > 0 ? 'rgba(16, 185, 129, 0.4)' : 'var(--border-color)'}`,
-              color: activeTerminalCount > 0 ? '#10b981' : 'var(--text-main)',
-              padding: '6px 12px',
-              borderRadius: '8px',
-              fontSize: '0.825rem',
-              fontWeight: 600,
-              cursor: 'pointer',
-            }}
-          >
-            <Terminal size={15} color={activeTerminalCount > 0 ? '#10b981' : 'var(--text-muted)'} />
-            <span className="header-btn-text">Terminal ({activeTerminalCount})</span>
-          </button>
-        )}
+
 
         <button
           onClick={onToggleSidebar}
-          title={isCompacting ? 'Compacting context into structured state package with Ollama...' : 'Toggle Context Inspector'}
+          title={isCompacting ? 'Compacting context into structured state package with Ollama...' : `Toggle Context Inspector (${contextInfo ? contextInfo.estimatedTokens.toLocaleString() : 0} tokens)`}
           style={{
             display: 'flex',
             alignItems: 'center',
-            gap: '8px',
+            gap: '6px',
             background: isCompacting
               ? 'rgba(245, 158, 11, 0.15)'
               : sidebarOpen
-                ? 'rgba(99, 102, 241, 0.2)'
+                ? 'rgba(99, 102, 241, 0.18)'
                 : 'rgba(15, 23, 42, 0.8)',
-            border: `1px solid ${isCompacting ? 'rgba(245, 158, 11, 0.4)' : sidebarOpen ? 'var(--accent-primary)' : 'var(--border-color)'}`,
-            color: isCompacting ? 'var(--accent-amber)' : 'var(--text-main)',
-            padding: '6px 12px',
+            border: `1px solid ${
+              isCompacting
+                ? 'rgba(245, 158, 11, 0.4)'
+                : sidebarOpen
+                  ? 'var(--accent-primary)'
+                  : 'var(--border-color)'
+            }`,
+            color: isCompacting
+              ? 'var(--accent-amber)'
+              : sidebarOpen
+                ? 'var(--accent-primary)'
+                : 'var(--text-main)',
+            padding: '5px 10px',
             borderRadius: '8px',
-            fontSize: '0.825rem',
-            fontWeight: 500,
+            fontSize: '0.8rem',
+            fontWeight: 600,
             cursor: 'pointer',
             transition: 'all 0.15s ease',
+            fontFamily: 'var(--font-code, monospace)',
+            fontVariantNumeric: 'tabular-nums',
+            boxShadow: sidebarOpen ? '0 0 12px rgba(99, 102, 241, 0.25)' : 'none',
           }}
         >
           {isCompacting ? (
             <>
-              <Loader2 size={16} className="spin" color="var(--accent-amber)" />
-              <span style={{ fontSize: '0.825rem', fontWeight: 600, color: 'var(--accent-amber)' }}>Compacting…</span>
-              <span style={{ fontSize: '0.75rem', fontWeight: 600, background: 'rgba(245, 158, 11, 0.15)', color: 'var(--accent-amber)', padding: '2px 8px', borderRadius: '12px', border: '1px solid rgba(245, 158, 11, 0.3)' }}>
-                ⚡ Summarizing State
+              <Loader2 size={14} className="spin" color="var(--accent-amber)" />
+              <span style={{ fontSize: '0.775rem', fontWeight: 600, color: 'var(--accent-amber)' }}>
+                Compacting…
               </span>
             </>
           ) : (
             <>
-              <Sidebar size={16} color={sidebarOpen ? 'var(--accent-primary)' : 'var(--text-muted)'} />
-              <span style={{ fontSize: '0.825rem', fontWeight: 600, color: sidebarOpen ? 'var(--accent-primary)' : 'var(--text-main)' }}>Context Inspector</span>
-              <span style={{ fontSize: '0.75rem', fontWeight: 600, background: 'rgba(99, 102, 241, 0.15)', color: 'var(--accent-primary)', padding: '2px 8px', borderRadius: '12px', border: '1px solid rgba(99, 102, 241, 0.3)', fontVariantNumeric: 'tabular-nums', fontFamily: 'var(--font-code, monospace)', display: 'inline-block', textAlign: 'center', minWidth: '90px' }}>
-                {contextInfo ? `${contextInfo.estimatedTokens.toLocaleString()} tokens` : '0 tokens'}
-              </span>
+              <Sidebar size={14} color={sidebarOpen ? 'var(--accent-primary)' : 'var(--text-muted)'} />
+              <span>{contextInfo ? `${contextInfo.estimatedTokens.toLocaleString()} tokens` : '0 tokens'}</span>
             </>
           )}
+        </button>
+
+        <button
+          onClick={onOpenToolSettings}
+          title="Open Settings (Tool Approvals, Safety, Working Directory & Model Config)"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            background: 'rgba(15, 23, 42, 0.8)',
+            border: '1px solid var(--border-color)',
+            color: 'var(--text-main)',
+            padding: '6px 12px',
+            borderRadius: '8px',
+            fontSize: '0.825rem',
+            fontWeight: 600,
+            cursor: 'pointer',
+            transition: 'all 0.15s ease',
+          }}
+        >
+          <Settings size={16} color="var(--accent-primary)" />
+          <span className="header-btn-text">Settings</span>
         </button>
       </div>
     </header>

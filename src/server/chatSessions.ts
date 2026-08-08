@@ -12,9 +12,13 @@ export interface ChatSession {
 
 export type ChatSessionSummary = Omit<ChatSession, 'messages'> & { messageCount: number };
 
-interface PersistedChatSessions {
+interface PersistedIndex {
   activeSessionId: string;
-  sessions: ChatSession[];
+}
+
+interface LegacyPersistedChatSessions {
+  activeSessionId?: string;
+  sessions?: ChatSession[];
 }
 
 const defaultTitle = 'New chat';
@@ -34,15 +38,40 @@ function titleFromMessages(messages: ChatMessage[]): string {
   return cleanTitle(firstUserMessage?.displayContent || firstUserMessage?.content);
 }
 
-export class ChatSessionStore {
-  private activeSessionId: string;
-  private sessions: ChatSession[];
+function atomicWriteJson(filePath: string, data: any): void {
+  const dir = path.dirname(filePath);
+  fs.mkdirSync(dir, { recursive: true });
+  const temporaryPath = `${filePath}.tmp_${Math.random().toString(36).slice(2, 7)}`;
+  fs.writeFileSync(temporaryPath, JSON.stringify(data, null, 2), 'utf8');
+  fs.renameSync(temporaryPath, filePath);
+}
 
-  constructor(private readonly filePath: string) {
+export class ChatSessionStore {
+  private readonly storageDir: string;
+  private readonly legacyFilePath?: string;
+  private activeSessionId: string = '';
+  private sessions: ChatSession[] = [];
+
+  constructor(targetPath: string, legacyFilePath?: string) {
+    if (targetPath.endsWith('.json') && !this.isDirectory(targetPath)) {
+      this.storageDir = targetPath.slice(0, -5);
+      this.legacyFilePath = legacyFilePath || targetPath;
+    } else {
+      this.storageDir = targetPath;
+      this.legacyFilePath = legacyFilePath;
+    }
+
     const loaded = this.load();
     this.sessions = loaded.sessions;
     this.activeSessionId = loaded.activeSessionId;
-    this.persist();
+  }
+
+  private isDirectory(p: string): boolean {
+    try {
+      return fs.existsSync(p) && fs.statSync(p).isDirectory();
+    } catch (_) {
+      return false;
+    }
   }
 
   public list(): ChatSessionSummary[] {
@@ -69,8 +98,12 @@ export class ChatSessionStore {
       messages: [],
     };
     this.sessions.push(session);
-    if (makeActive) this.activeSessionId = session.id;
-    this.persist();
+    this.persistSessionFile(session);
+
+    if (makeActive) {
+      this.activeSessionId = session.id;
+      this.persistIndex();
+    }
     return session;
   }
 
@@ -78,7 +111,7 @@ export class ChatSessionStore {
     const session = this.get(id);
     if (!session) return undefined;
     this.activeSessionId = id;
-    this.persist();
+    this.persistIndex();
     return session;
   }
 
@@ -98,7 +131,7 @@ export class ChatSessionStore {
     if (session.title === defaultTitle && messages.some((message) => message.role === 'user')) {
       session.title = titleFromMessages(messages);
     }
-    this.persist();
+    this.persistSessionFile(session);
     return session;
   }
 
@@ -107,21 +140,25 @@ export class ChatSessionStore {
     if (!session) return undefined;
     session.title = cleanTitle(title);
     session.updatedAt = Date.now();
-    this.persist();
+    this.persistSessionFile(session);
     return session;
   }
 
   public delete(id: string): ChatSession | undefined {
     const index = this.sessions.findIndex((session) => session.id === id);
     if (index === -1) return undefined;
-    this.sessions.splice(index, 1);
+
+    const [deleted] = this.sessions.splice(index, 1);
+    this.deleteSessionFile(deleted.id);
+
     if (this.sessions.length === 0) {
       return this.create();
     }
+
     if (this.activeSessionId === id) {
       this.activeSessionId = [...this.sessions].sort((a, b) => b.updatedAt - a.updatedAt)[0].id;
+      this.persistIndex();
     }
-    this.persist();
     return this.getActive();
   }
 
@@ -129,42 +166,109 @@ export class ChatSessionStore {
     return this.sessions.find((session) => session.id === id);
   }
 
-  private load(): PersistedChatSessions {
+  private load(): { sessions: ChatSession[]; activeSessionId: string } {
+    fs.mkdirSync(this.storageDir, { recursive: true });
+
+    // Migrate from legacy single-file store if present
+    this.migrateLegacyIfNeeded();
+
+    let activeSessionId = '';
+    const indexPath = path.join(this.storageDir, 'index.json');
     try {
-      const parsed = JSON.parse(fs.readFileSync(this.filePath, 'utf8')) as Partial<PersistedChatSessions>;
-      const sessions = Array.isArray(parsed.sessions)
-        ? parsed.sessions.filter((session): session is ChatSession => Boolean(
-            session && typeof session.id === 'string' && typeof session.title === 'string' &&
-            typeof session.createdAt === 'number' && typeof session.updatedAt === 'number' &&
-            Array.isArray(session.messages)
-          ))
-        : [];
-      if (sessions.length > 0) {
-        const activeSessionId = sessions.some((session) => session.id === parsed.activeSessionId)
-          ? parsed.activeSessionId!
-          : sessions[0].id;
-        return { sessions, activeSessionId };
+      if (fs.existsSync(indexPath)) {
+        const indexData = JSON.parse(fs.readFileSync(indexPath, 'utf8')) as PersistedIndex;
+        if (typeof indexData.activeSessionId === 'string') {
+          activeSessionId = indexData.activeSessionId;
+        }
       }
     } catch (_) {}
 
+    const sessions: ChatSession[] = [];
+    try {
+      const files = fs.readdirSync(this.storageDir);
+      for (const file of files) {
+        if (!file.endsWith('.json') || file === 'index.json') continue;
+        const filePath = path.join(this.storageDir, file);
+        try {
+          const raw = fs.readFileSync(filePath, 'utf8');
+          const session = JSON.parse(raw) as ChatSession;
+          if (
+            session &&
+            typeof session.id === 'string' &&
+            typeof session.title === 'string' &&
+            typeof session.createdAt === 'number' &&
+            typeof session.updatedAt === 'number' &&
+            Array.isArray(session.messages)
+          ) {
+            sessions.push(session);
+          }
+        } catch (_) {}
+      }
+    } catch (_) {}
+
+    if (sessions.length > 0) {
+      const validActiveId = sessions.some((s) => s.id === activeSessionId)
+        ? activeSessionId
+        : sessions.sort((a, b) => b.updatedAt - a.updatedAt)[0].id;
+      this.activeSessionId = validActiveId;
+      this.persistIndex();
+      return { sessions, activeSessionId: validActiveId };
+    }
+
+    // Default session creation if folder is empty
     const now = Date.now();
-    const session: ChatSession = {
+    const defaultSession: ChatSession = {
       id: newId(),
       title: defaultTitle,
       createdAt: now,
       updatedAt: now,
       messages: [],
     };
-    return { activeSessionId: session.id, sessions: [session] };
+    this.persistSessionFile(defaultSession);
+    this.activeSessionId = defaultSession.id;
+    this.persistIndex();
+    return { sessions: [defaultSession], activeSessionId: defaultSession.id };
   }
 
-  private persist(): void {
-    fs.mkdirSync(path.dirname(this.filePath), { recursive: true });
-    const temporaryPath = `${this.filePath}.tmp`;
-    fs.writeFileSync(temporaryPath, JSON.stringify({
-      activeSessionId: this.activeSessionId,
-      sessions: this.sessions,
-    }, null, 2), 'utf8');
-    fs.renameSync(temporaryPath, this.filePath);
+  private migrateLegacyIfNeeded(): void {
+    if (!this.legacyFilePath || !fs.existsSync(this.legacyFilePath) || this.isDirectory(this.legacyFilePath)) {
+      return;
+    }
+
+    try {
+      const raw = fs.readFileSync(this.legacyFilePath, 'utf8');
+      const parsed = JSON.parse(raw) as LegacyPersistedChatSessions;
+      if (Array.isArray(parsed.sessions) && parsed.sessions.length > 0) {
+        for (const session of parsed.sessions) {
+          if (session && typeof session.id === 'string' && Array.isArray(session.messages)) {
+            this.persistSessionFile(session);
+          }
+        }
+        if (parsed.activeSessionId) {
+          atomicWriteJson(path.join(this.storageDir, 'index.json'), { activeSessionId: parsed.activeSessionId });
+        }
+      }
+      // Backup migrated file
+      fs.renameSync(this.legacyFilePath, `${this.legacyFilePath}.migrated`);
+    } catch (_) {}
+  }
+
+  private persistSessionFile(session: ChatSession): void {
+    const filePath = path.join(this.storageDir, `${session.id}.json`);
+    atomicWriteJson(filePath, session);
+  }
+
+  private deleteSessionFile(id: string): void {
+    const filePath = path.join(this.storageDir, `${id}.json`);
+    try {
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+      }
+    } catch (_) {}
+  }
+
+  private persistIndex(): void {
+    const indexPath = path.join(this.storageDir, 'index.json');
+    atomicWriteJson(indexPath, { activeSessionId: this.activeSessionId });
   }
 }

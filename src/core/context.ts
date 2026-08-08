@@ -89,7 +89,6 @@ export class ContextManager {
     };
 
     this.messages = [compactMessage, ...recentMessages];
-    this.lastActualPromptTokens = undefined;
     return compactMessage;
   }
 
@@ -278,7 +277,6 @@ export class ContextManager {
 
   public setMessages(messages: ChatMessage[]): void {
     this.messages = messages;
-    this.lastActualPromptTokens = undefined;
     if (this.pruningConfig.enabled) {
       this.applyPruning();
     }
@@ -542,7 +540,7 @@ export class ContextManager {
     const converted = this.getConvertedContext();
     const rawJson = this.getRawJson();
     const charCount = converted.length;
-    const estimatedTokens = this.lastActualPromptTokens ?? Math.ceil(charCount / 3.3);
+    const estimatedTokens = this.lastActualPromptTokens ?? 0;
 
     return {
       totalMessages: this.messages.length,

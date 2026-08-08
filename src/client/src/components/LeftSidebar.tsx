@@ -5,8 +5,6 @@ import {
   MessageSquare,
   Zap,
   FolderOpen,
-  Wrench,
-  Server,
   SlidersHorizontal,
   Info,
   Bot,
@@ -567,14 +565,17 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
           </button>
         </div>
 
-        {/* Model & Agent Settings */}
-        <div>
-          <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: '8px' }}>
-            Agent Settings & Inspection
-          </span>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+        {/* Active Terminal Sessions (if available) */}
+        {onOpenTerminalSessions && (
+          <div>
+            <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: '8px' }}>
+              Active Environment
+            </span>
             <button
-              onClick={onOpenToolSettings}
+              onClick={() => {
+                onOpenTerminalSessions();
+                onClose();
+              }}
               style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -587,97 +588,14 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
                 fontSize: '0.825rem',
                 cursor: 'pointer',
                 textAlign: 'left',
+                width: '100%',
               }}
             >
-              <Wrench size={15} color="var(--accent-primary)" />
-              <span>Tool Approval & Safety Settings</span>
-            </button>
-
-            {onTogglePlanMode && (
-              <button
-                onClick={() => onTogglePlanMode(!config.planMode)}
-                title={config.planMode ? 'Plan Mode is ACTIVE: Research & generate plan before editing code' : 'Enable Plan Mode: Read-only research & plan review before edits'}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  padding: '9px 12px',
-                  borderRadius: '8px',
-                  border: config.planMode ? '1px solid rgba(59, 130, 246, 0.5)' : '1px solid var(--border-color)',
-                  background: config.planMode ? 'rgba(59, 130, 246, 0.15)' : 'rgba(30, 41, 59, 0.4)',
-                  color: config.planMode ? '#60a5fa' : 'var(--text-main)',
-                  fontSize: '0.825rem',
-                  cursor: 'pointer',
-                  textAlign: 'left',
-                  fontWeight: 600,
-                  transition: 'all 0.15s ease',
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  <span style={{ fontSize: '14px' }}>📋</span>
-                  <span>Plan Mode</span>
-                </div>
-                <span
-                  style={{
-                    fontSize: '0.7rem',
-                    padding: '2px 6px',
-                    borderRadius: '4px',
-                    background: config.planMode ? 'rgba(59, 130, 246, 0.25)' : 'rgba(255, 255, 255, 0.05)',
-                    color: config.planMode ? '#93c5fd' : 'var(--text-muted)',
-                    fontWeight: 700,
-                  }}
-                >
-                  {config.planMode ? 'ON' : 'OFF'}
-                </span>
-              </button>
-            )}
-
-            {onOpenTerminalSessions && (
-              <button
-                onClick={() => {
-                  onOpenTerminalSessions();
-                  onClose();
-                }}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '10px',
-                  padding: '9px 12px',
-                  borderRadius: '8px',
-                  border: '1px solid var(--border-color)',
-                  background: 'rgba(30, 41, 59, 0.4)',
-                  color: 'var(--text-main)',
-                  fontSize: '0.825rem',
-                  cursor: 'pointer',
-                  textAlign: 'left',
-                }}
-              >
-                <Terminal size={15} color="#10b981" />
-                <span>Active Terminal Sessions ({activeTerminalCount})</span>
-              </button>
-            )}
-
-            <button
-              onClick={onOpenConnectionSettings}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '10px',
-                padding: '9px 12px',
-                borderRadius: '8px',
-                border: '1px solid var(--border-color)',
-                background: 'rgba(30, 41, 59, 0.4)',
-                color: 'var(--text-main)',
-                fontSize: '0.825rem',
-                cursor: 'pointer',
-                textAlign: 'left',
-              }}
-            >
-              <Server size={15} color="var(--accent-teal)" />
-              <span>Ollama Host & API Connection</span>
+              <Terminal size={15} color="#10b981" />
+              <span>Active Terminal Sessions ({activeTerminalCount})</span>
             </button>
           </div>
-        </div>
+        )}
 
 
 

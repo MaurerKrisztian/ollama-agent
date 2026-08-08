@@ -1,6 +1,6 @@
 import React from 'react';
-import { X, ShieldAlert, Terminal, Edit3, Wrench, Check, RefreshCw, Cpu, RotateCcw, Info, Brain } from 'lucide-react';
-import { ToolSettings, ToolComplexityProfile } from '../types';
+import { X, ShieldAlert, Terminal, Edit3, Wrench, Check, RefreshCw, Cpu, RotateCcw, Info, Brain, FolderOpen, Settings, SlidersHorizontal, Server, Scissors } from 'lucide-react';
+import { ToolSettings, ToolComplexityProfile, AgentConfig, ContextPruningConfig } from '../types';
 import { JsonEditor } from './JsonEditor';
 import { ToolTogglePanel } from './ToolTogglePanel';
 import { DEFAULT_COMMAND_WHITELIST } from '../../../core/commandWhitelist.js';
@@ -257,6 +257,12 @@ interface ToolSettingsModalProps {
   onClose: () => void;
   settings: ToolSettings;
   onUpdateSettings: (newSettings: ToolSettings) => void;
+  config?: AgentConfig;
+  onOpenWorkingDirPicker?: () => void;
+  onToggleWorkingDirInfo?: (enabled: boolean) => void;
+  onOpenConnectionSettings?: () => void;
+  onOpenModelSettings?: () => void;
+  onOpenSystemPrompt?: () => void;
 }
 
 export const ToolSettingsModal: React.FC<ToolSettingsModalProps> = ({
@@ -264,9 +270,55 @@ export const ToolSettingsModal: React.FC<ToolSettingsModalProps> = ({
   onClose,
   settings,
   onUpdateSettings,
+  config,
+  onOpenWorkingDirPicker,
+  onToggleWorkingDirInfo,
+  onOpenConnectionSettings,
+  onOpenModelSettings,
+  onOpenSystemPrompt,
 }) => {
+  const [activeTab, setActiveTab] = React.useState<'safety' | 'tools' | 'mcp' | 'workspace' | 'model' | 'pruning'>('safety');
   const [newCmdInput, setNewCmdInput] = React.useState('');
   const [infoTool, setInfoTool] = React.useState<string | null>(null);
+
+  const [pruningConfig, setPruningConfig] = React.useState<ContextPruningConfig | null>(null);
+  const [pruningLoading, setPruningLoading] = React.useState(false);
+
+  const fetchPruningConfig = React.useCallback(async () => {
+    setPruningLoading(true);
+    try {
+      const res = await fetch('/api/context/pruning');
+      const data = await res.json();
+      if (data.success && data.pruningConfig) {
+        setPruningConfig(data.pruningConfig);
+      }
+    } catch (_) {
+    } finally {
+      setPruningLoading(false);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    if (isOpen) void fetchPruningConfig();
+  }, [isOpen, fetchPruningConfig]);
+
+  const handleUpdatePruning = async (updates: Partial<ContextPruningConfig>) => {
+    if (!pruningConfig) return;
+    const newConfig = { ...pruningConfig, ...updates };
+    setPruningConfig(newConfig);
+
+    try {
+      const res = await fetch('/api/context/pruning', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updates),
+      });
+      const data = await res.json();
+      if (data.success && data.pruningConfig) {
+        setPruningConfig(data.pruningConfig);
+      }
+    } catch (_) {}
+  };
 
   if (!isOpen) return null;
 
@@ -329,7 +381,9 @@ export const ToolSettingsModal: React.FC<ToolSettingsModalProps> = ({
         className="glass-panel animate-fade-in tool-settings-modal"
         style={{
           width: '100%',
-          maxWidth: '560px',
+          maxWidth: '900px',
+          height: '78vh',
+          maxHeight: '720px',
           borderRadius: '16px',
           overflow: 'hidden',
           display: 'flex',
@@ -351,9 +405,9 @@ export const ToolSettingsModal: React.FC<ToolSettingsModalProps> = ({
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <Wrench size={20} color="var(--accent-primary)" />
+            <Settings size={20} color="var(--accent-primary)" />
             <h3 style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--text-main)', margin: 0 }}>
-              Tool Approval & Safety Settings
+              Application & Safety Settings
             </h3>
           </div>
           <button
@@ -364,8 +418,394 @@ export const ToolSettingsModal: React.FC<ToolSettingsModalProps> = ({
           </button>
         </div>
 
-        {/* Modal Body */}
-        <div className="tool-settings-body" style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '20px', maxHeight: '75vh', overflowY: 'auto' }}>
+        {/* Modal Main Area: Vertical Nav + Content */}
+        <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
+          {/* Vertical Left Navigation */}
+          <div
+            className="tool-settings-nav"
+            style={{
+              width: '210px',
+              flexShrink: 0,
+              background: 'rgba(30, 41, 59, 0.4)',
+              borderRight: '1px solid var(--border-color)',
+              padding: '16px 10px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '6px',
+              overflowY: 'auto',
+            }}
+          >
+            {[
+              { id: 'safety', label: 'Safety & Approvals', icon: <ShieldAlert size={16} /> },
+              { id: 'tools', label: 'Tools & Capabilities', icon: <Wrench size={16} /> },
+              { id: 'mcp', label: 'MCP Servers', icon: <Server size={16} /> },
+              { id: 'workspace', label: 'Workspace', icon: <FolderOpen size={16} /> },
+              { id: 'model', label: 'Model & Ollama', icon: <Cpu size={16} /> },
+              { id: 'pruning', label: 'Context Pruning', icon: <Scissors size={16} /> },
+            ].map((tab) => {
+              const isActive = activeTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setActiveTab(tab.id as any)}
+                  style={{
+                    width: '100%',
+                    padding: '10px 12px',
+                    borderRadius: '8px',
+                    border: 'none',
+                    background: isActive ? 'rgba(59, 130, 246, 0.18)' : 'transparent',
+                    borderLeft: isActive ? '3px solid #60a5fa' : '3px solid transparent',
+                    color: isActive ? '#60a5fa' : 'var(--text-muted)',
+                    fontWeight: 600,
+                    fontSize: '0.83rem',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '10px',
+                    textAlign: 'left',
+                    transition: 'all 0.15s ease',
+                  }}
+                >
+                  {tab.icon}
+                  <span>{tab.label}</span>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Modal Body */}
+          <div className="tool-settings-body" style={{ flex: 1, minHeight: 0, padding: '24px', display: 'flex', flexDirection: 'column', gap: '20px', overflowY: 'auto' }}>
+          {activeTab === 'workspace' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <div className="tool-settings-section" style={{ background: 'rgba(15, 23, 42, 0.6)', padding: '16px', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                  <FolderOpen size={18} color="var(--accent-primary)" />
+                  <span style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--text-main)' }}>
+                    Active Workspace Directory
+                  </span>
+                </div>
+                <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', lineHeight: 1.5, marginBottom: '12px' }}>
+                  The root directory where the AI agent inspects files, executes command tools, and performs code edits.
+                </p>
+                <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                  <div
+                    style={{
+                      flex: 1,
+                      padding: '8px 12px',
+                      borderRadius: '8px',
+                      background: 'rgba(30, 41, 59, 0.6)',
+                      border: '1px solid var(--border-color)',
+                      fontFamily: 'var(--font-code)',
+                      fontSize: '0.82rem',
+                      color: '#93c5fd',
+                      wordBreak: 'break-all',
+                    }}
+                  >
+                    {config?.workingDir || 'Default (Process CWD)'}
+                  </div>
+                  {onOpenWorkingDirPicker && (
+                    <button
+                      type="button"
+                      onClick={onOpenWorkingDirPicker}
+                      style={{
+                        padding: '8px 14px',
+                        borderRadius: '8px',
+                        border: '1px solid var(--accent-primary)',
+                        background: 'rgba(99, 102, 241, 0.15)',
+                        color: 'var(--accent-primary)',
+                        fontSize: '0.825rem',
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      Change Directory...
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {onToggleWorkingDirInfo && (
+                <div className="tool-settings-section" style={{ background: 'rgba(15, 23, 42, 0.6)', padding: '16px', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={Boolean(config?.showWorkingDirInfo)}
+                      onChange={(e) => onToggleWorkingDirInfo(e.target.checked)}
+                      style={{ width: '18px', height: '18px', cursor: 'pointer' }}
+                    />
+                    <div>
+                      <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-main)' }}>
+                        Include Working Directory Info in prompt responses
+                      </div>
+                      <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', margin: '2px 0 0 0' }}>
+                        Automatically inject project root file lists and package metadata into the agent context.
+                      </p>
+                    </div>
+                  </label>
+                </div>
+              )}
+            </div>
+          )}
+
+          {activeTab === 'model' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <div className="tool-settings-section" style={{ background: 'rgba(15, 23, 42, 0.6)', padding: '16px', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <SlidersHorizontal size={18} color="var(--accent-amber)" />
+                    <span style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--text-main)' }}>
+                      System Prompt &amp; Core Rules
+                    </span>
+                  </div>
+                  {onOpenSystemPrompt && (
+                    <button
+                      type="button"
+                      onClick={onOpenSystemPrompt}
+                      style={{
+                        padding: '6px 12px',
+                        borderRadius: '6px',
+                        border: '1px solid rgba(245, 158, 11, 0.4)',
+                        background: 'rgba(245, 158, 11, 0.15)',
+                        color: 'var(--accent-amber)',
+                        fontSize: '0.78rem',
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      Edit System Prompt...
+                    </button>
+                  )}
+                </div>
+                <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', lineHeight: 1.5, margin: 0 }}>
+                  Define instructions, identity, and system constraints enforced across agent execution loops.
+                </p>
+              </div>
+
+              <div className="tool-settings-section" style={{ background: 'rgba(15, 23, 42, 0.6)', padding: '16px', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <Server size={18} color="var(--accent-primary)" />
+                    <span style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--text-main)' }}>
+                      Ollama Host Connection
+                    </span>
+                  </div>
+                  {onOpenConnectionSettings && (
+                    <button
+                      type="button"
+                      onClick={onOpenConnectionSettings}
+                      style={{
+                        padding: '6px 12px',
+                        borderRadius: '6px',
+                        border: '1px solid var(--accent-primary)',
+                        background: 'rgba(99, 102, 241, 0.15)',
+                        color: 'var(--accent-primary)',
+                        fontSize: '0.78rem',
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      Configure Host &amp; Auth...
+                    </button>
+                  )}
+                </div>
+                <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+                  Active Host: <code style={{ fontFamily: 'var(--font-code)', color: '#93c5fd' }}>{config?.ollamaHost || 'http://127.0.0.1:11434'}</code>
+                </div>
+              </div>
+
+              <div className="tool-settings-section" style={{ background: 'rgba(15, 23, 42, 0.6)', padding: '16px', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <SlidersHorizontal size={18} color="#c084fc" />
+                    <span style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--text-main)' }}>
+                      Advanced Model Parameters &amp; Tuning
+                    </span>
+                  </div>
+                  {onOpenModelSettings && (
+                    <button
+                      type="button"
+                      onClick={onOpenModelSettings}
+                      style={{
+                        padding: '6px 12px',
+                        borderRadius: '6px',
+                        border: '1px solid rgba(192, 132, 252, 0.4)',
+                        background: 'rgba(192, 132, 252, 0.15)',
+                        color: '#c084fc',
+                        fontSize: '0.78rem',
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      Configure Parameters...
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'pruning' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              {/* Context Pruning Settings */}
+              <div className="tool-settings-section" style={{ background: 'rgba(15, 23, 42, 0.6)', padding: '16px', borderRadius: '12px', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <Scissors size={18} color="var(--accent-teal)" />
+                    <span style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--text-main)' }}>
+                      Context Pruning &amp; Summarization
+                    </span>
+                  </div>
+                  {pruningLoading ? (
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Loading…</span>
+                  ) : (
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                      <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Enable Pruning</span>
+                      <input
+                        type="checkbox"
+                        checked={pruningConfig?.enabled ?? true}
+                        onChange={(e) => handleUpdatePruning({ enabled: e.target.checked })}
+                        style={{ cursor: 'pointer', width: '16px', height: '16px' }}
+                      />
+                    </label>
+                  )}
+                </div>
+
+                {pruningConfig && (
+                  <div style={{ opacity: pruningConfig.enabled ? 1 : 0.5, pointerEvents: pruningConfig.enabled ? 'auto' : 'none', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    {/* Strategy 1: Superseded Reads */}
+                    <div style={{ padding: '12px', background: 'rgba(30, 41, 59, 0.5)', border: '1px solid var(--border-color)', borderRadius: '8px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <span style={{ fontWeight: 600, color: 'var(--text-main)', fontSize: '0.825rem' }}>Superseded File Read Pruning</span>
+                        <input
+                          type="checkbox"
+                          checked={pruningConfig.pruneSupersededReads ?? true}
+                          onChange={(e) => handleUpdatePruning({ pruneSupersededReads: e.target.checked })}
+                          style={{ cursor: 'pointer', width: '16px', height: '16px' }}
+                        />
+                      </div>
+                      <p style={{ fontSize: '0.725rem', color: 'var(--text-muted)', marginTop: '4px', margin: 0 }}>
+                        Replaces older read_file tool outputs for a path when a newer read for the same file occurs.
+                      </p>
+                    </div>
+
+                    {/* Strategy 2: Post-Mutation Invalidation */}
+                    <div style={{ padding: '12px', background: 'rgba(30, 41, 59, 0.5)', border: '1px solid var(--border-color)', borderRadius: '8px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <span style={{ fontWeight: 600, color: 'var(--text-main)', fontSize: '0.825rem' }}>Post-Mutation Invalidation</span>
+                        <input
+                          type="checkbox"
+                          checked={pruningConfig.invalidateOnMutation ?? true}
+                          onChange={(e) => handleUpdatePruning({ invalidateOnMutation: e.target.checked })}
+                          style={{ cursor: 'pointer', width: '16px', height: '16px' }}
+                        />
+                      </div>
+                      <p style={{ fontSize: '0.725rem', color: 'var(--text-muted)', marginTop: '4px', margin: 0 }}>
+                        Invalidates prior read_file outputs when a file is edited, replaced, or created.
+                      </p>
+                    </div>
+
+                    {/* Strategy 3: Tool Output TTL Expiration */}
+                    <div style={{ padding: '12px', background: 'rgba(30, 41, 59, 0.5)', border: '1px solid var(--border-color)', borderRadius: '8px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <span style={{ fontWeight: 600, color: 'var(--text-main)', fontSize: '0.825rem' }}>Tool Output TTL Expiration</span>
+                        <input
+                          type="checkbox"
+                          checked={pruningConfig.enableToolTTL ?? false}
+                          onChange={(e) => handleUpdatePruning({ enableToolTTL: e.target.checked })}
+                          style={{ cursor: 'pointer', width: '16px', height: '16px' }}
+                        />
+                      </div>
+                      <p style={{ fontSize: '0.725rem', color: 'var(--text-muted)', margin: 0 }}>
+                        Expires raw execution logs and search results after a set number of user turns.
+                      </p>
+
+                      {pruningConfig.enableToolTTL && (
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginTop: '6px' }}>
+                          <div>
+                            <label style={{ fontSize: '0.7rem', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>Terminal Log TTL (turns)</label>
+                            <input
+                              type="number"
+                              min="1"
+                              max="50"
+                              value={pruningConfig.terminalOutputTTLTurns ?? 5}
+                              onChange={(e) => handleUpdatePruning({ terminalOutputTTLTurns: parseInt(e.target.value, 10) || 5 })}
+                              style={{ width: '100%', padding: '4px 8px', borderRadius: '4px', background: 'rgba(15, 23, 42, 0.8)', border: '1px solid var(--border-color)', color: '#fff', fontSize: '0.8rem' }}
+                            />
+                          </div>
+                          <div>
+                            <label style={{ fontSize: '0.7rem', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>Web Search TTL (turns)</label>
+                            <input
+                              type="number"
+                              min="1"
+                              max="50"
+                              value={pruningConfig.webOutputTTLTurns ?? 5}
+                              onChange={(e) => {
+                                const value = Number.parseInt(e.target.value, 10);
+                                handleUpdatePruning({ webOutputTTLTurns: Number.isNaN(value) ? 5 : Math.max(0, value) });
+                              }}
+                              style={{ width: '100%', padding: '4px 8px', borderRadius: '4px', background: 'rgba(15, 23, 42, 0.8)', border: '1px solid var(--border-color)', color: '#fff', fontSize: '0.8rem' }}
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Strategy 4: Auto-Compaction & State Summarization */}
+                    <div style={{ padding: '12px', background: 'rgba(30, 41, 59, 0.5)', border: '1px solid var(--border-color)', borderRadius: '8px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <span style={{ fontWeight: 600, color: 'var(--text-main)', fontSize: '0.825rem' }}>Auto-Compaction &amp; State Summarization</span>
+                        <input
+                          type="checkbox"
+                          checked={pruningConfig.enableAutoCompaction ?? true}
+                          onChange={(e) => handleUpdatePruning({ enableAutoCompaction: e.target.checked })}
+                          style={{ cursor: 'pointer', width: '16px', height: '16px' }}
+                        />
+                      </div>
+                      <p style={{ fontSize: '0.725rem', color: 'var(--text-muted)', margin: 0 }}>
+                        Automatically distills conversation history into a structured state package before context overflows while preserving recent turns.
+                      </p>
+
+                      {(pruningConfig.enableAutoCompaction ?? true) && (
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginTop: '6px' }}>
+                          <div>
+                            <label style={{ fontSize: '0.7rem', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>Auto-Compact Threshold</label>
+                            <select
+                              value={pruningConfig.autoCompactThresholdRatio ?? 0.85}
+                              onChange={(e) => handleUpdatePruning({ autoCompactThresholdRatio: parseFloat(e.target.value) })}
+                              style={{ width: '100%', padding: '4px 8px', borderRadius: '4px', background: 'rgba(15, 23, 42, 0.8)', border: '1px solid var(--border-color)', color: '#fff', fontSize: '0.8rem' }}
+                            >
+                              <option value={0.75}>75% of context</option>
+                              <option value={0.80}>80% of context</option>
+                              <option value={0.85}>85% of context</option>
+                              <option value={0.90}>90% of context</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label style={{ fontSize: '0.7rem', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>Retain Recent Turns</label>
+                            <input
+                              type="number"
+                              min="0"
+                              max="10"
+                              value={pruningConfig.keepRecentTurnsOnCompact ?? 2}
+                              onChange={(e) => handleUpdatePruning({ keepRecentTurnsOnCompact: parseInt(e.target.value, 10) || 0 })}
+                              style={{ width: '100%', padding: '4px 8px', borderRadius: '4px', background: 'rgba(15, 23, 42, 0.8)', border: '1px solid var(--border-color)', color: '#fff', fontSize: '0.8rem' }}
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+
+
+          {activeTab === 'safety' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
           {/* Section 0: Tool Complexity Profile Selector */}
           <div className="tool-settings-section" style={{ background: 'rgba(15, 23, 42, 0.7)', padding: '16px', borderRadius: '12px', border: '1px solid var(--accent-primary)' }}>
             <div className="tool-settings-section-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
@@ -522,10 +962,10 @@ export const ToolSettingsModal: React.FC<ToolSettingsModalProps> = ({
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <div>
                   <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-main)' }}>
-                    🖥️ GUI Terminal Window Mode
+                    🖥️ External GUI Terminal Window Mode
                   </div>
                   <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', margin: '2px 0 0 0' }}>
-                    Launch terminal processes in visible desktop GUI windows (e.g. gnome-terminal, konsole, kitty, xterm, wt.exe).
+                    Forces terminal commands to launch in visible desktop GUI windows (e.g. gnome-terminal, konsole, kitty, xterm, wt.exe).
                   </p>
                 </div>
                 <label style={{ display: 'inline-flex', alignItems: 'center', cursor: 'pointer' }}>
@@ -537,6 +977,12 @@ export const ToolSettingsModal: React.FC<ToolSettingsModalProps> = ({
                   />
                 </label>
               </div>
+
+              {settings.terminalGuiMode && (
+                <div style={{ marginTop: '10px', padding: '10px 12px', borderRadius: '8px', background: 'rgba(234, 179, 8, 0.1)', border: '1px solid rgba(234, 179, 8, 0.3)', color: '#fde047', fontSize: '0.78rem', lineHeight: 1.4 }}>
+                  <strong>⚠️ Warning:</strong> When enabled, commands are forced to start in an external desktop window. The AI can start terminal commands in this window, but cannot view or read its terminal output.
+                </div>
+              )}
 
               {settings.terminalGuiMode && (
                 <div style={{ marginTop: '10px' }}>
@@ -780,76 +1226,6 @@ export const ToolSettingsModal: React.FC<ToolSettingsModalProps> = ({
             </div>
           </div>
 
-          {/* Section 3.5: Model Reasoning / Thinking */}
-          <div className="tool-settings-section" style={{ background: 'rgba(15, 23, 42, 0.6)', padding: '16px', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
-            <div className="tool-settings-section-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <Brain size={18} color="#c084fc" />
-                <span style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--text-main)' }}>
-                  Model Reasoning / Thinking
-                </span>
-              </div>
-              {(() => {
-                const isUserEnabled = settings.enableThinking !== false;
-                const supportsThinking = settings.supportsThinking !== false;
-                const isEffectiveON = isUserEnabled && supportsThinking;
-                const isUnsupported = isUserEnabled && !supportsThinking;
-
-                let label = 'Disabled';
-                let color = 'var(--text-muted)';
-                let bg = 'rgba(148, 163, 184, 0.15)';
-                let border = 'rgba(148, 163, 184, 0.3)';
-
-                if (isEffectiveON) {
-                  label = 'Enabled';
-                  color = '#c084fc';
-                  bg = 'rgba(192, 132, 252, 0.15)';
-                  border = 'rgba(192, 132, 252, 0.3)';
-                } else if (isUnsupported) {
-                  label = 'Unsupported by Model';
-                  color = '#eab308';
-                  bg = 'rgba(234, 179, 8, 0.15)';
-                  border = 'rgba(234, 179, 8, 0.3)';
-                }
-
-                return (
-                  <span
-                    style={{
-                      fontSize: '0.8rem',
-                      fontWeight: 700,
-                      fontFamily: 'var(--font-code)',
-                      color,
-                      background: bg,
-                      padding: '2px 8px',
-                      borderRadius: '6px',
-                      border: `1px solid ${border}`,
-                    }}
-                  >
-                    {label}
-                  </span>
-                );
-              })()}
-            </div>
-            <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', lineHeight: 1.5, marginBottom: '12px' }}>
-              Allows reasoning models (e.g. Qwen 2.5/3.5, DeepSeek R1) to output thinking steps before generating actions or answers.
-              {settings.enableThinking !== false && settings.supportsThinking === false && (
-                <span style={{ display: 'block', marginTop: '4px', color: '#eab308', fontWeight: 500 }}>
-                  ⚠️ Current model does not support thinking capabilities. Thinking is automatically disabled for generations.
-                </span>
-              )}
-            </p>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '0.825rem', color: 'var(--text-main)', fontWeight: 500 }}>
-              <input
-                type="checkbox"
-                checked={settings.enableThinking !== false}
-                onChange={(e) => {
-                  onUpdateSettings({ ...settings, enableThinking: e.target.checked });
-                }}
-                style={{ accentColor: '#c084fc', cursor: 'pointer' }}
-              />
-              <span>Enable reasoning & thinking output</span>
-            </label>
-          </div>
 
           {/* Section 3.5b: Plan Mode */}
           <div className="tool-settings-section" style={{ background: 'rgba(15, 23, 42, 0.6)', padding: '16px', borderRadius: '12px', border: '1px solid var(--border-color)', marginBottom: '16px' }}>
@@ -857,7 +1233,7 @@ export const ToolSettingsModal: React.FC<ToolSettingsModalProps> = ({
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <span style={{ fontSize: '18px' }}>📋</span>
                 <span style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--text-main)' }}>
-                  Antigravity Plan Mode
+                  Plan Mode
                 </span>
               </div>
               <span
@@ -931,57 +1307,159 @@ export const ToolSettingsModal: React.FC<ToolSettingsModalProps> = ({
             </label>
           </div>
 
-          {/* Section 4: Categorized Toolset Controls */}
-          <div className="tool-settings-section" style={{ background: 'rgba(15, 23, 42, 0.6)', padding: '16px', borderRadius: '12px', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '18px' }}>
-            <div style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '8px' }}>
-              <span style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--text-main)', display: 'block' }}>
-                🧰 Active Toolset Controls & Categories
-              </span>
-              <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', margin: '4px 0 0 0' }}>
-                Toggle entire tool categories at once using group master buttons, or configure individual tools one by one.
-              </p>
             </div>
+          )}
 
-            {/* Tool groups — rendered dynamically from /api/tools/definitions */}
-            <ToolTogglePanel
-              enabledTools={settings.enabledTools as Record<string, boolean>}
-              onChange={(updated) => onUpdateSettings({ ...settings, enabledTools: updated as ToolSettings['enabledTools'] })}
-              variant="modal"
-              onInfoClick={(toolName) => setInfoTool(toolName as keyof ToolSettings['enabledTools'])}
-            />
-          </div>
+          {activeTab === 'tools' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+              {/* Section 0: Tool Complexity Profile Selector */}
+              <div className="tool-settings-section" style={{ background: 'rgba(15, 23, 42, 0.7)', padding: '16px', borderRadius: '12px', border: '1px solid var(--accent-primary)' }}>
+                <div className="tool-settings-section-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <Cpu size={18} color="var(--accent-primary)" />
+                    <span style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--text-main)' }}>
+                      🎯 Model Tool Complexity Profile
+                    </span>
+                  </div>
+                  <span
+                    style={{
+                      fontSize: '0.75rem',
+                      fontWeight: 700,
+                      padding: '2px 8px',
+                      borderRadius: '6px',
+                      background:
+                        (settings.complexityProfile || 'simple') === 'simple'
+                          ? 'rgba(34, 197, 94, 0.2)'
+                          : (settings.complexityProfile || 'simple') === 'medium'
+                          ? 'rgba(245, 158, 11, 0.2)'
+                          : 'rgba(168, 85, 247, 0.2)',
+                      color:
+                        (settings.complexityProfile || 'simple') === 'simple'
+                          ? '#86efac'
+                          : (settings.complexityProfile || 'simple') === 'medium'
+                          ? '#fcd34d'
+                          : '#c084fc',
+                      border: '1px solid currentColor',
+                    }}
+                  >
+                    {(settings.complexityProfile || 'simple').toUpperCase()} PROFILE
+                  </span>
+                </div>
 
-          {/* Section 4: MCP (Model Context Protocol) Servers */}
-          <McpServersSection />
+                <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', lineHeight: 1.45, marginBottom: '12px' }}>
+                  Select the tool schema complexity sent to the model context. Match your active Ollama model size to ensure reliable tool calls. Only one schema profile is active at a time.
+                </p>
+
+                <div className="tool-profile-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
+                  {[
+                    {
+                      id: 'simple',
+                      label: '🟢 Simple',
+                      desc: 'Small Models (3B–8B)\nShort 2-param schema',
+                      color: '#22c55e',
+                    },
+                    {
+                      id: 'medium',
+                      label: '🟡 Medium',
+                      desc: 'Mid Models (14B–32B)\nRegex + file filter',
+                      color: '#f59e0b',
+                    },
+                    {
+                      id: 'advanced',
+                      label: '🟣 Advanced',
+                      desc: 'Large Models (70B+)\nFull power AST/Grep',
+                      color: '#a855f7',
+                    },
+                  ].map((prof) => {
+                    const isSelected = (settings.complexityProfile || 'simple') === prof.id;
+                    return (
+                      <button
+                        key={prof.id}
+                        type="button"
+                        onClick={() => onUpdateSettings({ ...settings, complexityProfile: prof.id as ToolComplexityProfile })}
+                        style={{
+                          padding: '10px 8px',
+                          borderRadius: '8px',
+                          border: `1px solid ${isSelected ? prof.color : 'var(--border-color)'}`,
+                          background: isSelected ? `${prof.color}22` : 'rgba(30, 41, 59, 0.4)',
+                          color: isSelected ? prof.color : 'var(--text-muted)',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          alignItems: 'center',
+                          gap: '4px',
+                          textAlign: 'center',
+                        }}
+                      >
+                        <span style={{ fontSize: '0.85rem', fontWeight: 700 }}>{prof.label}</span>
+                        <span style={{ fontSize: '0.7rem', color: isSelected ? 'rgba(255,255,255,0.85)' : 'var(--text-dim)', whiteSpace: 'pre-line', lineHeight: 1.25 }}>
+                          {prof.desc}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Section 4: Categorized Toolset Controls */}
+              <div className="tool-settings-section" style={{ background: 'rgba(15, 23, 42, 0.6)', padding: '16px', borderRadius: '12px', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '18px' }}>
+                <div style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '8px' }}>
+                  <span style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--text-main)', display: 'block' }}>
+                    🧰 Active Toolset Controls & Categories
+                  </span>
+                  <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', margin: '4px 0 0 0' }}>
+                    Toggle entire tool categories at once using group master buttons, or configure individual tools one by one.
+                  </p>
+                </div>
+
+                {/* Tool groups — rendered dynamically from /api/tools/definitions */}
+                <ToolTogglePanel
+                  enabledTools={settings.enabledTools as Record<string, boolean>}
+                  onChange={(updated) => onUpdateSettings({ ...settings, enabledTools: updated as ToolSettings['enabledTools'] })}
+                  variant="modal"
+                  onInfoClick={(toolName) => setInfoTool(toolName as keyof ToolSettings['enabledTools'])}
+                />
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'mcp' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+              <McpServersSection />
+            </div>
+          )}
         </div>
+      </div>
 
-        {/* Modal Footer */}
-        <div
-          className="tool-settings-footer"
+      {/* Modal Footer */}
+      <div
+        className="tool-settings-footer"
+        style={{
+          padding: '14px 24px',
+          background: 'rgba(30, 41, 59, 0.8)',
+          borderTop: '1px solid var(--border-color)',
+          display: 'flex',
+          justifyContent: 'flex-end',
+          flexShrink: 0,
+        }}
+      >
+        <button
+          type="button"
+          onClick={onClose}
           style={{
-            padding: '16px 24px',
-            background: 'rgba(30, 41, 59, 0.8)',
-            borderTop: '1px solid var(--border-color)',
-            display: 'flex',
-            justifyContent: 'flex-end',
+            background: 'var(--accent-gradient)',
+            border: 'none',
+            color: '#fff',
+            padding: '8px 24px',
+            borderRadius: '8px',
+            fontSize: '0.85rem',
+            fontWeight: 600,
+            cursor: 'pointer',
+            boxShadow: '0 2px 8px rgba(59, 130, 246, 0.3)',
           }}
         >
-          <button
-            onClick={onClose}
-            style={{
-              background: 'var(--accent-gradient)',
-              border: 'none',
-              color: '#fff',
-              padding: '8px 20px',
-              borderRadius: '8px',
-              fontSize: '0.875rem',
-              fontWeight: 600,
-              cursor: 'pointer',
-            }}
-          >
-            Done
-          </button>
-        </div>
+          Done
+        </button>
       </div>
 
       {/* Tool Info Inspector Modal Popup */}
@@ -1107,6 +1585,7 @@ export const ToolSettingsModal: React.FC<ToolSettingsModalProps> = ({
           </div>
         </div>
       )}
+    </div>
     </div>
   );
 };

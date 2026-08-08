@@ -1,5 +1,5 @@
 import React, { useMemo, useRef, useState } from 'react';
-import { AlertCircle, Brain, CheckCircle2, Copy, Cpu, Download, Info, Loader2, Power, Search, SlidersHorizontal, Terminal, X } from 'lucide-react';
+import { AlertCircle, Brain, CheckCircle2, Copy, Cpu, Download, Info, Loader2, Power, RotateCcw, Search, SlidersHorizontal, Terminal, X } from 'lucide-react';
 import { AgentConfig, OllamaModelInfo, OllamaRunningModelInfo, SystemMetrics, ollamaModelNamesMatch } from '../types';
 
 interface ModelSettingsModalProps {
@@ -187,6 +187,7 @@ export const ModelSettingsModal: React.FC<ModelSettingsModalProps> = ({
   const [downloadPercent, setDownloadPercent] = useState<number | null>(null);
   const [unloadState, setUnloadState] = useState<'idle' | 'unloading' | 'success' | 'error'>('idle');
   const [unloadMessage, setUnloadMessage] = useState('');
+  const [unloadingModelName, setUnloadingModelName] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   const installedNames = useMemo(() => new Set(models.flatMap((model) => [model.name, model.name.replace(/:latest$/, '')])), [models]);
@@ -284,18 +285,21 @@ export const ModelSettingsModal: React.FC<ModelSettingsModalProps> = ({
     }
   };
 
-  const unloadActiveModel = async () => {
-    const targetModel = loadedModel?.name || loadedModel?.model || config.model;
+  const handleUnloadModel = async (targetModel: string) => {
     if (!targetModel || unloadState === 'unloading') return;
+    setUnloadingModelName(targetModel);
     setUnloadState('unloading');
     setUnloadMessage('');
     try {
       await onUnloadModel(targetModel);
+      await onModelsChanged();
       setUnloadState('success');
       setUnloadMessage(`${targetModel} was successfully unloaded from VRAM.`);
     } catch (err: any) {
       setUnloadState('error');
-      setUnloadMessage(err.message || 'Could not unload the model.');
+      setUnloadMessage(err.message || `Could not unload ${targetModel}.`);
+    } finally {
+      setUnloadingModelName(null);
     }
   };
 
@@ -467,26 +471,130 @@ export const ModelSettingsModal: React.FC<ModelSettingsModalProps> = ({
                 <Download size={15} /> Download
               </button>
             </div>
-            <div className="model-status-row">
-              <div className={`model-status ${loadedModel ? 'loaded' : ''}`}>
-                <span />
-                {loadedModel ? `Loaded${vramGb ? ` · ${vramGb} GB VRAM` : ''}` : 'Idle · loads on the next prompt'}
+            {/* Active Models in VRAM Section */}
+            <div style={{ marginTop: '12px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  Loaded Models in VRAM ({runningModels.length})
+                </span>
+                <button
+                  type="button"
+                  onClick={() => void onModelsChanged()}
+                  title="Query Ollama for active loaded models"
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: 'var(--accent-primary, #60a5fa)',
+                    fontSize: '0.72rem',
+                    cursor: 'pointer',
+                    fontWeight: 600,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    padding: '2px 6px',
+                  }}
+                >
+                  <RotateCcw size={12} />
+                  <span>Refresh</span>
+                </button>
               </div>
-              <button
-                type="button"
-                className="model-unload-button"
-                disabled={unloadState === 'unloading' || !loadedModel}
-                onClick={() => void unloadActiveModel()}
-                title={loadedModel ? 'Release VRAM memory allocation' : 'Model is not currently loaded in VRAM'}
-              >
-                {unloadState === 'unloading' ? <Loader2 size={14} className="spin" /> : <Power size={14} />}
-                {unloadState === 'unloading' ? 'Unloading…' : loadedModel ? 'Unload VRAM' : 'VRAM Released'}
-              </button>
+
+              {runningModels.length === 0 ? (
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '10px',
+                    background: 'rgba(30, 41, 59, 0.4)',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: '8px',
+                    padding: '10px 14px',
+                  }}
+                >
+                  <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#94a3b8', flexShrink: 0 }} />
+                  <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem', lineHeight: 1.4, flex: 1 }}>
+                    No models currently loaded in VRAM (Idle · loads automatically on prompt)
+                  </span>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {runningModels.map((running) => {
+                    const modelNameStr = running.name || running.model;
+                    const isSelected = ollamaModelNamesMatch(modelNameStr, config.model);
+                    const runningVramGb = running.size_vram
+                      ? (running.size_vram / (1024 * 1024 * 1024)).toFixed(2)
+                      : null;
+                    const isUnloadingThis = unloadState === 'unloading' && unloadingModelName === modelNameStr;
+
+                    return (
+                      <div
+                        key={modelNameStr}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          background: isSelected ? 'rgba(99, 102, 241, 0.12)' : 'rgba(30, 41, 59, 0.5)',
+                          border: isSelected ? '1px solid rgba(99, 102, 241, 0.4)' : '1px solid var(--border-color)',
+                          borderRadius: '8px',
+                          padding: '10px 12px',
+                        }}
+                      >
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', minWidth: 0, flex: 1 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#34d399', boxShadow: '0 0 6px #34d399', flexShrink: 0 }} />
+                            <strong style={{ fontSize: '0.85rem', color: 'var(--text-main)', fontFamily: 'var(--font-code)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {modelNameStr}
+                            </strong>
+                            {isSelected && (
+                              <span style={{ background: 'rgba(99, 102, 241, 0.25)', color: '#818cf8', border: '1px solid rgba(99, 102, 241, 0.5)', padding: '1px 6px', borderRadius: '4px', fontSize: '0.68rem', fontWeight: 700 }}>
+                                ACTIVE MODEL
+                              </span>
+                            )}
+                          </div>
+                          <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginLeft: '16px' }}>
+                            {runningVramGb ? `${runningVramGb} GB VRAM` : 'VRAM active'}
+                            {running.details?.quantization_level ? ` · ${running.details.quantization_level}` : ''}
+                            {running.details?.parameter_size ? ` · ${running.details.parameter_size}` : ''}
+                          </span>
+                        </div>
+
+                        <button
+                          type="button"
+                          className="model-unload-button"
+                          disabled={unloadState === 'unloading'}
+                          onClick={() => void handleUnloadModel(modelNameStr)}
+                          title={`Unload ${modelNameStr} from VRAM`}
+                          style={{ flexShrink: 0, marginLeft: '12px' }}
+                        >
+                          {isUnloadingThis ? <Loader2 size={14} className="spin" /> : <Power size={14} />}
+                          {isUnloadingThis ? 'Unloading…' : 'Unload VRAM'}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
+
             {unloadMessage && (
-              <p className={`model-unload-message ${unloadState}`} style={{ marginTop: '7px', fontSize: '0.78rem', color: unloadState === 'success' ? '#34d399' : '#fb7185' }}>
-                {unloadMessage}
-              </p>
+              <div
+                style={{
+                  marginTop: '10px',
+                  padding: '8px 12px',
+                  borderRadius: '6px',
+                  background: unloadState === 'success' ? 'rgba(52, 211, 153, 0.1)' : 'rgba(251, 113, 133, 0.1)',
+                  border: `1px solid ${unloadState === 'success' ? 'rgba(52, 211, 153, 0.3)' : 'rgba(251, 113, 133, 0.3)'}`,
+                  color: unloadState === 'success' ? '#34d399' : '#fb7185',
+                  fontSize: '0.78rem',
+                  fontWeight: 500,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                }}
+              >
+                <span>{unloadState === 'success' ? '✓' : '⚠️'}</span>
+                <span>{unloadMessage}</span>
+              </div>
             )}
           </section>
 
@@ -588,16 +696,7 @@ export const ModelSettingsModal: React.FC<ModelSettingsModalProps> = ({
             <p>Controls how much conversation and workspace context the model can receive.</p>
           </section>
 
-          <section className="model-settings-section">
-            <div className="model-setting-title-row">
-              <label htmlFor="temperature">
-                Temperature <InfoTooltip text="Lower values (0.1 - 0.3) are precise and focused. Higher values (0.7 - 1.0) increase output variety." />
-              </label>
-              <output>{config.temperature.toFixed(1)}</output>
-            </div>
-            <input id="temperature" type="range" min="0" max="2" step="0.1" value={config.temperature} onChange={(event) => onChangeTemperature(Number(event.target.value))} />
-            <p>Lower values are more focused; higher values produce more varied responses.</p>
-          </section>
+
 
           <section className="model-settings-section model-thinking-setting">
             <div>
@@ -649,6 +748,21 @@ export const ModelSettingsModal: React.FC<ModelSettingsModalProps> = ({
             {advancedOpen && (
               <div style={{ marginTop: '12px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                  <div>
+                    <label style={{ fontSize: '0.8rem', fontWeight: 600, display: 'flex', alignItems: 'center' }}>
+                      Temperature <InfoTooltip text="Lower values (0.0 - 0.3) are precise and focused. Higher values (0.7 - 1.0+) increase output randomness." />
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      max="2"
+                      step="0.05"
+                      value={config.temperature ?? 0.2}
+                      onChange={(e) => onChangeTemperature(parseFloat(e.target.value))}
+                      style={{ width: '100%', background: 'rgba(30,41,59,0.8)', border: '1px solid var(--border-color)', color: '#fff', borderRadius: '6px', padding: '6px', fontSize: '0.8rem' }}
+                    />
+                  </div>
+
                   <div>
                     <label style={{ fontSize: '0.8rem', fontWeight: 600, display: 'flex', alignItems: 'center' }}>
                       Top P <InfoTooltip text="Nucleus sampling: considers only tokens comprising the top P cumulative probability (e.g. 0.9)." />

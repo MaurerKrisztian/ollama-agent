@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { User, Bot, ShieldAlert, CheckCircle2, XCircle, Loader2, RotateCcw, FileText, Zap, X, ArrowDown, Plus } from 'lucide-react';
+import { User, Bot, ShieldAlert, CheckCircle2, XCircle, Loader2, RotateCcw, FileText, Zap, X, ArrowDown, Plus, Terminal, Sliders } from 'lucide-react';
 import { ChatMessage, ImageAttachment, BatchReviewFile, PendingApprovalCall, TextAttachment, TerminalSessionInfo } from '../types';
 import { BatchReviewCard } from './chat/BatchReviewCard';
 import { findActiveSkillMention } from '../skillMention';
@@ -42,7 +42,9 @@ export interface ChatWindowProps {
   onOpenModelDetails?: () => void;
   onCompactContext?: () => void;
   terminalSessions?: TerminalSessionInfo[];
+  activeTerminalCount?: number;
   onOpenTerminal?: (sessionId?: string) => void;
+  onOpenTerminalSessions?: () => void;
   onTerminateTerminalSession?: (sessionId: string) => Promise<void>;
   isCompacting?: boolean;
   planMode?: boolean;
@@ -81,7 +83,9 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   onOpenModelDetails,
   onCompactContext,
   terminalSessions = [],
+  activeTerminalCount = 0,
   onOpenTerminal,
+  onOpenTerminalSessions,
   onTerminateTerminalSession,
   isCompacting,
   planMode,
@@ -111,6 +115,20 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const isAutoScrollRef = useRef(true);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
+  const [actionsMenuOpen, setActionsMenuOpen] = useState(false);
+  const actionsMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (actionsMenuRef.current && !actionsMenuRef.current.contains(e.target as Node)) {
+        setActionsMenuOpen(false);
+      }
+    };
+    if (actionsMenuOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [actionsMenuOpen]);
 
   const [previewImage, setPreviewImage] = useState<{ src: string; alt?: string } | null>(null);
 
@@ -562,41 +580,207 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
           )}
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
-          {onNewSession && (
+        {isCompact ? (
+          <div ref={actionsMenuRef} style={{ position: 'relative', flexShrink: 0 }}>
             <button
               type="button"
-              onClick={onNewSession}
-              title="Start a new chat session"
-              style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '2px 4px', fontSize: '0.72rem', fontFamily: 'var(--font-code)', display: 'flex', alignItems: 'center', gap: '4px' }}
+              onClick={() => setActionsMenuOpen((prev) => !prev)}
+              title="Session actions menu"
+              style={{
+                background: 'rgba(30, 41, 59, 0.8)',
+                border: '1px solid var(--border-color)',
+                color: 'var(--text-main)',
+                padding: '3px 8px',
+                borderRadius: '6px',
+                fontSize: '0.72rem',
+                fontFamily: 'var(--font-code)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px',
+                cursor: 'pointer',
+              }}
             >
-              <Plus size={11} color="#38bdf8" />
-              <span className="dev-hud-label">New Session</span>
+              <Sliders size={12} color="var(--accent-primary)" />
+              <span>Actions ▾</span>
             </button>
-          )}
-          {onCompactContext && (
-            <button
-              type="button"
-              onClick={onCompactContext}
-              title="Compact & summarize context (/compact)"
-              style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '2px 4px', fontSize: '0.72rem', fontFamily: 'var(--font-code)', display: 'flex', alignItems: 'center', gap: '4px' }}
-            >
-              <Zap size={11} color="#a855f7" />
-              <span className="dev-hud-label">Compact</span>
-            </button>
-          )}
-          {onClearChat && (
-            <button
-              type="button"
-              onClick={onClearChat}
-              title="Clear context (/clear)"
-              style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '2px 4px', fontSize: '0.72rem', fontFamily: 'var(--font-code)', display: 'flex', alignItems: 'center', gap: '4px' }}
-            >
-              <RotateCcw size={11} />
-              <span className="dev-hud-label">Clear</span>
-            </button>
-          )}
-        </div>
+
+            {actionsMenuOpen && (
+              <div
+                style={{
+                  position: 'absolute',
+                  top: 'calc(100% + 6px)',
+                  right: 0,
+                  background: 'rgba(15, 23, 42, 0.95)',
+                  backdropFilter: 'blur(12px)',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: '8px',
+                  boxShadow: '0 8px 24px rgba(0, 0, 0, 0.5)',
+                  padding: '6px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '2px',
+                  zIndex: 50,
+                  minWidth: '160px',
+                }}
+              >
+                {(onOpenTerminalSessions || onOpenTerminal) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActionsMenuOpen(false);
+                      (onOpenTerminalSessions || (() => onOpenTerminal?.()))();
+                    }}
+                    style={{
+                      padding: '6px 10px',
+                      borderRadius: '6px',
+                      border: 'none',
+                      background: 'transparent',
+                      color: (activeTerminalCount || terminalSessions.length) > 0 ? '#10b981' : 'var(--text-muted)',
+                      fontSize: '0.78rem',
+                      fontFamily: 'var(--font-code)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      cursor: 'pointer',
+                      textAlign: 'left',
+                    }}
+                  >
+                    <Terminal size={13} color={(activeTerminalCount || terminalSessions.length) > 0 ? '#10b981' : '#64748b'} />
+                    <span>Terminal ({(activeTerminalCount || terminalSessions.length)})</span>
+                  </button>
+                )}
+
+                {onNewSession && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActionsMenuOpen(false);
+                      onNewSession();
+                    }}
+                    style={{
+                      padding: '6px 10px',
+                      borderRadius: '6px',
+                      border: 'none',
+                      background: 'transparent',
+                      color: 'var(--text-muted)',
+                      fontSize: '0.78rem',
+                      fontFamily: 'var(--font-code)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      cursor: 'pointer',
+                      textAlign: 'left',
+                    }}
+                  >
+                    <Plus size={13} color="#38bdf8" />
+                    <span>New Session</span>
+                  </button>
+                )}
+
+                {onCompactContext && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActionsMenuOpen(false);
+                      onCompactContext();
+                    }}
+                    style={{
+                      padding: '6px 10px',
+                      borderRadius: '6px',
+                      border: 'none',
+                      background: 'transparent',
+                      color: 'var(--text-muted)',
+                      fontSize: '0.78rem',
+                      fontFamily: 'var(--font-code)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      cursor: 'pointer',
+                      textAlign: 'left',
+                    }}
+                  >
+                    <Zap size={13} color="#a855f7" />
+                    <span>Compact</span>
+                  </button>
+                )}
+
+                {onClearChat && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActionsMenuOpen(false);
+                      onClearChat();
+                    }}
+                    style={{
+                      padding: '6px 10px',
+                      borderRadius: '6px',
+                      border: 'none',
+                      background: 'transparent',
+                      color: 'var(--text-muted)',
+                      fontSize: '0.78rem',
+                      fontFamily: 'var(--font-code)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      cursor: 'pointer',
+                      textAlign: 'left',
+                    }}
+                  >
+                    <RotateCcw size={13} />
+                    <span>Clear</span>
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        ) : (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+            {(onOpenTerminalSessions || onOpenTerminal) && (
+              <button
+                type="button"
+                onClick={onOpenTerminalSessions || (() => onOpenTerminal?.())}
+                title="Manage terminal sessions"
+                style={{ background: 'none', border: 'none', color: (activeTerminalCount || terminalSessions.length) > 0 ? '#10b981' : 'var(--text-muted)', cursor: 'pointer', padding: '2px 4px', fontSize: '0.72rem', fontFamily: 'var(--font-code)', display: 'flex', alignItems: 'center', gap: '4px' }}
+              >
+                <Terminal size={11} color={(activeTerminalCount || terminalSessions.length) > 0 ? '#10b981' : '#10b981'} />
+                <span className="dev-hud-label">Terminal ({(activeTerminalCount || terminalSessions.length)})</span>
+              </button>
+            )}
+            {onNewSession && (
+              <button
+                type="button"
+                onClick={onNewSession}
+                title="Start a new chat session"
+                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '2px 4px', fontSize: '0.72rem', fontFamily: 'var(--font-code)', display: 'flex', alignItems: 'center', gap: '4px' }}
+              >
+                <Plus size={11} color="#38bdf8" />
+                <span className="dev-hud-label">New Session</span>
+              </button>
+            )}
+            {onCompactContext && (
+              <button
+                type="button"
+                onClick={onCompactContext}
+                title="Compact & summarize context (/compact)"
+                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '2px 4px', fontSize: '0.72rem', fontFamily: 'var(--font-code)', display: 'flex', alignItems: 'center', gap: '4px' }}
+              >
+                <Zap size={11} color="#a855f7" />
+                <span className="dev-hud-label">Compact</span>
+              </button>
+            )}
+            {onClearChat && (
+              <button
+                type="button"
+                onClick={onClearChat}
+                title="Clear context (/clear)"
+                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '2px 4px', fontSize: '0.72rem', fontFamily: 'var(--font-code)', display: 'flex', alignItems: 'center', gap: '4px' }}
+              >
+                <RotateCcw size={11} />
+                <span className="dev-hud-label">Clear</span>
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       <div ref={chatMainRef} className="chat-main" style={{ flex: 1, display: 'flex', minHeight: 0, position: 'relative' }}>

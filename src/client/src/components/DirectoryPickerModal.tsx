@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ArrowUp, Folder, FolderCheck, RefreshCw, X } from 'lucide-react';
+import { ArrowUp, Folder, FolderCheck, FolderPlus, RefreshCw, X } from 'lucide-react';
 
 interface DirectoryEntry {
   name: string;
@@ -27,6 +27,10 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
+  const [showNewFolderInput, setShowNewFolderInput] = useState(false);
+  const [newFolderName, setNewFolderName] = useState('');
+  const [creatingFolder, setCreatingFolder] = useState(false);
+
   const browse = async (targetPath: string) => {
     setLoading(true);
     setError('');
@@ -45,10 +49,37 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
     }
   };
 
+  const handleCreateFolder = async () => {
+    const trimmed = newFolderName.trim();
+    if (!trimmed || creatingFolder) return;
+    setCreatingFolder(true);
+    setError('');
+    try {
+      const response = await fetch('/api/directories/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ parentPath: browsingPath, folderName: trimmed }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || 'Failed to create directory.');
+      }
+      setShowNewFolderInput(false);
+      setNewFolderName('');
+      await browse(data.newDirPath || browsingPath);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setCreatingFolder(false);
+    }
+  };
+
   useEffect(() => {
     if (isOpen) {
       setBrowsingPath(currentDir);
       setPathInput(currentDir);
+      setShowNewFolderInput(false);
+      setNewFolderName('');
       void browse(currentDir);
     }
   }, [isOpen, currentDir]);
@@ -84,10 +115,104 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
             aria-label="Directory path"
             style={{ flex: 1, padding: '9px 11px', borderRadius: 8, border: '1px solid var(--border-color)', background: 'rgba(15, 23, 42, .8)', color: 'var(--text-main)', fontFamily: 'var(--font-code)', outline: 'none' }}
           />
+          <button
+            type="button"
+            onClick={() => setShowNewFolderInput((prev) => !prev)}
+            title="Create a new folder in this directory"
+            style={{
+              padding: '8px 12px',
+              borderRadius: 8,
+              border: '1px solid rgba(20, 184, 166, 0.4)',
+              background: 'rgba(20, 184, 166, 0.15)',
+              color: 'var(--accent-teal)',
+              fontSize: '0.8rem',
+              fontWeight: 600,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              whiteSpace: 'nowrap',
+            }}
+          >
+            <FolderPlus size={16} />
+            <span>+ New Folder</span>
+          </button>
           <button type="submit" disabled={loading} title="Open path" style={{ padding: '8px 11px', borderRadius: 8, border: '1px solid var(--border-color)', background: 'rgba(255,255,255,.06)', color: 'var(--text-main)', cursor: 'pointer' }}>
             <RefreshCw size={16} className={loading ? 'spin' : undefined} />
           </button>
         </form>
+
+        {showNewFolderInput && (
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              void handleCreateFolder();
+            }}
+            style={{
+              display: 'flex',
+              gap: 8,
+              marginBottom: 12,
+              background: 'rgba(30, 41, 59, 0.6)',
+              padding: '8px 10px',
+              borderRadius: 8,
+              border: '1px solid var(--accent-teal)',
+              alignItems: 'center',
+            }}
+          >
+            <FolderPlus size={16} color="var(--accent-teal)" style={{ flexShrink: 0 }} />
+            <input
+              value={newFolderName}
+              onChange={(e) => setNewFolderName(e.target.value)}
+              placeholder="New folder name..."
+              autoFocus
+              style={{
+                flex: 1,
+                padding: '6px 9px',
+                borderRadius: 6,
+                border: '1px solid var(--border-color)',
+                background: 'rgba(15, 23, 42, 0.9)',
+                color: 'var(--text-main)',
+                fontSize: '0.82rem',
+                outline: 'none',
+              }}
+            />
+            <button
+              type="submit"
+              disabled={creatingFolder || !newFolderName.trim()}
+              style={{
+                padding: '6px 14px',
+                borderRadius: 6,
+                border: 'none',
+                background: 'var(--accent-teal)',
+                color: '#0f172a',
+                fontWeight: 600,
+                fontSize: '0.8rem',
+                cursor: creatingFolder || !newFolderName.trim() ? 'not-allowed' : 'pointer',
+                opacity: creatingFolder || !newFolderName.trim() ? 0.6 : 1,
+              }}
+            >
+              {creatingFolder ? 'Creating...' : 'Create'}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setShowNewFolderInput(false);
+                setNewFolderName('');
+              }}
+              style={{
+                padding: '6px 10px',
+                borderRadius: 6,
+                border: '1px solid var(--border-color)',
+                background: 'transparent',
+                color: 'var(--text-muted)',
+                fontSize: '0.8rem',
+                cursor: 'pointer',
+              }}
+            >
+              Cancel
+            </button>
+          </form>
+        )}
 
         <div style={{ color: 'var(--text-dim)', fontSize: '.76rem', marginBottom: 10 }}>
           Browse directories on the machine running the local agent server.

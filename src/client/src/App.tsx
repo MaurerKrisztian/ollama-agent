@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { io, type Socket } from 'socket.io-client';
-import { ChevronRight, MessageSquare, PanelRightClose, PanelRightOpen } from 'lucide-react';
+import { ChevronRight, MessageSquare, PanelRightClose, PanelRightOpen, X } from 'lucide-react';
 import { Header } from './components/Header';
 import { ChatWindow } from './components/ChatWindow';
 import { ContextSidebar } from './components/ContextSidebar';
@@ -128,6 +128,14 @@ export const App: React.FC = () => {
   const [activeGenerationsCount, setActiveGenerationsCount] = useState<number>(0);
   const [lastAiEditEvent, setLastAiEditEvent] = useState<AiEditEvent | null>(null);
   const [aiEditNotification, setAiEditNotification] = useState<{ path: string; operationType: 'read' | 'write'; timestamp: number } | null>(null);
+
+  useEffect(() => {
+    if (!aiEditNotification) return;
+    const timer = setTimeout(() => {
+      setAiEditNotification(null);
+    }, 4500);
+    return () => clearTimeout(timer);
+  }, [aiEditNotification]);
   const liveSocketRef = useRef<Socket | null>(null);
   const activeSessionIdRef = useRef('');
   const chatStreamAbortControllerRef = useRef<AbortController | null>(null);
@@ -283,15 +291,13 @@ export const App: React.FC = () => {
         });
       }
     } else if (eventType === 'context_update') {
-      setContextInfo(eventData ? { ...eventData, _baseTokens: eventData.estimatedTokens } as any : null);
+      setContextInfo(eventData ? { ...eventData } as any : null);
     } else if (eventType === 'eval_count_update') {
       setContextInfo((prev) => {
         if (!prev) return prev;
-        const baseTokens = (prev as any)._baseTokens ?? prev.estimatedTokens;
         return {
           ...prev,
-          _baseTokens: baseTokens,
-          estimatedTokens: baseTokens + (eventData.evalCount || 0),
+          generatedTokens: eventData.evalCount,
         } as any;
       });
     } else if (eventType === 'tool_approval_required') {
@@ -558,6 +564,22 @@ export const App: React.FC = () => {
             }
             sessionStorage.setItem('local-model-chat.activeSessionId', initialSessionId);
             fetchCheckpoints(initialSessionId);
+          }
+        } else {
+          const createRes = await fetch('/api/chat/sessions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({}),
+          });
+          if (createRes.ok) {
+            const createData = await createRes.json();
+            setMessages([]);
+            setContextInfo(createData.context);
+            setChatSessions(createData.sessions || []);
+            if (createData.activeSessionId) {
+              setActiveSessionId(createData.activeSessionId);
+              sessionStorage.setItem('local-model-chat.activeSessionId', createData.activeSessionId);
+            }
           }
         }
       }
@@ -1130,13 +1152,36 @@ export const App: React.FC = () => {
     setStreamingThinking('');
 
     try {
+      let currentSessionId = activeSessionId;
+      if (!currentSessionId) {
+        const createRes = await fetch('/api/chat/sessions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({}),
+        });
+        if (createRes.ok) {
+          const createData = await createRes.json();
+          currentSessionId = createData.activeSessionId || '';
+          if (currentSessionId) {
+            setActiveSessionId(currentSessionId);
+            sessionStorage.setItem('local-model-chat.activeSessionId', currentSessionId);
+            setChatSessions(createData.sessions || []);
+            setContextInfo(createData.context);
+          }
+        }
+      }
+
+      if (!currentSessionId) {
+        throw new Error('A valid chat session is required.');
+      }
+
       // Join the session-specific Socket.IO room so the server can target stream events at us
-      liveSocketRef.current?.emit('session:join', activeSessionId);
+      liveSocketRef.current?.emit('session:join', currentSessionId);
 
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...body, planMode: config.planMode, sessionId: activeSessionId }),
+        body: JSON.stringify({ ...body, planMode: config.planMode, sessionId: currentSessionId }),
       });
 
       if (!response.ok) {
@@ -1333,10 +1378,12 @@ export const App: React.FC = () => {
             planMode={config.planMode}
             onTogglePlanMode={handleTogglePlanMode}
             terminalSessions={terminalSessions}
+            activeTerminalCount={terminalSessions.filter((s) => s.status === 'running').length}
             onOpenTerminal={(sessionId) => {
               if (sessionId) setSelectedTerminalSessionId(sessionId);
               setTerminalSidebarOpen(true);
             }}
+            onOpenTerminalSessions={() => setTerminalSidebarOpen((prev) => !prev)}
             onTerminateTerminalSession={handleTerminateTerminalSession}
           />
         ) : activeView === 'editor' ? (
@@ -1547,6 +1594,12 @@ export const App: React.FC = () => {
         onClose={() => setToolSettingsModalOpen(false)}
         settings={toolSettings}
         onUpdateSettings={handleUpdateToolSettings}
+        config={config}
+        onOpenWorkingDirPicker={() => setDirectoryPickerOpen(true)}
+        onToggleWorkingDirInfo={handleToggleWorkingDirInfo}
+        onOpenConnectionSettings={() => setConnectionSettingsModalOpen(true)}
+        onOpenModelSettings={() => setModelSettingsModalOpen(true)}
+        onOpenSystemPrompt={() => setSystemPromptModalOpen(true)}
       />
 
       <ConnectionSettingsModal
@@ -1666,6 +1719,7 @@ export const App: React.FC = () => {
       )}
 
       {/* Floating AI Edit/Read Notification Toast */}
+      {/* Toast Notification for AI Edits */}
       {aiEditNotification && activeView !== 'editor' && (
         <div
           style={{
@@ -1673,29 +1727,79 @@ export const App: React.FC = () => {
             top: '64px',
             right: '24px',
             zIndex: 9999,
-            background: aiEditNotification.operationType === 'read' ? '#89dceb' : '#a6e3a1',
-            color: '#11111b',
-            padding: '10px 16px',
-            borderRadius: '8px',
-            boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
+            background: 'rgba(15, 23, 42, 0.95)',
+            backdropFilter: 'blur(12px)',
+            border: aiEditNotification.operationType === 'read' ? '1px solid rgba(56, 189, 248, 0.4)' : '1px solid rgba(16, 185, 129, 0.4)',
+            color: '#f8fafc',
+            padding: '8px 14px',
+            borderRadius: '10px',
+            boxShadow: '0 10px 30px rgba(0, 0, 0, 0.5)',
             display: 'flex',
             alignItems: 'center',
-            gap: '12px',
-            fontSize: '13px',
-            fontWeight: 600,
-            cursor: 'pointer',
+            gap: '10px',
+            fontSize: '0.8rem',
+            fontWeight: 500,
             animation: 'fadeIn 0.2s ease',
           }}
-          onClick={() => {
-            setActiveView('editor');
-            setAiEditNotification(null);
-          }}
         >
-          <span>
-            {aiEditNotification.operationType === 'read' ? '👁️ AI reading' : '⚡ AI modified'}{' '}
-            <code>{aiEditNotification.path}</code>
-          </span>
-          <span style={{ textDecoration: 'underline', opacity: 0.9 }}>View in Editor →</span>
+          <div
+            style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}
+            onClick={() => {
+              setActiveView('editor');
+              setAiEditNotification(null);
+            }}
+          >
+            <span style={{ fontSize: '0.9rem' }}>
+              {aiEditNotification.operationType === 'read' ? '👁️' : '⚡'}
+            </span>
+            <span style={{ fontWeight: 650, color: aiEditNotification.operationType === 'read' ? '#38bdf8' : '#34d399' }}>
+              {aiEditNotification.operationType === 'read' ? 'AI Reading' : 'AI Modified'}
+            </span>
+            <code
+              title={aiEditNotification.path}
+              style={{
+                fontFamily: 'var(--font-code, monospace)',
+                background: 'rgba(30, 41, 59, 0.8)',
+                border: '1px solid var(--border-color)',
+                color: '#93c5fd',
+                padding: '2px 7px',
+                borderRadius: '5px',
+                fontSize: '0.75rem',
+                maxWidth: '220px',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                display: 'inline-block',
+              }}
+            >
+              {aiEditNotification.path.split(/[/\\]/).pop() || aiEditNotification.path}
+            </code>
+            <span style={{ textDecoration: 'underline', color: 'var(--accent-teal)', fontSize: '0.75rem', marginLeft: '4px' }}>
+              View in Editor →
+            </span>
+          </div>
+
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setAiEditNotification(null);
+            }}
+            title="Dismiss notification"
+            style={{
+              background: 'none',
+              border: 'none',
+              color: 'var(--text-muted)',
+              cursor: 'pointer',
+              padding: '2px',
+              display: 'flex',
+              alignItems: 'center',
+              borderRadius: '4px',
+              marginLeft: '4px',
+            }}
+          >
+            <X size={14} />
+          </button>
         </div>
       )}
     </div>

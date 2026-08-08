@@ -257,44 +257,6 @@ export const ChatInputBar: React.FC<ChatInputBarProps> = ({
         </div>
       )}
 
-      {/* Quick Helper Chips Bar */}
-      {!isCompact && (
-        <div className="quick-helpers-bar" style={{ display: 'flex', alignItems: 'center', gap: '6px', overflowX: 'auto', paddingBottom: '2px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.725rem', fontWeight: 600, color: 'var(--accent-primary)', paddingRight: '6px', whiteSpace: 'nowrap' }}>
-            <Sparkles size={13} />
-            <span>Quick Prompts:</span>
-          </div>
-          {QUICK_HELPER_PROMPTS.map((item, idx) => {
-            const IconComponent = item.icon;
-            return (
-              <button
-                key={idx}
-                onClick={() => handleSelectHelperPrompt(item.prompt)}
-                disabled={isGenerating}
-                title={item.prompt}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '5px',
-                  background: 'rgba(30, 41, 59, 0.6)',
-                  border: '1px solid var(--border-color)',
-                  color: 'var(--text-muted)',
-                  padding: '4px 10px',
-                  borderRadius: '14px',
-                  fontSize: '0.75rem',
-                  fontWeight: 500,
-                  whiteSpace: 'nowrap',
-                  cursor: isGenerating ? 'not-allowed' : 'pointer',
-                  transition: 'all 0.2s',
-                }}
-              >
-                <IconComponent size={13} color="var(--accent-primary)" />
-                <span>{item.label}</span>
-              </button>
-            );
-          })}
-        </div>
-      )}
 
       {generationStatus !== 'idle' && (
         <div

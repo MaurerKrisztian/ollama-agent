@@ -909,9 +909,8 @@ ${conversationText}`;
         signal: callbacks?.signal,
       });
       if (res.metrics) {
-        const totalOllamaTokens = (res.metrics.promptEvalCount || 0) + (res.metrics.evalCount || 0);
-        if (totalOllamaTokens > 0) {
-          this.contextManager.setLastActualPromptTokens(totalOllamaTokens);
+        if (typeof res.metrics.promptEvalCount === 'number' && res.metrics.promptEvalCount > 0) {
+          this.contextManager.setLastActualPromptTokens(res.metrics.promptEvalCount);
         }
         callbacks?.onModelResponse?.(res.metrics);
       }

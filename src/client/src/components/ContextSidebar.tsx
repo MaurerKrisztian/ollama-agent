@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import { X, Copy, Check, FileJson, AlignLeft, Layers, FolderTree, RefreshCw, Cpu, Sparkles, Scissors, SlidersHorizontal, FolderOpen, Settings, BookOpen, Loader2 } from 'lucide-react';
-import { AgentConfig, ContextInfo, ContextPruningConfig } from '../types';
+import { X, Copy, Check, FileJson, AlignLeft, Layers, FolderTree, RefreshCw, Cpu, Sparkles, BookOpen, Loader2 } from 'lucide-react';
+import { AgentConfig, ContextInfo } from '../types';
 
 interface ContextSidebarProps {
   isOpen: boolean;
@@ -114,16 +114,13 @@ export const ContextSidebar: React.FC<ContextSidebarProps> = ({
   onOpenWorkingDirPicker,
   onToggleWorkingDirInfo,
 }) => {
-  const [activeTab, setActiveTab] = useState<'formatted' | 'json' | 'workdir' | 'pruning' | 'settings' | 'skills'>('formatted');
+  const [activeTab, setActiveTab] = useState<'formatted' | 'json' | 'workdir' | 'skills'>('formatted');
   const [copied, setCopied] = useState(false);
   const [workdirContext, setWorkdirContext] = useState('');
   const [workdirEnabled, setWorkdirEnabled] = useState(false);
   const [workdirLoading, setWorkdirLoading] = useState(false);
   const [workdirError, setWorkdirError] = useState('');
   const [maxContextTokens, setMaxContextTokens] = useState<number | null>(null);
-
-  const [pruningConfig, setPruningConfig] = useState<ContextPruningConfig | null>(null);
-  const [pruningLoading, setPruningLoading] = useState(false);
 
   interface SkillItem {
     name: string;
@@ -176,45 +173,6 @@ export const ContextSidebar: React.FC<ContextSidebarProps> = ({
       setExpandedSkillLoading(false);
     }
   }, [expandedSkillName]);
-
-  const fetchPruningConfig = useCallback(async () => {
-    setPruningLoading(true);
-    try {
-      const res = await fetch('/api/context/pruning');
-      const data = await res.json();
-      if (data.success && data.pruningConfig) {
-        setPruningConfig(data.pruningConfig);
-      }
-    } catch (_) {
-    } finally {
-      setPruningLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (isOpen) void fetchPruningConfig();
-  }, [isOpen, fetchPruningConfig]);
-
-  const handleUpdatePruning = async (updates: Partial<ContextPruningConfig>) => {
-    if (!pruningConfig) return;
-    const newConfig = { ...pruningConfig, ...updates };
-    setPruningConfig(newConfig);
-
-    try {
-      const res = await fetch('/api/context/pruning', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updates),
-      });
-      const data = await res.json();
-      if (data.success) {
-        if (data.pruningConfig) setPruningConfig(data.pruningConfig);
-        if (data.context && onContextInfoChange) {
-          onContextInfoChange(data.context);
-        }
-      }
-    } catch (_) {}
-  };
 
   useEffect(() => {
     if (!activeModel) return;
@@ -331,7 +289,7 @@ export const ContextSidebar: React.FC<ContextSidebarProps> = ({
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '0.8rem' }}>
                   <span style={{ fontWeight: 600, color: 'var(--text-main)', display: 'flex', alignItems: 'center', gap: '6px' }}>
                     <Cpu size={14} color="var(--accent-primary)" />
-                    <span>Token Context Usage</span>
+                    <span>Prompt Token Usage</span>
                   </span>
                   <span style={{ fontFamily: 'var(--font-code, monospace)', fontSize: '0.75rem', color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums' }}>
                     {effectiveMaxTokens
@@ -409,7 +367,7 @@ export const ContextSidebar: React.FC<ContextSidebarProps> = ({
       {contextInfo && (
         <div style={{ padding: '10px 20px', display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px', background: 'rgba(15, 23, 42, 0.4)', borderBottom: '1px solid var(--border-color)' }}>
           <div style={{ background: 'rgba(99, 102, 241, 0.1)', border: '1px solid rgba(99, 102, 241, 0.2)', padding: '6px 8px', borderRadius: '6px', textAlign: 'center' }}>
-            <span style={{ fontSize: '0.675rem', color: 'var(--accent-primary)', display: 'block', textTransform: 'uppercase', fontWeight: 600 }}>Tokens</span>
+            <span style={{ fontSize: '0.675rem', color: 'var(--accent-primary)', display: 'block', textTransform: 'uppercase', fontWeight: 600 }}>Prompt Tokens</span>
             <span style={{ fontSize: '0.9rem', fontWeight: 700, color: '#fff', fontVariantNumeric: 'tabular-nums', fontFamily: 'var(--font-code, monospace)' }}>~{contextInfo.estimatedTokens.toLocaleString()}</span>
           </div>
           <div style={{ background: 'rgba(20, 184, 166, 0.1)', border: '1px solid rgba(20, 184, 166, 0.2)', padding: '6px 8px', borderRadius: '6px', textAlign: 'center' }}>
@@ -484,44 +442,6 @@ export const ContextSidebar: React.FC<ContextSidebarProps> = ({
             <span>Workdir</span>
           </button>
           <button
-            onClick={() => setActiveTab('pruning')}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '4px',
-              padding: '5px 8px',
-              borderRadius: '6px',
-              border: 'none',
-              fontSize: '0.75rem',
-              fontWeight: 500,
-              cursor: 'pointer',
-              background: activeTab === 'pruning' ? 'var(--accent-primary)' : 'transparent',
-              color: activeTab === 'pruning' ? '#fff' : 'var(--text-muted)',
-            }}
-          >
-            <Scissors size={13} />
-            <span>Pruning</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('settings')}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '4px',
-              padding: '5px 8px',
-              borderRadius: '6px',
-              border: 'none',
-              fontSize: '0.75rem',
-              fontWeight: 500,
-              cursor: 'pointer',
-              background: activeTab === 'settings' ? 'var(--accent-primary)' : 'transparent',
-              color: activeTab === 'settings' ? '#fff' : 'var(--text-muted)',
-            }}
-          >
-            <Settings size={13} />
-            <span>Settings</span>
-          </button>
-          <button
             onClick={() => setActiveTab('skills')}
             style={{
               display: 'flex',
@@ -553,253 +473,32 @@ export const ContextSidebar: React.FC<ContextSidebarProps> = ({
               <RefreshCw size={14} className={workdirLoading ? 'spin' : undefined} />
             </button>
           )}
-          {activeTab !== 'pruning' && activeTab !== 'settings' && (
-            <button
-              onClick={handleCopy}
-              title="Copy to clipboard"
-              disabled={activeTab === 'workdir' && !workdirContext}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '4px',
-                background: 'rgba(255, 255, 255, 0.05)',
-                border: '1px solid var(--border-color)',
-                color: 'var(--text-muted)',
-                padding: '4px 8px',
-                borderRadius: '6px',
-                fontSize: '0.75rem',
-                cursor: 'pointer',
-              }}
-            >
-              {copied ? <Check size={14} color="var(--accent-teal)" /> : <Copy size={14} />}
-              <span>{copied ? 'Copied' : 'Copy'}</span>
-            </button>
-          )}
+          <button
+            onClick={handleCopy}
+            title="Copy to clipboard"
+            disabled={activeTab === 'workdir' && !workdirContext}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+              background: 'rgba(255, 255, 255, 0.05)',
+              border: '1px solid var(--border-color)',
+              color: 'var(--text-muted)',
+              padding: '4px 8px',
+              borderRadius: '6px',
+              fontSize: '0.75rem',
+              cursor: 'pointer',
+            }}
+          >
+            {copied ? <Check size={14} color="var(--accent-teal)" /> : <Copy size={14} />}
+            <span>{copied ? 'Copied' : 'Copy'}</span>
+          </button>
         </div>
       </div>
 
-      {/* Code / Text Inspector / Pruning Config / Settings View */}
+      {/* Code / Text Inspector / Skills View */}
       <div style={{ flex: 1, overflow: 'auto', padding: '16px 20px', background: 'rgba(10, 15, 28, 0.95)' }}>
-        {activeTab === 'settings' ? (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-            {/* System Prompt */}
-            <div style={{ padding: '14px', background: 'rgba(30, 41, 59, 0.5)', border: '1px solid var(--border-color)', borderRadius: '8px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <SlidersHorizontal size={15} color="var(--accent-amber)" />
-                <span style={{ fontWeight: 600, color: 'var(--text-main)', fontSize: '0.85rem' }}>System Prompt &amp; Core Rules</span>
-              </div>
-              <p style={{ fontSize: '0.725rem', color: 'var(--text-muted)', margin: 0 }}>Define the agent's base behaviour, personality, and constraints.</p>
-              <button
-                onClick={onOpenSystemPrompt}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '6px',
-                  padding: '7px 12px',
-                  borderRadius: '6px',
-                  border: '1px solid rgba(245, 158, 11, 0.4)',
-                  background: 'rgba(245, 158, 11, 0.12)',
-                  color: 'var(--accent-amber)',
-                  fontSize: '0.8rem',
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  transition: 'all 0.15s ease',
-                }}
-              >
-                <SlidersHorizontal size={14} />
-                <span>Edit System Prompt</span>
-              </button>
-            </div>
-
-            {/* Working Directory */}
-            <div style={{ padding: '14px', background: 'rgba(30, 41, 59, 0.5)', border: '1px solid var(--border-color)', borderRadius: '8px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <FolderOpen size={15} color="var(--accent-teal)" />
-                <span style={{ fontWeight: 600, color: 'var(--text-main)', fontSize: '0.85rem' }}>Active Working Directory</span>
-              </div>
-              <button
-                onClick={onOpenWorkingDirPicker}
-                title="Click to change working directory"
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px',
-                  background: 'rgba(15, 23, 42, 0.6)',
-                  border: '1px solid var(--border-color)',
-                  color: 'var(--text-main)',
-                  fontSize: '0.78rem',
-                  cursor: 'pointer',
-                  textAlign: 'left',
-                  width: '100%',
-                  padding: '7px 10px',
-                  borderRadius: '6px',
-                  fontFamily: 'var(--font-code)',
-                }}
-              >
-                <FolderOpen size={14} color="var(--accent-teal)" style={{ flexShrink: 0 }} />
-                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
-                  {config?.workingDir || 'Not set'}
-                </span>
-              </button>
-              {onToggleWorkingDirInfo && (
-                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.76rem', color: 'var(--text-muted)', cursor: 'pointer', paddingTop: '4px', borderTop: '1px dashed var(--border-color)' }}>
-                  <input
-                    type="checkbox"
-                    checked={config?.showWorkingDirInfo ?? false}
-                    onChange={(e) => onToggleWorkingDirInfo(e.target.checked)}
-                    style={{ accentColor: 'var(--accent-teal)' }}
-                  />
-                  <span>Include workspace &amp; skills context</span>
-                </label>
-              )}
-            </div>
-          </div>
-        ) : activeTab === 'pruning' ? (
-          pruningLoading ? (
-            <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Loading pruning settings…</div>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px', background: 'rgba(99, 102, 241, 0.1)', border: '1px solid rgba(99, 102, 241, 0.25)', borderRadius: '8px' }}>
-                <div>
-                  <div style={{ fontWeight: 600, color: '#fff', fontSize: '0.85rem' }}>Enable Context Pruning</div>
-                  <div style={{ fontSize: '0.725rem', color: 'var(--text-muted)' }}>Master switch for context management & stale output removal</div>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={pruningConfig?.enabled ?? true}
-                  onChange={(e) => handleUpdatePruning({ enabled: e.target.checked })}
-                  style={{ cursor: 'pointer', width: '18px', height: '18px' }}
-                />
-              </div>
-
-              <div style={{ opacity: pruningConfig?.enabled ? 1 : 0.5, pointerEvents: pruningConfig?.enabled ? 'auto' : 'none', display: 'flex', flexDirection: 'column', gap: '14px' }}>
-                {/* Strategy 1 */}
-                <div style={{ padding: '12px', background: 'rgba(30, 41, 59, 0.5)', border: '1px solid var(--border-color)', borderRadius: '8px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <span style={{ fontWeight: 600, color: 'var(--text-main)', fontSize: '0.825rem' }}>Superseded File Read Pruning</span>
-                    <input
-                      type="checkbox"
-                      checked={pruningConfig?.pruneSupersededReads ?? true}
-                      onChange={(e) => handleUpdatePruning({ pruneSupersededReads: e.target.checked })}
-                      style={{ cursor: 'pointer', width: '16px', height: '16px' }}
-                    />
-                  </div>
-                  <p style={{ fontSize: '0.725rem', color: 'var(--text-muted)', marginTop: '4px', margin: 0 }}>
-                    Replaces older read_file tool outputs for a path when a newer read for the same file occurs.
-                  </p>
-                </div>
-
-                {/* Strategy 2 */}
-                <div style={{ padding: '12px', background: 'rgba(30, 41, 59, 0.5)', border: '1px solid var(--border-color)', borderRadius: '8px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <span style={{ fontWeight: 600, color: 'var(--text-main)', fontSize: '0.825rem' }}>Post-Mutation Invalidation</span>
-                    <input
-                      type="checkbox"
-                      checked={pruningConfig?.invalidateOnMutation ?? true}
-                      onChange={(e) => handleUpdatePruning({ invalidateOnMutation: e.target.checked })}
-                      style={{ cursor: 'pointer', width: '16px', height: '16px' }}
-                    />
-                  </div>
-                  <p style={{ fontSize: '0.725rem', color: 'var(--text-muted)', marginTop: '4px', margin: 0 }}>
-                    Invalidates prior read_file outputs when a file is edited, replaced, or created.
-                  </p>
-                </div>
-
-                {/* Strategy 3 */}
-                <div style={{ padding: '12px', background: 'rgba(30, 41, 59, 0.5)', border: '1px solid var(--border-color)', borderRadius: '8px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <span style={{ fontWeight: 600, color: 'var(--text-main)', fontSize: '0.825rem' }}>Tool Output TTL Expiration</span>
-                    <input
-                      type="checkbox"
-                      checked={pruningConfig?.enableToolTTL ?? false}
-                      onChange={(e) => handleUpdatePruning({ enableToolTTL: e.target.checked })}
-                      style={{ cursor: 'pointer', width: '16px', height: '16px' }}
-                    />
-                  </div>
-                  <p style={{ fontSize: '0.725rem', color: 'var(--text-muted)', margin: 0 }}>
-                    Expires raw execution logs and search results after a set number of user turns.
-                  </p>
-
-                  {pruningConfig?.enableToolTTL && (
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginTop: '6px' }}>
-                      <div>
-                        <label style={{ fontSize: '0.7rem', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>Terminal Log TTL (turns)</label>
-                        <input
-                          type="number"
-                          min="1"
-                          max="50"
-                          value={pruningConfig.terminalOutputTTLTurns ?? 5}
-                          onChange={(e) => handleUpdatePruning({ terminalOutputTTLTurns: parseInt(e.target.value, 10) || 5 })}
-                          style={{ width: '100%', padding: '4px 8px', borderRadius: '4px', background: 'rgba(15, 23, 42, 0.8)', border: '1px solid var(--border-color)', color: '#fff', fontSize: '0.8rem' }}
-                        />
-                      </div>
-                      <div>
-                        <label style={{ fontSize: '0.7rem', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>Web Search TTL (turns)</label>
-                        <input
-                          type="number"
-                          min="1"
-                          max="50"
-                          value={pruningConfig.webOutputTTLTurns ?? 5}
-                          onChange={(e) => {
-                            const value = Number.parseInt(e.target.value, 10);
-                            handleUpdatePruning({ webOutputTTLTurns: Number.isNaN(value) ? 5 : Math.max(0, value) });
-                          }}
-                          style={{ width: '100%', padding: '4px 8px', borderRadius: '4px', background: 'rgba(15, 23, 42, 0.8)', border: '1px solid var(--border-color)', color: '#fff', fontSize: '0.8rem' }}
-                        />
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {/* Strategy 4 */}
-                <div style={{ padding: '12px', background: 'rgba(30, 41, 59, 0.5)', border: '1px solid var(--border-color)', borderRadius: '8px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <span style={{ fontWeight: 600, color: 'var(--text-main)', fontSize: '0.825rem' }}>Auto-Compaction & State Summarization</span>
-                    <input
-                      type="checkbox"
-                      checked={pruningConfig?.enableAutoCompaction ?? true}
-                      onChange={(e) => handleUpdatePruning({ enableAutoCompaction: e.target.checked })}
-                      style={{ cursor: 'pointer', width: '16px', height: '16px' }}
-                    />
-                  </div>
-                  <p style={{ fontSize: '0.725rem', color: 'var(--text-muted)', margin: 0 }}>
-                    Automatically distills conversation history into a structured state package before context overflows while preserving recent turns.
-                  </p>
-
-                  {(pruningConfig?.enableAutoCompaction ?? true) && (
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginTop: '6px' }}>
-                      <div>
-                        <label style={{ fontSize: '0.7rem', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>Auto-Compact Threshold</label>
-                        <select
-                          value={pruningConfig?.autoCompactThresholdRatio ?? 0.85}
-                          onChange={(e) => handleUpdatePruning({ autoCompactThresholdRatio: parseFloat(e.target.value) })}
-                          style={{ width: '100%', padding: '4px 8px', borderRadius: '4px', background: 'rgba(15, 23, 42, 0.8)', border: '1px solid var(--border-color)', color: '#fff', fontSize: '0.8rem' }}
-                        >
-                          <option value={0.75}>75% of context</option>
-                          <option value={0.80}>80% of context</option>
-                          <option value={0.85}>85% of context</option>
-                          <option value={0.90}>90% of context</option>
-                        </select>
-                      </div>
-                      <div>
-                        <label style={{ fontSize: '0.7rem', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>Retain Recent Turns</label>
-                        <input
-                          type="number"
-                          min="0"
-                          max="10"
-                          value={pruningConfig?.keepRecentTurnsOnCompact ?? 2}
-                          onChange={(e) => handleUpdatePruning({ keepRecentTurnsOnCompact: parseInt(e.target.value, 10) || 0 })}
-                          style={{ width: '100%', padding: '4px 8px', borderRadius: '4px', background: 'rgba(15, 23, 42, 0.8)', border: '1px solid var(--border-color)', color: '#fff', fontSize: '0.8rem' }}
-                        />
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          )
-        ) : activeTab === 'skills' ? (
+        {activeTab === 'skills' ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <div>

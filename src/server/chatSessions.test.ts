@@ -5,7 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { ChatSessionStore } from './chatSessions.js';
 
-test('chat sessions persist messages, titles, activation, and deletion', () => {
+test('chat sessions persist messages, titles, activation, and deletion in directory', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'local-model-chat-sessions-'));
   const file = path.join(dir, 'sessions.json');
   const store = new ChatSessionStore(file);
@@ -31,4 +31,28 @@ test('chat sessions persist messages, titles, activation, and deletion', () => {
   reloaded.delete(firstId);
   assert.equal(reloaded.list().length, 2);
   fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('chat sessions auto-migrate legacy monolithic JSON files to session directory', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'local-model-chat-migrate-'));
+  const legacyFile = path.join(tmpDir, 'legacy-sessions.json');
+  const sessionsDir = path.join(tmpDir, 'sessions-folder');
+
+  fs.writeFileSync(legacyFile, JSON.stringify({
+    activeSessionId: 'sess-1',
+    sessions: [
+      { id: 'sess-1', title: 'Legacy Session 1', createdAt: 100, updatedAt: 100, messages: [{ id: 'm1', role: 'user', content: 'Hi', timestamp: 100 }] },
+      { id: 'sess-2', title: 'Legacy Session 2', createdAt: 200, updatedAt: 200, messages: [{ id: 'm2', role: 'user', content: 'Hello', timestamp: 200 }] },
+    ],
+  }), 'utf8');
+
+  const store = new ChatSessionStore(sessionsDir, legacyFile);
+  assert.equal(store.list().length, 2);
+  assert.equal(store.getActiveId(), 'sess-1');
+  assert.equal(fs.existsSync(path.join(sessionsDir, 'sess-1.json')), true);
+  assert.equal(fs.existsSync(path.join(sessionsDir, 'sess-2.json')), true);
+  assert.equal(fs.existsSync(path.join(sessionsDir, 'index.json')), true);
+  assert.equal(fs.existsSync(`${legacyFile}.migrated`), true);
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
 });

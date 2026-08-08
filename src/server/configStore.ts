@@ -6,6 +6,7 @@ import { DEFAULT_COMMAND_WHITELIST } from '../core/commandWhitelist.js';
 import { ContextPruningConfig, ModelProfileTemplate } from '../core/types.js';
 
 export const CONFIG_FILE_PATH = path.join(os.homedir(), '.local-model-chat-config.json');
+export const CHAT_SESSIONS_DIR = path.join(os.homedir(), '.local-model-chat-sessions');
 export const CHAT_SESSIONS_FILE_PATH = path.join(os.homedir(), '.local-model-chat-sessions.json');
 
 export function detectLiveOllamaDaemonEnv(): {

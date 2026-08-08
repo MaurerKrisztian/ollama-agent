@@ -56,6 +56,7 @@ const PORT = process.env.PORT || 3012;
 
 import {
   CONFIG_FILE_PATH,
+  CHAT_SESSIONS_DIR,
   CHAT_SESSIONS_FILE_PATH,
   getInitialPersistedConfig,
   savePersistedConfig,
@@ -89,7 +90,7 @@ const agent = new AgentEngine({
   customTerminalCmd: initialConfig.customTerminalCmd,
 });
 
-const chatSessions = new ChatSessionStore(CHAT_SESSIONS_FILE_PATH);
+const chatSessions = new ChatSessionStore(CHAT_SESSIONS_DIR, CHAT_SESSIONS_FILE_PATH);
 agent.getContextManager().setMessages(chatSessions.getActive().messages);
 
 type ChatRuntime = { engine: AgentEngine; ready: Promise<void> };
@@ -221,6 +222,13 @@ const saveChatSession = (sessionId: string, engine: AgentEngine = getChatRuntime
 const getSessionContext = (sessionId: string) => {
   const session = chatSessions.getSession(sessionId);
   if (!session) return undefined;
+  // Use the live session agent's ContextManager (which holds the actual Ollama prompt token count)
+  // instead of creating a throwaway ContextManager that would lose lastActualPromptTokens.
+  const runtime = chatRuntimes.get(sessionId);
+  if (runtime) {
+    return runtime.engine.getContextManager().getContextInfo();
+  }
+  // Fallback for sessions without a live runtime (e.g. inactive sessions listed in sidebar)
   const context = new ContextManager(agent.getConfig().systemPrompt, agent.getActiveTools(), { enabled: false });
   context.setMessages(session.messages);
   return context.getContextInfo();
@@ -963,6 +971,27 @@ app.get('/api/directories', async (req, res) => {
     });
   } catch (err: any) {
     res.status(400).json({ success: false, error: `Cannot browse directory: ${err.message}` });
+  }
+});
+
+// POST /api/directories/create - Create a new directory inside currentPath
+app.post('/api/directories/create', async (req, res) => {
+  const { parentPath, folderName } = req.body || {};
+  if (!parentPath || typeof parentPath !== 'string' || !folderName || typeof folderName !== 'string') {
+    return res.status(400).json({ success: false, error: 'parentPath and folderName are required.' });
+  }
+
+  const sanitizedFolderName = folderName.trim();
+  if (!sanitizedFolderName || sanitizedFolderName.includes('/') || sanitizedFolderName.includes('\\')) {
+    return res.status(400).json({ success: false, error: 'Invalid folder name.' });
+  }
+
+  const newDirPath = path.resolve(parentPath.trim(), sanitizedFolderName);
+  try {
+    await fs.mkdir(newDirPath, { recursive: true });
+    res.json({ success: true, newDirPath });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: `Failed to create directory: ${err.message}` });
   }
 });
 
