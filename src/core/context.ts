@@ -78,12 +78,25 @@ export class ContextManager {
    */
   public compactWithSummary(summary: string, keepRecentCount?: number): ChatMessage {
     const turnsToKeep = keepRecentCount ?? (this.pruningConfig.keepRecentTurnsOnCompact ?? 2);
-    const recentMessages = turnsToKeep > 0 ? this.messages.slice(-turnsToKeep) : [];
+    let startIndex = turnsToKeep > 0 ? Math.max(0, this.messages.length - turnsToKeep) : this.messages.length;
+
+    // Expand startIndex backwards if it lands on a tool response or in the middle of a tool call
+    while (
+      startIndex > 0 &&
+      (this.messages[startIndex]?.role === 'tool' ||
+        (startIndex < this.messages.length &&
+          this.messages[startIndex - 1]?.tool_calls &&
+          this.messages[startIndex - 1].tool_calls!.length > 0))
+    ) {
+      startIndex--;
+    }
+
+    const recentMessages = turnsToKeep > 0 ? this.messages.slice(startIndex) : [];
 
     const compactMessage: ChatMessage = {
       id: `msg_compact_${Date.now()}`,
       role: 'system',
-      content: `[COMPACTED CONVERSATION STATE]\n${summary.trim()}`,
+      content: `[COMPACTED CONVERSATION SUMMARY]\n${summary.trim()}`,
       displayContent: `⚡ **Context Compacted**: Prior conversation history has been summarized into a structured state package (retaining ${recentMessages.length} recent messages).\n\n${summary.trim()}`,
       timestamp: Date.now(),
     };
@@ -499,13 +512,8 @@ export class ContextManager {
     return JSON.stringify(contextObject, null, 2);
   }
 
-  public getConvertedContext(): string {
+  public getMessagesHistoryText(): string {
     const lines: string[] = [];
-
-    lines.push(`=== [EFFECTIVE SYSTEM PROMPT & TOOL PROTOCOL] ===`);
-    lines.push(this.getEffectiveSystemPrompt(true));
-    lines.push('');
-
     lines.push(`=== [CONVERSATION HISTORY (${this.messages.length} messages)] ===`);
 
     this.messages.forEach((msg, idx) => {
@@ -524,6 +532,17 @@ export class ContextManager {
       }
       lines.push('---');
     });
+
+    return lines.join('\n');
+  }
+
+  public getConvertedContext(): string {
+    const lines: string[] = [];
+
+    lines.push(`=== [EFFECTIVE SYSTEM PROMPT & TOOL PROTOCOL] ===`);
+    lines.push(this.getEffectiveSystemPrompt(true));
+    lines.push('');
+    lines.push(this.getMessagesHistoryText());
 
     return lines.join('\n');
   }

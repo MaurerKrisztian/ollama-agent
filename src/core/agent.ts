@@ -2,7 +2,7 @@ import { ContextManager } from './context.js';
 import { OllamaClient } from './ollama.js';
 import type { OllamaPullProgress, OllamaResponseMetrics } from './ollama.js';
 import { getToolDefinitions, ToolExecutor } from './tools.js';
-import { AgentConfig, ChatMessage, OllamaModelInfo, OllamaRunningModelInfo } from './types.js';
+import { AgentConfig, ChatMessage, ContextInfo, OllamaModelInfo, OllamaRunningModelInfo } from './types.js';
 import { buildWorkingDirectoryContext } from './workdir-context.js';
 import { buildSelectedSkillPrompt } from './skills.js';
 import type { LoadedProjectSkill } from './skills.js';
@@ -22,6 +22,7 @@ export interface AgentSendMessageOptions {
   onToolEnd?: (name: string, result: any) => void;
   onMessageAdded?: (message: ChatMessage) => void;
   onMessageUpdated?: (message: ChatMessage) => void;
+  onContextCompacted?: (data: { message: ChatMessage; context: ContextInfo; messages: ChatMessage[] }) => void;
   onModelResponse?: (metrics: OllamaResponseMetrics) => void;
   onEvalCount?: (evalCount: number) => void;
   onMaxLoopsReached?: (limit: number) => void;
@@ -677,7 +678,7 @@ export class AgentEngine {
         for (const tc of msg.tool_calls) {
           const path = tc.arguments?.relative_path || tc.arguments?.target_file || tc.arguments?.path;
           if (path && typeof path === 'string') {
-            if (['edit_file', 'replace_file', 'create_file', 'apply_patch'].includes(tc.name)) {
+            if (['edit_file', 'replace_file', 'create_file', 'apply_patch', 'grep_replace'].includes(tc.name)) {
               filesModified.add(path);
             } else if (tc.name === 'read_file') {
               filesRead.add(path);
@@ -692,7 +693,7 @@ export class AgentEngine {
       filesRead.size > 0 ? `Files Inspected: ${Array.from(filesRead).join(', ')}` : null,
     ].filter(Boolean).join('\n');
 
-    const conversationText = this.contextManager.getConvertedContext();
+    const conversationText = this.contextManager.getMessagesHistoryText();
     const prompt = `You are a context compaction assistant. Summarize the conversation state below into a clean, structured package.
 Structure your summary using these bullet points:
 - **User Goal**: What the user requested.
@@ -758,7 +759,14 @@ ${conversationText}`;
         if (ctxInfo.estimatedTokens / maxCtx >= ratio && this.contextManager.getMessages().length > 3) {
           const pctStr = Math.round(ratio * 100);
           callbacks?.onChunk?.(`⚡ **Auto-Compacting Context**: Threshold reached (${pctStr}%). Distilling conversation history into a structured state package...\n\n`);
-          await this.compactContext();
+          const compactRes = await this.compactContext();
+          if (compactRes.success && compactRes.message) {
+            callbacks?.onContextCompacted?.({
+              message: compactRes.message,
+              context: compactRes.context,
+              messages: this.contextManager.getMessages(),
+            });
+          }
         }
       }
     }

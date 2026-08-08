@@ -7,7 +7,7 @@ import { WebSearchResultsView, WebPageReaderView, DeepResearchResultsView, DeepR
 
 export const CompactedContextCard: React.FC<{ message: ChatMessage }> = ({ message }) => {
   const [expanded, setExpanded] = useState(true);
-  const cleanSummary = message.content.replace(/^\[COMPACTED CONVERSATION SUMMARY\]\s*/i, '');
+  const cleanSummary = message.content.replace(/^\[COMPACTED CONVERSATION (SUMMARY|STATE)\]\s*/i, '');
 
   return (
     <div className="animate-fade-in" style={{ margin: '12px auto', maxWidth: '90%', width: '100%' }}>
@@ -772,13 +772,18 @@ export const PlanReviewCard: React.FC<{
     verification_plan?: string;
     affected_files?: string[];
     markdown_content?: string;
+    approved?: boolean;
+    status?: string;
   };
+  isApproved?: boolean;
   onApprovePlan?: () => void;
   onRejectPlan?: (feedback: string) => void;
-}> = ({ plan, onApprovePlan, onRejectPlan }) => {
+}> = ({ plan, isApproved: isApprovedProp, onApprovePlan, onRejectPlan }) => {
   const [rejectFeedback, setRejectFeedback] = useState('');
   const [showRejectInput, setShowRejectInput] = useState(false);
-  const [approved, setApproved] = useState(false);
+  const [approvedState, setApprovedState] = useState(false);
+
+  const isApproved = Boolean(isApprovedProp || approvedState || plan?.approved || plan?.status === 'approved');
 
   const goalText = plan.goal || plan.summary || '';
   const changes = Array.isArray(plan.proposed_changes) && plan.proposed_changes.length > 0
@@ -814,13 +819,13 @@ export const PlanReviewCard: React.FC<{
             fontSize: '0.72rem',
             padding: '3px 9px',
             borderRadius: '10px',
-            background: approved ? 'rgba(16, 185, 129, 0.2)' : 'rgba(59, 130, 246, 0.2)',
-            color: approved ? '#10b981' : '#60a5fa',
+            background: isApproved ? 'rgba(16, 185, 129, 0.2)' : 'rgba(59, 130, 246, 0.2)',
+            color: isApproved ? '#10b981' : '#60a5fa',
             fontWeight: 600,
-            border: `1px solid ${approved ? 'rgba(16, 185, 129, 0.3)' : 'rgba(59, 130, 246, 0.3)'}`,
+            border: `1px solid ${isApproved ? 'rgba(16, 185, 129, 0.3)' : 'rgba(59, 130, 246, 0.3)'}`,
           }}
         >
-          {approved ? 'Plan Approved ✓' : 'Awaiting User Approval'}
+          {isApproved ? 'Plan Approved ✓' : 'Awaiting User Approval'}
         </span>
       </div>
 
@@ -916,12 +921,12 @@ export const PlanReviewCard: React.FC<{
       )}
 
       {/* Interactive Action Buttons */}
-      {!approved && (
+      {!isApproved && (
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '4px', paddingTop: '12px', borderTop: '1px solid rgba(255, 255, 255, 0.08)' }}>
           <button
             type="button"
             onClick={() => {
-              setApproved(true);
+              setApprovedState(true);
               onApprovePlan?.();
             }}
             style={{
@@ -968,7 +973,7 @@ export const PlanReviewCard: React.FC<{
         </div>
       )}
 
-      {showRejectInput && !approved && (
+      {showRejectInput && !isApproved && (
         <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
           <input
             type="text"

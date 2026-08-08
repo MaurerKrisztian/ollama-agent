@@ -900,7 +900,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
             };
 
             return messages.map((msg, msgIdx) => {
-              if (msg.role === 'system' || msg.content.startsWith('[COMPACTED CONVERSATION SUMMARY]')) {
+              if (msg.role === 'system' || msg.content.startsWith('[COMPACTED CONVERSATION SUMMARY]') || msg.content.startsWith('[COMPACTED CONVERSATION STATE]')) {
                 return <CompactedContextCard key={msg.id} message={msg} />;
               }
 
@@ -1011,10 +1011,15 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                                   if (parsed && typeof parsed === 'object') planData = { ...planData, ...parsed };
                                 } catch (_) {}
                               }
+                              const isPlanApproved = messages.slice(msgIdx + 1).some((m) =>
+                                (m.role === 'user' && m.content.toLowerCase().includes('plan approved')) ||
+                                (m.role === 'assistant' && m.tool_calls && m.tool_calls.some((t) => t.name !== 'create_plan'))
+                              );
                               return (
                                 <PlanReviewCard
                                   key={tc.id || `${tc.name}-${tcIdx}`}
                                   plan={planData}
+                                  isApproved={isPlanApproved}
                                   onApprovePlan={() => {
                                     onTogglePlanMode?.(false);
                                     onSendMessage('Plan approved! Proceed with execution.');
@@ -1086,10 +1091,15 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                       if (parsed && typeof parsed === 'object') planData = { ...planData, ...parsed };
                     } catch (_) {}
                   }
+                  const isPlanApproved = messages.slice(msgIdx + 1).some((m) =>
+                    (m.role === 'user' && m.content.toLowerCase().includes('plan approved')) ||
+                    (m.role === 'assistant' && m.tool_calls && m.tool_calls.some((t) => t.name !== 'create_plan'))
+                  );
                   return (
                     <div key={msg.id} className="tool-message-wrapper" style={{ marginLeft: isCompact ? '0px' : '44px', width: isCompact ? '100%' : 'calc(100% - 44px)' }}>
                       <PlanReviewCard
                         plan={planData}
+                        isApproved={isPlanApproved}
                         onApprovePlan={() => {
                           onTogglePlanMode?.(false);
                           onSendMessage('Plan approved! Proceed with execution.');

@@ -1952,8 +1952,12 @@ app.post('/api/chat', async (req, res) => {
       const compactRes = await sessionAgent.compactContext();
       if (compactRes.success && compactRes.message) {
         saveChatSession(sessionId, sessionAgent);
-        sendEvent('message_added', compactRes.message);
-        sendEvent('context_update', compactRes.context);
+        const fullMessages = sessionAgent.getContextManager().getMessages();
+        sendEvent('context_compacted', {
+          message: compactRes.message,
+          context: compactRes.context,
+          messages: fullMessages,
+        });
         sendEvent('done', {
           fullText: compactRes.message.displayContent || compactRes.message.content,
           context: compactRes.context,
@@ -2133,6 +2137,10 @@ app.post('/api/chat', async (req, res) => {
       onMessageUpdated: (msg) => {
         saveChatSession(sessionId, sessionAgent);
         sendEvent('message_updated', msg);
+      },
+      onContextCompacted: ({ message, context, messages }) => {
+        saveChatSession(sessionId, sessionAgent);
+        sendEvent('context_compacted', { message, context, messages });
       },
       onToolStream: (name, argsText) => {
         activeToolStates.set(sessionId, { name, args: { _streaming: true, _rawText: argsText } });

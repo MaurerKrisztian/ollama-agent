@@ -290,6 +290,13 @@ export const App: React.FC = () => {
           return updated;
         });
       }
+    } else if (eventType === 'context_compacted') {
+      if (eventData?.messages) {
+        setMessages(eventData.messages);
+      }
+      if (eventData?.context) {
+        setContextInfo({ ...eventData.context });
+      }
     } else if (eventType === 'context_update') {
       setContextInfo(eventData ? { ...eventData } as any : null);
     } else if (eventType === 'eval_count_update') {
@@ -934,8 +941,6 @@ export const App: React.FC = () => {
           setContextInfo(data.context);
           if (data.messages) {
             setMessages(data.messages);
-          } else if (data.message) {
-            setMessages([data.message]);
           }
         }
       }

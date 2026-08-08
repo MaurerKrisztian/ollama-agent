@@ -217,7 +217,7 @@ test('compactWithSummary retains recent turns and builds structured state messag
 
   assert.equal(messages.length, 3);
   assert.equal(messages[0].id, compactMsg.id);
-  assert.match(messages[0].content, /COMPACTED CONVERSATION STATE/);
+  assert.match(messages[0].content, /COMPACTED CONVERSATION/);
   assert.equal(messages[1].content, 'Turn 2 User');
   assert.equal(messages[2].content, 'Turn 2 Assistant');
 });
